@@ -36,6 +36,13 @@ class User extends Authenticatable
         'status',
         'locked_until',
         'onboarding_progress',
+        'two_factor_method',
+        'two_factor_secret',
+        'backup_codes',
+        'pending_email',
+        'pending_email_code',
+        'pending_email_expires_at',
+        'pending_email_attempts',
     ];
 
     protected $hidden = [

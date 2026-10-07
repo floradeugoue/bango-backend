@@ -89,4 +89,39 @@ Route::middleware('auth:api')->group(function () {
         // Sauvegarder ou mettre à jour les critères de recherche immobilière
         Route::put('/', [\App\Http\Controllers\Housing\HousingSearchController::class, 'update']);
     });
+
+    // ------------------------------------------
+    // 🔐 SÉCURITÉ ET PARAMÈTRES
+    // ------------------------------------------
+    Route::prefix('settings')->group(function () {
+        
+        // --- Changement d'Email ---
+        // Demander un changement d'email (génère un code OTP)
+        Route::post('/email/request', [\App\Http\Controllers\Profile\EmailController::class, 'requestChange']);
+        // Valider le code OTP et appliquer la nouvelle adresse email
+        Route::post('/email/verify', [\App\Http\Controllers\Profile\EmailController::class, 'verifyChange']);
+        // Renvoyer un nouveau code OTP sur la nouvelle adresse
+        Route::post('/email/resend', [\App\Http\Controllers\Profile\EmailController::class, 'resendCode']);
+        // Annuler la procédure de changement d'email
+        Route::post('/email/cancel', [\App\Http\Controllers\Profile\EmailController::class, 'cancelChange']);
+
+        // --- Mot de passe ---
+        // Mettre à jour le mot de passe (vérification de l'ancien mot de passe requise)
+        Route::put('/password', [\App\Http\Controllers\Profile\PasswordController::class, 'update']);
+
+        // --- Sécurisation et Sessions ---
+        // Sécuriser le compte (déconnecte les autres appareils, active 2FA, génère des codes de secours)
+        Route::post('/secure', [\App\Http\Controllers\Profile\SecurityController::class, 'secureAccount']);
+        // Récupérer la liste des appareils/sessions connectés
+        Route::get('/sessions', [\App\Http\Controllers\Profile\SecurityController::class, 'getSessions']);
+        // Valider une connexion inhabituelle ("Oui, c'était moi")
+        Route::post('/sessions/{id}/acknowledge', [\App\Http\Controllers\Profile\SecurityController::class, 'acknowledgeSession']);
+
+        // --- Gestion du Compte ---
+        // Mettre le compte en pause (statut 'paused' et déconnexion forcée)
+        Route::post('/account/pause', [\App\Http\Controllers\Profile\AccountController::class, 'pause']);
+        // Supprimer le compte (Soft Delete)
+        Route::delete('/account', [\App\Http\Controllers\Profile\AccountController::class, 'delete']);
+    });
 });
+
