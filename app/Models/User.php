@@ -2,31 +2,69 @@
 
 namespace App\Models;
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
-use Database\Factories\UserFactory;
-use Illuminate\Database\Eloquent\Attributes\Fillable;
-use Illuminate\Database\Eloquent\Attributes\Hidden;
+use App\Enums\AccountType;
+use App\Enums\Gender;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Laravel\Passport\HasApiTokens;
 
-#[Fillable(['name', 'email', 'password'])]
-#[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
-    /** @use HasFactory<UserFactory> */
-    use HasFactory, Notifiable;
+    /** @use HasFactory<\Database\Factories\UserFactory> */
+    use HasApiTokens, HasFactory, Notifiable, SoftDeletes;
 
-    /**
-     * Get the attributes that should be cast.
-     *
-     * @return array<string, string>
-     */
+    protected $fillable = [
+        'email',
+        'password',
+        'handle',
+        'display_name',
+        'avatar_url',
+        'birth_date',
+        'gender',
+        'gender_hidden',
+        'phone',
+        'country_code',
+        'city',
+        'neighbourhood',
+        'locale',
+        'account_type',
+        'is_verified',
+        'status',
+        'locked_until',
+        'onboarding_progress',
+    ];
+
+    protected $hidden = [
+        'password',
+        'remember_token',
+    ];
+
     protected function casts(): array
     {
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'birth_date' => 'date',
+            'gender_hidden' => 'boolean',
+            'is_verified' => 'boolean',
+            'locked_until' => 'datetime',
+            'onboarding_progress' => 'array',
+            'gender' => Gender::class,
+            'account_type' => AccountType::class,
         ];
+    }
+
+    public function interests(): BelongsToMany
+    {
+        return $this->belongsToMany(Interest::class);
+    }
+
+    public function housingSearch(): HasOne
+    {
+        return $this->hasOne(HousingSearch::class);
     }
 }

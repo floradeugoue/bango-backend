@@ -1,0 +1,31 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "Bango API",
+        "description": "Bango Backend API Documentation",
+        "version": "1.0.0"
+    },
+    "paths": {
+        "/api/properties": {
+            "get": {
+                "tags": [
+                    "Properties"
+                ],
+                "summary": "List properties",
+                "description": "Display a listing of the resource.",
+                "operationId": "ae50890d9da51a5cfe01cd2151d4077a",
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                }
+            }
+        }
+    },
+    "tags": [
+        {
+            "name": "Properties",
+            "description": "Properties"
+        }
+    ]
+}
