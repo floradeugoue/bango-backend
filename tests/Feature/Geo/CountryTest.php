@@ -7,8 +7,10 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
-    $this->user = \App\Models\User::factory()->create();
-    $this->actingAs($this->user, 'api');
+    \Illuminate\Support\Facades\Artisan::call('passport:client', ['--personal' => true, '--name' => 'Test']);
+    $role = \App\Models\Role::firstOrCreate(['slug' => 'admin'], ['name' => 'Admin']);
+    $this->user = \App\Models\User::factory()->create(['role_id' => $role->id]);
+    \Laravel\Passport\Passport::actingAs($this->user, ['*']);
     $this->currency = Currency::create(['name' => 'Franc CFA', 'code' => 'XAF']);
 });
 

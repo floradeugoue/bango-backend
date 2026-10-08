@@ -27,8 +27,15 @@ class SignupController extends Controller
         }
 
         $user = clone new User();
+        $user->name = $request->name ?? explode('@', $request->email)[0];
         $user->email = $request->email;
         $user->password = Hash::make($request->password);
+        
+        $userRole = \App\Models\Role::where('slug', 'user')->first();
+        if ($userRole) {
+            $user->role_id = $userRole->id;
+        }
+
         $user->save();
 
         $token = $user->createToken('auth_token')->accessToken;

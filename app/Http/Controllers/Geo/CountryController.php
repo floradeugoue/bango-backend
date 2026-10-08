@@ -12,7 +12,7 @@ class CountryController extends Controller
      */
     public function index()
     {
-        //
+        return response()->json(\App\Models\Geo\Country::all());
     }
 
     /**
@@ -20,7 +20,18 @@ class CountryController extends Controller
      */
     public function store(Request $request)
     {
-        //
+        $validated = $request->validate([
+            'name' => 'required|string',
+            'code' => 'required|string',
+            'iso2' => 'required|string',
+            'iso3' => 'required|string',
+            'currency_id' => 'required|exists:currencies,id',
+            'is_active' => 'sometimes|boolean'
+        ]);
+
+        $country = \App\Models\Geo\Country::create($validated);
+
+        return response()->json($country, 201);
     }
 
     /**
@@ -28,7 +39,7 @@ class CountryController extends Controller
      */
     public function show(string $id)
     {
-        //
+        return response()->json(\App\Models\Geo\Country::findOrFail($id));
     }
 
     /**
@@ -36,7 +47,9 @@ class CountryController extends Controller
      */
     public function update(Request $request, string $id)
     {
-        //
+        $country = \App\Models\Geo\Country::findOrFail($id);
+        $country->update($request->all());
+        return response()->json($country);
     }
 
     /**
@@ -44,6 +57,8 @@ class CountryController extends Controller
      */
     public function destroy(string $id)
     {
-        //
+        $country = \App\Models\Geo\Country::findOrFail($id);
+        $country->delete();
+        return response()->json(null, 204);
     }
 }

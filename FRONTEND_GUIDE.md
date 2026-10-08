@@ -132,6 +132,19 @@ Ces endpoints sont réservés aux administrateurs de la plateforme et renverront
 - `POST, PUT, DELETE /api/geo/neighbourhoods`
 - `POST, PUT, DELETE /api/geo/operators`
 
+**Gestion des Utilisateurs et Sessions (USERS)**
+- `GET /api/users` : Lister tous les utilisateurs (Filtres disponibles : `display_name`, `email`, `phone`, `handle`, `status`, `is_verified` ; Tris : `sort_by`, `sort_order`)
+- `GET /api/users/{id}` : Afficher un utilisateur en détail
+- `PATCH /api/users/{id}` : Mettre à jour les informations basiques (Ne permet pas de changer le mot de passe)
+- `POST /api/users/{id}/suspend` : Suspendre temporairement le compte (déconnecte immédiatement l'utilisateur)
+- `POST /api/users/{id}/unsuspend` : Lever la suspension du compte
+- `POST /api/users/{id}/block` : Bloquer indéfiniment le compte
+- `POST /api/users/{id}/unblock` : Débloquer le compte
+- `DELETE /api/users/{id}` : Supprimer un utilisateur (Soft delete)
+- `GET /api/users/{id}/sessions` : Lister toutes les sessions actives (appareils connectés) de l'utilisateur
+- `DELETE /api/users/{id}/sessions` : Révoquer toutes les sessions de l'utilisateur (Déconnexion globale)
+- `DELETE /api/users/{id}/sessions/{session_id}` : Révoquer une session spécifique
+
 ---
 
 ## ⚠️ Gestion des Erreurs (Format Custom BANGO)

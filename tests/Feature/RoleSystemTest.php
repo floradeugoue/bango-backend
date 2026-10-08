@@ -23,6 +23,7 @@ it('is idempotent and does not create duplicates', function () {
 
 it('assigns the user role by default to a new user during signup', function () {
     $this->artisan('db:seed', ['--class' => 'RoleSeeder']);
+    \Illuminate\Support\Facades\Artisan::call('passport:client', ['--personal' => true, '--name' => 'Test']);
 
     $response = $this->postJson('/api/auth/signup', [
         'name' => 'Test User',

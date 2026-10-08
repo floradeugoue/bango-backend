@@ -6,6 +6,10 @@ use function Pest\Laravel\postJson;
 
 uses(RefreshDatabase::class);
 
+beforeEach(function () {
+    \Illuminate\Support\Facades\Artisan::call('passport:client', ['--personal' => true, '--name' => 'Test']);
+});
+
 it('can register a new user successfully', function () {
     $response = postJson('/api/auth/signup', [
         'email' => 'test@example.com',
