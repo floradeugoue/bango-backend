@@ -27,6 +27,7 @@ class User extends Authenticatable
         'gender',
         'gender_hidden',
         'phone',
+        'phone_verified_at',
         'country_code',
         'city',
         'neighbourhood',

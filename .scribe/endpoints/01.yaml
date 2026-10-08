@@ -1,23 +1,25 @@
-name: 'GEO - Pays'
+name: Auth
 description: |-
 
-  API pour gérer le référentiel des pays.
+  API pour la réinitialisation de mot de passe (Forgot Password)
 endpoints:
   -
     custom: []
     httpMethods:
-      - GET
-    uri: api/geo/countries
+      - POST
+    uri: api/auth/forgot-password
     metadata:
       custom: []
-      groupName: 'GEO - Pays'
+      groupName: Auth
       groupDescription: |-
 
-        API pour gérer le référentiel des pays.
+        API pour la réinitialisation de mot de passe (Forgot Password)
       subgroup: ''
       subgroupDescription: ''
-      title: 'Liste des pays'
-      description: ''
+      title: 'Demander une réinitialisation de mot de passe'
+      description: |-
+        Permet d'envoyer un code OTP par email ou SMS pour réinitialiser le mot de passe.
+        Pour des raisons de sécurité, cette API ne confirme jamais si un utilisateur existe ou non.
       authenticated: false
       deprecated: false
     headers:
@@ -25,52 +27,44 @@ endpoints:
       Accept: application/json
     urlParameters: []
     cleanUrlParameters: []
-    queryParameters:
-      search:
+    queryParameters: []
+    cleanQueryParameters: []
+    bodyParameters:
+      channel:
         custom: []
-        name: search
-        description: 'Recherche par nom, iso2, iso3 ou code.'
-        required: false
-        example: Cameroun
+        name: channel
+        description: "Le canal d'envoi. Exemple: sms, email"
+        required: true
+        example: architecto
         type: string
         enumValues: []
-        exampleWasSpecified: true
+        exampleWasSpecified: false
         nullable: false
         deprecated: false
-      is_active:
+      identifier:
         custom: []
-        name: is_active
-        description: "Filtrer par statut d'activation (1 ou 0)."
-        required: false
-        example: true
-        type: boolean
-        enumValues: []
-        exampleWasSpecified: true
-        nullable: false
-        deprecated: false
-      with:
-        custom: []
-        name: with
-        description: 'Relations à inclure (currency, cities).'
-        required: false
-        example: currency
+        name: identifier
+        description: "L'identifiant (numéro de téléphone ou email)."
+        required: true
+        example: architecto
         type: string
         enumValues: []
-        exampleWasSpecified: true
+        exampleWasSpecified: false
         nullable: false
         deprecated: false
-    cleanQueryParameters:
-      search: Cameroun
-      is_active: true
-      with: currency
-    bodyParameters: []
-    cleanBodyParameters: []
+    cleanBodyParameters:
+      channel: architecto
+      identifier: architecto
     fileParameters: []
     responses:
       -
         custom: []
         status: 200
-        content: '[{"id":1,"name":"Cameroun","iso2":"CM"}]'
+        content: |-
+          {
+            "success": true,
+            "message": "If your account exists, an OTP has been sent."
+          }
         headers: []
         description: ''
     responseFields: []
@@ -82,17 +76,17 @@ endpoints:
     custom: []
     httpMethods:
       - POST
-    uri: api/geo/countries
+    uri: api/auth/forgot-password/verify
     metadata:
       custom: []
-      groupName: 'GEO - Pays'
+      groupName: Auth
       groupDescription: |-
 
-        API pour gérer le référentiel des pays.
+        API pour la réinitialisation de mot de passe (Forgot Password)
       subgroup: ''
       subgroupDescription: ''
-      title: 'Créer un pays'
-      description: ''
+      title: "Vérifier l'OTP de réinitialisation"
+      description: 'Vérifie le code OTP reçu. Si valide, retourne un token temporaire pour changer le mot de passe.'
       authenticated: false
       deprecated: false
     headers:
@@ -103,97 +97,53 @@ endpoints:
     queryParameters: []
     cleanQueryParameters: []
     bodyParameters:
-      name:
+      channel:
         custom: []
-        name: name
-        description: 'Le nom du pays.'
+        name: channel
+        description: "Le canal d'envoi. Exemple: sms, email"
         required: true
-        example: Cameroun
+        example: architecto
         type: string
         enumValues: []
-        exampleWasSpecified: true
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+      identifier:
+        custom: []
+        name: identifier
+        description: "L'identifiant (numéro de téléphone ou email)."
+        required: true
+        example: architecto
+        type: string
+        enumValues: []
+        exampleWasSpecified: false
         nullable: false
         deprecated: false
       code:
         custom: []
         name: code
-        description: 'Code interne unique.'
+        description: 'Le code OTP à 6 chiffres.'
         required: true
-        example: CM
+        example: architecto
         type: string
         enumValues: []
-        exampleWasSpecified: true
-        nullable: false
-        deprecated: false
-      iso2:
-        custom: []
-        name: iso2
-        description: 'Code ISO2.'
-        required: true
-        example: CM
-        type: string
-        enumValues: []
-        exampleWasSpecified: true
-        nullable: false
-        deprecated: false
-      iso3:
-        custom: []
-        name: iso3
-        description: 'Code ISO3.'
-        required: true
-        example: CMR
-        type: string
-        enumValues: []
-        exampleWasSpecified: true
-        nullable: false
-        deprecated: false
-      phone_code:
-        custom: []
-        name: phone_code
-        description: 'Code téléphonique.'
-        required: false
-        example: '+237'
-        type: string
-        enumValues: []
-        exampleWasSpecified: true
-        nullable: true
-        deprecated: false
-      currency_id:
-        custom: []
-        name: currency_id
-        description: 'ID de la devise.'
-        required: true
-        example: 1
-        type: integer
-        enumValues: []
-        exampleWasSpecified: true
-        nullable: false
-        deprecated: false
-      is_active:
-        custom: []
-        name: is_active
-        description: Statut.
-        required: false
-        example: true
-        type: boolean
-        enumValues: []
-        exampleWasSpecified: true
+        exampleWasSpecified: false
         nullable: false
         deprecated: false
     cleanBodyParameters:
-      name: Cameroun
-      code: CM
-      iso2: CM
-      iso3: CMR
-      phone_code: '+237'
-      currency_id: 1
-      is_active: true
+      channel: architecto
+      identifier: architecto
+      code: architecto
     fileParameters: []
     responses:
       -
         custom: []
-        status: 201
-        content: '{"id":1,"name":"Cameroun"}'
+        status: 200
+        content: |-
+          {
+            "success": true,
+            "reset_token": "a1b2c3d4..."
+          }
         headers: []
         description: ''
     responseFields: []
@@ -204,76 +154,101 @@ endpoints:
   -
     custom: []
     httpMethods:
-      - GET
-    uri: 'api/geo/countries/{id}'
+      - POST
+    uri: api/auth/forgot-password/reset
     metadata:
       custom: []
-      groupName: 'GEO - Pays'
+      groupName: Auth
       groupDescription: |-
 
-        API pour gérer le référentiel des pays.
+        API pour la réinitialisation de mot de passe (Forgot Password)
       subgroup: ''
       subgroupDescription: ''
-      title: "Détail d'un pays"
-      description: ''
+      title: 'Réinitialiser le mot de passe'
+      description: "Permet de définir un nouveau mot de passe à l'aide du token temporaire."
       authenticated: false
       deprecated: false
     headers:
       Content-Type: application/json
       Accept: application/json
-    urlParameters:
-      id:
+    urlParameters: []
+    cleanUrlParameters: []
+    queryParameters: []
+    cleanQueryParameters: []
+    bodyParameters:
+      channel:
         custom: []
-        name: id
-        description: 'The ID of the country.'
+        name: channel
+        description: "Le canal d'envoi. Exemple: sms, email"
         required: true
-        example: 16
-        type: integer
+        example: architecto
+        type: string
         enumValues: []
         exampleWasSpecified: false
         nullable: false
         deprecated: false
-      country:
+      identifier:
         custom: []
-        name: country
-        description: "L'ID du pays."
+        name: identifier
+        description: "L'identifiant (numéro de téléphone ou email)."
         required: true
-        example: 1
-        type: integer
-        enumValues: []
-        exampleWasSpecified: true
-        nullable: false
-        deprecated: false
-    cleanUrlParameters:
-      id: 16
-      country: 1
-    queryParameters:
-      with:
-        custom: []
-        name: with
-        description: 'Relations (ex: currency,cities,operators).'
-        required: false
-        example: currency
+        example: architecto
         type: string
         enumValues: []
-        exampleWasSpecified: true
+        exampleWasSpecified: false
         nullable: false
         deprecated: false
-    cleanQueryParameters:
-      with: currency
-    bodyParameters: []
-    cleanBodyParameters: []
+      token:
+        custom: []
+        name: token
+        description: "Le token obtenu après vérification de l'OTP."
+        required: true
+        example: architecto
+        type: string
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+      password:
+        custom: []
+        name: password
+        description: 'Le nouveau mot de passe.'
+        required: true
+        example: '|]|{+-'
+        type: string
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+      password_confirmation:
+        custom: []
+        name: password_confirmation
+        description: 'La confirmation du mot de passe.'
+        required: true
+        example: architecto
+        type: string
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+    cleanBodyParameters:
+      channel: architecto
+      identifier: architecto
+      token: architecto
+      password: '|]|{+-'
+      password_confirmation: architecto
     fileParameters: []
     responses:
       -
         custom: []
-        status: 401
-        content: '{"message":"Unauthenticated."}'
-        headers:
-          cache-control: 'no-cache, private'
-          content-type: application/json
-          access-control-allow-origin: '*'
-        description: null
+        status: 200
+        content: |-
+          {
+            "success": true,
+            "message": "Password reset successfully."
+          }
+        headers: []
+        description: ''
     responseFields: []
     auth: []
     controller: null
@@ -282,59 +257,342 @@ endpoints:
   -
     custom: []
     httpMethods:
-      - PUT
-      - PATCH
-    uri: 'api/geo/countries/{id}'
+      - POST
+    uri: api/auth/reset-password/request
     metadata:
       custom: []
-      groupName: 'GEO - Pays'
+      groupName: Auth
       groupDescription: |-
 
-        API pour gérer le référentiel des pays.
+        API pour le Reset Password classique via lien envoyé par email.
       subgroup: ''
       subgroupDescription: ''
-      title: 'Mettre à jour un pays'
-      description: ''
+      title: 'Demander un lien de réinitialisation (Reset Password)'
+      description: |-
+        Permet d'envoyer un email avec un lien contenant un token temporaire pour réinitialiser le mot de passe.
+        Pour des raisons de sécurité, ne confirme jamais si un email existe.
       authenticated: false
       deprecated: false
     headers:
       Content-Type: application/json
       Accept: application/json
-    urlParameters:
-      id:
+    urlParameters: []
+    cleanUrlParameters: []
+    queryParameters: []
+    cleanQueryParameters: []
+    bodyParameters:
+      email:
         custom: []
-        name: id
-        description: 'The ID of the country.'
+        name: email
+        description: "L'adresse email de l'utilisateur."
         required: true
-        example: 16
-        type: integer
+        example: gbailey@example.net
+        type: string
         enumValues: []
         exampleWasSpecified: false
         nullable: false
         deprecated: false
-      country:
+    cleanBodyParameters:
+      email: gbailey@example.net
+    fileParameters: []
+    responses:
+      -
         custom: []
-        name: country
-        description: "L'ID du pays."
-        required: true
-        example: 1
-        type: integer
-        enumValues: []
-        exampleWasSpecified: true
-        nullable: false
-        deprecated: false
-    cleanUrlParameters:
-      id: 16
-      country: 1
+        status: 200
+        content: |-
+          {
+            "success": true,
+            "message": "If your account exists, a reset link has been sent to your email."
+          }
+        headers: []
+        description: ''
+    responseFields: []
+    auth: []
+    controller: null
+    method: null
+    route: null
+  -
+    custom: []
+    httpMethods:
+      - POST
+    uri: api/auth/reset-password
+    metadata:
+      custom: []
+      groupName: Auth
+      groupDescription: |-
+
+        API pour le Reset Password classique via lien envoyé par email.
+      subgroup: ''
+      subgroupDescription: ''
+      title: 'Réinitialiser le mot de passe via lien'
+      description: 'Valide le token fourni et met à jour le mot de passe.'
+      authenticated: false
+      deprecated: false
+    headers:
+      Content-Type: application/json
+      Accept: application/json
+    urlParameters: []
+    cleanUrlParameters: []
     queryParameters: []
     cleanQueryParameters: []
     bodyParameters:
-      name:
+      token:
         custom: []
-        name: name
-        description: 'Must not be greater than 255 characters.'
-        required: false
-        example: b
+        name: token
+        description: 'Le token unique fourni dans le lien.'
+        required: true
+        example: architecto
+        type: string
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+      password:
+        custom: []
+        name: password
+        description: 'Le nouveau mot de passe (min 8 char).'
+        required: true
+        example: '|]|{+-'
+        type: string
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+      password_confirmation:
+        custom: []
+        name: password_confirmation
+        description: 'La confirmation du nouveau mot de passe.'
+        required: true
+        example: architecto
+        type: string
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+    cleanBodyParameters:
+      token: architecto
+      password: '|]|{+-'
+      password_confirmation: architecto
+    fileParameters: []
+    responses:
+      -
+        custom: []
+        status: 200
+        content: |-
+          {
+            "success": true,
+            "message": "Password reset successfully."
+          }
+        headers: []
+        description: ''
+      -
+        custom: []
+        status: 422
+        content: |-
+          {
+            "message": "Invalid or expired token."
+          }
+        headers: []
+        description: ''
+    responseFields: []
+    auth: []
+    controller: null
+    method: null
+    route: null
+  -
+    custom: []
+    httpMethods:
+      - POST
+    uri: api/auth/logout
+    metadata:
+      custom: []
+      groupName: Auth
+      groupDescription: |-
+
+        API d'authentification des utilisateurs.
+      subgroup: ''
+      subgroupDescription: ''
+      title: 'Déconnexion (Logout)'
+      description: |-
+        Déconnecte l'utilisateur courant en invalidant son token Passport actuel.
+        Cette action ne révoque que le token utilisé pour la requête.
+      authenticated: true
+      deprecated: false
+    headers:
+      Content-Type: application/json
+      Accept: application/json
+    urlParameters: []
+    cleanUrlParameters: []
+    queryParameters: []
+    cleanQueryParameters: []
+    bodyParameters: []
+    cleanBodyParameters: []
+    fileParameters: []
+    responses:
+      -
+        custom: []
+        status: 200
+        content: |-
+          {
+            "success": true,
+            "message": "Déconnexion réussie."
+          }
+        headers: []
+        description: ''
+      -
+        custom: []
+        status: 401
+        content: |-
+          {
+            "message": "Unauthenticated."
+          }
+        headers: []
+        description: ''
+    responseFields: []
+    auth: []
+    controller: null
+    method: null
+    route: null
+  -
+    custom: []
+    httpMethods:
+      - POST
+    uri: api/otp/request
+    metadata:
+      custom: []
+      groupName: Auth
+      groupDescription: |-
+
+        API de validation par OTP (One-Time Password).
+      subgroup: ''
+      subgroupDescription: ''
+      title: 'Request OTP'
+      description: "Demande l'envoi d'un code OTP par SMS ou Email."
+      authenticated: false
+      deprecated: false
+    headers:
+      Content-Type: application/json
+      Accept: application/json
+    urlParameters: []
+    cleanUrlParameters: []
+    queryParameters: []
+    cleanQueryParameters: []
+    bodyParameters:
+      channel:
+        custom: []
+        name: channel
+        description: "Le canal d'envoi. Exemple: sms, email"
+        required: true
+        example: architecto
+        type: string
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+      identifier:
+        custom: []
+        name: identifier
+        description: "L'identifiant (numéro de téléphone ou email)."
+        required: true
+        example: architecto
+        type: string
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+    cleanBodyParameters:
+      channel: architecto
+      identifier: architecto
+    fileParameters: []
+    responses:
+      -
+        custom: []
+        status: 200
+        content: |-
+          {
+            "success": true
+          }
+        headers: []
+        description: ''
+      -
+        custom: []
+        status: 409
+        content: |-
+          {
+            "kind": "number-taken",
+            "handle": "pseudo",
+            "createdAt": "2026-10-07T19:00:00Z"
+          }
+        headers: []
+        description: ''
+      -
+        custom: []
+        status: 422
+        content: |-
+          {
+            "message": "The given data was invalid.",
+            "errors": { ... }
+          }
+        headers: []
+        description: ''
+      -
+        custom: []
+        status: 429
+        content: |-
+          {
+            "kind": "locked",
+            "minutes": 15,
+            "until": "2026-10-07T20:45:00Z"
+          }
+        headers: []
+        description: ''
+    responseFields: []
+    auth: []
+    controller: null
+    method: null
+    route: null
+  -
+    custom: []
+    httpMethods:
+      - POST
+    uri: api/otp/verify
+    metadata:
+      custom: []
+      groupName: Auth
+      groupDescription: |-
+
+        API de validation par OTP (One-Time Password).
+      subgroup: ''
+      subgroupDescription: ''
+      title: 'Verify OTP'
+      description: 'Valide un code OTP pour un canal spécifique.'
+      authenticated: false
+      deprecated: false
+    headers:
+      Content-Type: application/json
+      Accept: application/json
+    urlParameters: []
+    cleanUrlParameters: []
+    queryParameters: []
+    cleanQueryParameters: []
+    bodyParameters:
+      channel:
+        custom: []
+        name: channel
+        description: 'Le canal. Exemple: sms, email'
+        required: true
+        example: architecto
+        type: string
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+      identifier:
+        custom: []
+        name: identifier
+        description: "L'identifiant (numéro de téléphone ou email)."
+        required: true
+        example: architecto
         type: string
         enumValues: []
         exampleWasSpecified: false
@@ -343,75 +601,29 @@ endpoints:
       code:
         custom: []
         name: code
-        description: ''
-        required: false
-        example: null
+        description: 'Le code à 6 chiffres. Exemple: 123456'
+        required: true
+        example: architecto
         type: string
-        enumValues: []
-        exampleWasSpecified: false
-        nullable: false
-        deprecated: false
-      iso2:
-        custom: []
-        name: iso2
-        description: ''
-        required: false
-        example: null
-        type: string
-        enumValues: []
-        exampleWasSpecified: false
-        nullable: false
-        deprecated: false
-      iso3:
-        custom: []
-        name: iso3
-        description: ''
-        required: false
-        example: null
-        type: string
-        enumValues: []
-        exampleWasSpecified: false
-        nullable: false
-        deprecated: false
-      phone_code:
-        custom: []
-        name: phone_code
-        description: 'Must not be greater than 10 characters.'
-        required: false
-        example: ngzmiy
-        type: string
-        enumValues: []
-        exampleWasSpecified: false
-        nullable: true
-        deprecated: false
-      currency_id:
-        custom: []
-        name: currency_id
-        description: 'Must match an existing stored value.'
-        required: false
-        example: null
-        type: string
-        enumValues: []
-        exampleWasSpecified: false
-        nullable: false
-        deprecated: false
-      is_active:
-        custom: []
-        name: is_active
-        description: ''
-        required: false
-        example: false
-        type: boolean
         enumValues: []
         exampleWasSpecified: false
         nullable: false
         deprecated: false
     cleanBodyParameters:
-      name: b
-      phone_code: ngzmiy
-      is_active: false
+      channel: architecto
+      identifier: architecto
+      code: architecto
     fileParameters: []
-    responses: []
+    responses:
+      -
+        custom: []
+        status: 200
+        content: |-
+          {
+            "success": true
+          }
+        headers: []
+        description: ''
     responseFields: []
     auth: []
     controller: null
@@ -420,59 +632,63 @@ endpoints:
   -
     custom: []
     httpMethods:
-      - DELETE
-    uri: 'api/geo/countries/{id}'
+      - POST
+    uri: api/otp/resend
     metadata:
       custom: []
-      groupName: 'GEO - Pays'
+      groupName: Auth
       groupDescription: |-
 
-        API pour gérer le référentiel des pays.
+        API de validation par OTP (One-Time Password).
       subgroup: ''
       subgroupDescription: ''
-      title: 'Supprimer un pays'
-      description: "Ne supprime pas s'il possède des villes ou des opérateurs."
+      title: 'Resend OTP'
+      description: 'Renvoie un nouveau code OTP.'
       authenticated: false
       deprecated: false
     headers:
       Content-Type: application/json
       Accept: application/json
-    urlParameters:
-      id:
+    urlParameters: []
+    cleanUrlParameters: []
+    queryParameters: []
+    cleanQueryParameters: []
+    bodyParameters:
+      channel:
         custom: []
-        name: id
-        description: 'The ID of the country.'
+        name: channel
+        description: 'Le canal. Exemple: sms, email'
         required: true
-        example: 16
-        type: integer
+        example: architecto
+        type: string
         enumValues: []
         exampleWasSpecified: false
         nullable: false
         deprecated: false
-      country:
+      identifier:
         custom: []
-        name: country
-        description: "L'ID du pays."
+        name: identifier
+        description: "L'identifiant (numéro de téléphone ou email)."
         required: true
-        example: 1
-        type: integer
+        example: architecto
+        type: string
         enumValues: []
-        exampleWasSpecified: true
+        exampleWasSpecified: false
         nullable: false
         deprecated: false
-    cleanUrlParameters:
-      id: 16
-      country: 1
-    queryParameters: []
-    cleanQueryParameters: []
-    bodyParameters: []
-    cleanBodyParameters: []
+    cleanBodyParameters:
+      channel: architecto
+      identifier: architecto
     fileParameters: []
     responses:
       -
         custom: []
-        status: 409
-        content: '{"message":"Ce pays est encore utilisé (villes, opérateurs ou utilisateurs)."}'
+        status: 200
+        content: |-
+          {
+            "success": true,
+            "resendAfterSeconds": 60
+          }
         headers: []
         description: ''
     responseFields: []

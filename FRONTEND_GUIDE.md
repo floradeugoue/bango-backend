@@ -66,6 +66,11 @@ Ces API sont librement accessibles depuis le Frontend sans authentification.
 **Authentification (AUTH)**
 - `POST /api/auth/signup` : Inscription
 - `POST /api/auth/signin` : Connexion (inclut Rate Limiting)
+- `POST /api/auth/forgot-password` : Demande d'OTP de réinitialisation (Email/SMS)
+- `POST /api/auth/forgot-password/verify` : Validation de l'OTP
+- `POST /api/auth/forgot-password/reset` : Changer le mot de passe (via OTP)
+- `POST /api/auth/reset-password/request` : Demande de lien email de réinitialisation
+- `POST /api/auth/reset-password` : Changer le mot de passe (via lien Email)
 
 **Référentiel Géographique (GEO) - Lecture seule**
 - `GET /api/geo/countries` (et `/api/geo/countries/{id}`)
