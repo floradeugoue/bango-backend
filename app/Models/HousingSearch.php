@@ -33,4 +33,19 @@ class HousingSearch extends Model
     {
         return $this->belongsTo(User::class);
     }
+
+    public function currency()
+    {
+        return $this->belongsTo(\App\Models\Geo\Currency::class);
+    }
+
+    public function city()
+    {
+        return $this->belongsTo(\App\Models\Geo\City::class);
+    }
+
+    public function neighbourhoods()
+    {
+        return $this->belongsToMany(\App\Models\Geo\Neighbourhood::class, 'housing_search_neighbourhood');
+    }
 }

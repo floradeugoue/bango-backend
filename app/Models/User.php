@@ -70,8 +70,38 @@ class User extends Authenticatable
         return $this->belongsToMany(Interest::class);
     }
 
+    public function role()
+    {
+        return $this->belongsTo(Role::class);
+    }
+
+    public function isAdmin(): bool
+    {
+        return $this->role?->slug === 'admin';
+    }
+
+    public function hasRole(string $roleSlug): bool
+    {
+        return $this->role?->slug === $roleSlug;
+    }
+
     public function housingSearch(): HasOne
     {
         return $this->hasOne(HousingSearch::class);
+    }
+
+    public function country()
+    {
+        return $this->belongsTo(\App\Models\Geo\Country::class);
+    }
+
+    public function city()
+    {
+        return $this->belongsTo(\App\Models\Geo\City::class);
+    }
+
+    public function neighbourhood()
+    {
+        return $this->belongsTo(\App\Models\Geo\Neighbourhood::class);
     }
 }

@@ -1,0 +1,424 @@
+name: 'GEO - Quartiers'
+description: |-
+
+  API pour gérer le référentiel des quartiers.
+endpoints:
+  -
+    custom: []
+    httpMethods:
+      - GET
+    uri: api/geo/neighbourhoods
+    metadata:
+      custom: []
+      groupName: 'GEO - Quartiers'
+      groupDescription: |-
+
+        API pour gérer le référentiel des quartiers.
+      subgroup: ''
+      subgroupDescription: ''
+      title: 'Liste des quartiers'
+      description: ''
+      authenticated: false
+      deprecated: false
+    headers:
+      Content-Type: application/json
+      Accept: application/json
+    urlParameters: []
+    cleanUrlParameters: []
+    queryParameters:
+      city_id:
+        custom: []
+        name: city_id
+        description: 'Filtrer par ville.'
+        required: false
+        example: 1
+        type: integer
+        enumValues: []
+        exampleWasSpecified: true
+        nullable: false
+        deprecated: false
+      country_id:
+        custom: []
+        name: country_id
+        description: 'Filtrer par pays (via la ville).'
+        required: false
+        example: 1
+        type: integer
+        enumValues: []
+        exampleWasSpecified: true
+        nullable: false
+        deprecated: false
+      search:
+        custom: []
+        name: search
+        description: 'Recherche par nom ou slug.'
+        required: false
+        example: Bonapriso
+        type: string
+        enumValues: []
+        exampleWasSpecified: true
+        nullable: false
+        deprecated: false
+      is_active:
+        custom: []
+        name: is_active
+        description: "Filtrer par statut d'activation (1 ou 0)."
+        required: false
+        example: true
+        type: boolean
+        enumValues: []
+        exampleWasSpecified: true
+        nullable: false
+        deprecated: false
+      with:
+        custom: []
+        name: with
+        description: 'Relations à inclure (city, city.country).'
+        required: false
+        example: city.country
+        type: string
+        enumValues: []
+        exampleWasSpecified: true
+        nullable: false
+        deprecated: false
+    cleanQueryParameters:
+      city_id: 1
+      country_id: 1
+      search: Bonapriso
+      is_active: true
+      with: city.country
+    bodyParameters: []
+    cleanBodyParameters: []
+    fileParameters: []
+    responses:
+      -
+        custom: []
+        status: 200
+        content: '[{"id":1,"name":"Bonapriso","slug":"bonapriso","city_id":1}]'
+        headers: []
+        description: ''
+    responseFields: []
+    auth: []
+    controller: null
+    method: null
+    route: null
+  -
+    custom: []
+    httpMethods:
+      - POST
+    uri: api/geo/neighbourhoods
+    metadata:
+      custom: []
+      groupName: 'GEO - Quartiers'
+      groupDescription: |-
+
+        API pour gérer le référentiel des quartiers.
+      subgroup: ''
+      subgroupDescription: ''
+      title: 'Créer un quartier'
+      description: ''
+      authenticated: false
+      deprecated: false
+    headers:
+      Content-Type: application/json
+      Accept: application/json
+    urlParameters: []
+    cleanUrlParameters: []
+    queryParameters: []
+    cleanQueryParameters: []
+    bodyParameters:
+      city_id:
+        custom: []
+        name: city_id
+        description: 'ID de la ville parente.'
+        required: true
+        example: 1
+        type: integer
+        enumValues: []
+        exampleWasSpecified: true
+        nullable: false
+        deprecated: false
+      name:
+        custom: []
+        name: name
+        description: 'Le nom du quartier.'
+        required: true
+        example: Bonapriso
+        type: string
+        enumValues: []
+        exampleWasSpecified: true
+        nullable: false
+        deprecated: false
+      slug:
+        custom: []
+        name: slug
+        description: 'Le slug (unique). Géré automatiquement si omis.'
+        required: false
+        example: bonapriso
+        type: string
+        enumValues: []
+        exampleWasSpecified: true
+        nullable: true
+        deprecated: false
+      is_active:
+        custom: []
+        name: is_active
+        description: Statut.
+        required: false
+        example: true
+        type: boolean
+        enumValues: []
+        exampleWasSpecified: true
+        nullable: false
+        deprecated: false
+    cleanBodyParameters:
+      city_id: 1
+      name: Bonapriso
+      slug: bonapriso
+      is_active: true
+    fileParameters: []
+    responses: []
+    responseFields: []
+    auth: []
+    controller: null
+    method: null
+    route: null
+  -
+    custom: []
+    httpMethods:
+      - GET
+    uri: 'api/geo/neighbourhoods/{id}'
+    metadata:
+      custom: []
+      groupName: 'GEO - Quartiers'
+      groupDescription: |-
+
+        API pour gérer le référentiel des quartiers.
+      subgroup: ''
+      subgroupDescription: ''
+      title: "Détail d'un quartier"
+      description: ''
+      authenticated: false
+      deprecated: false
+    headers:
+      Content-Type: application/json
+      Accept: application/json
+    urlParameters:
+      id:
+        custom: []
+        name: id
+        description: 'The ID of the neighbourhood.'
+        required: true
+        example: 16
+        type: integer
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+      neighbourhood:
+        custom: []
+        name: neighbourhood
+        description: "L'ID du quartier."
+        required: true
+        example: 1
+        type: integer
+        enumValues: []
+        exampleWasSpecified: true
+        nullable: false
+        deprecated: false
+    cleanUrlParameters:
+      id: 16
+      neighbourhood: 1
+    queryParameters:
+      with:
+        custom: []
+        name: with
+        description: 'Relations (ex: city, city.country).'
+        required: false
+        example: city.country
+        type: string
+        enumValues: []
+        exampleWasSpecified: true
+        nullable: false
+        deprecated: false
+    cleanQueryParameters:
+      with: city.country
+    bodyParameters: []
+    cleanBodyParameters: []
+    fileParameters: []
+    responses:
+      -
+        custom: []
+        status: 401
+        content: '{"message":"Unauthenticated."}'
+        headers:
+          cache-control: 'no-cache, private'
+          content-type: application/json
+          access-control-allow-origin: '*'
+        description: null
+    responseFields: []
+    auth: []
+    controller: null
+    method: null
+    route: null
+  -
+    custom: []
+    httpMethods:
+      - PUT
+      - PATCH
+    uri: 'api/geo/neighbourhoods/{id}'
+    metadata:
+      custom: []
+      groupName: 'GEO - Quartiers'
+      groupDescription: |-
+
+        API pour gérer le référentiel des quartiers.
+      subgroup: ''
+      subgroupDescription: ''
+      title: 'Mettre à jour un quartier'
+      description: ''
+      authenticated: false
+      deprecated: false
+    headers:
+      Content-Type: application/json
+      Accept: application/json
+    urlParameters:
+      id:
+        custom: []
+        name: id
+        description: 'The ID of the neighbourhood.'
+        required: true
+        example: 16
+        type: integer
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+      neighbourhood:
+        custom: []
+        name: neighbourhood
+        description: "L'ID du quartier."
+        required: true
+        example: 1
+        type: integer
+        enumValues: []
+        exampleWasSpecified: true
+        nullable: false
+        deprecated: false
+    cleanUrlParameters:
+      id: 16
+      neighbourhood: 1
+    queryParameters: []
+    cleanQueryParameters: []
+    bodyParameters:
+      city_id:
+        custom: []
+        name: city_id
+        description: 'Must match an existing stored value.'
+        required: false
+        example: null
+        type: string
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+      name:
+        custom: []
+        name: name
+        description: 'Must not be greater than 255 characters.'
+        required: false
+        example: b
+        type: string
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+      slug:
+        custom: []
+        name: slug
+        description: ''
+        required: false
+        example: null
+        type: string
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+      is_active:
+        custom: []
+        name: is_active
+        description: ''
+        required: false
+        example: true
+        type: boolean
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+    cleanBodyParameters:
+      name: b
+      is_active: true
+    fileParameters: []
+    responses: []
+    responseFields: []
+    auth: []
+    controller: null
+    method: null
+    route: null
+  -
+    custom: []
+    httpMethods:
+      - DELETE
+    uri: 'api/geo/neighbourhoods/{id}'
+    metadata:
+      custom: []
+      groupName: 'GEO - Quartiers'
+      groupDescription: |-
+
+        API pour gérer le référentiel des quartiers.
+      subgroup: ''
+      subgroupDescription: ''
+      title: 'Supprimer un quartier'
+      description: ''
+      authenticated: false
+      deprecated: false
+    headers:
+      Content-Type: application/json
+      Accept: application/json
+    urlParameters:
+      id:
+        custom: []
+        name: id
+        description: 'The ID of the neighbourhood.'
+        required: true
+        example: 16
+        type: integer
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+      neighbourhood:
+        custom: []
+        name: neighbourhood
+        description: "L'ID du quartier."
+        required: true
+        example: 1
+        type: integer
+        enumValues: []
+        exampleWasSpecified: true
+        nullable: false
+        deprecated: false
+    cleanUrlParameters:
+      id: 16
+      neighbourhood: 1
+    queryParameters: []
+    cleanQueryParameters: []
+    bodyParameters: []
+    cleanBodyParameters: []
+    fileParameters: []
+    responses: []
+    responseFields: []
+    auth: []
+    controller: null
+    method: null
+    route: null
