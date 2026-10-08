@@ -286,9 +286,6 @@
                                                                                 <li class="tocify-item level-2" data-unique="endpoints-POSTapi-settings-account-pause">
                                 <a href="#endpoints-POSTapi-settings-account-pause">POST api/settings/account/pause</a>
                             </li>
-                                                                                <li class="tocify-item level-2" data-unique="endpoints-DELETEapi-settings-account">
-                                <a href="#endpoints-DELETEapi-settings-account">DELETE api/settings/account</a>
-                            </li>
                                                                                 <li class="tocify-item level-2" data-unique="endpoints-POSTapi-geo-countries">
                                 <a href="#endpoints-POSTapi-geo-countries">Store a newly created resource in storage.</a>
                             </li>
@@ -333,6 +330,19 @@
                             </li>
                                                                                 <li class="tocify-item level-2" data-unique="endpoints-DELETEapi-geo-operators--id-">
                                 <a href="#endpoints-DELETEapi-geo-operators--id-">Remove the specified resource from storage.</a>
+                            </li>
+                                                                        </ul>
+                            </ul>
+                    <ul id="tocify-header-settings-profil" class="tocify-header">
+                <li class="tocify-item level-1" data-unique="settings-profil">
+                    <a href="#settings-profil">Settings - Profil</a>
+                </li>
+                                    <ul id="tocify-subheader-settings-profil" class="tocify-subheader">
+                                                    <li class="tocify-item level-2" data-unique="settings-profil-POSTapi-auth-restore-account">
+                                <a href="#settings-profil-POSTapi-auth-restore-account">Restaurer un compte supprimé</a>
+                            </li>
+                                                                                <li class="tocify-item level-2" data-unique="settings-profil-DELETEapi-settings-account">
+                                <a href="#settings-profil-DELETEapi-settings-account">Supprimer définitivement le compte</a>
                             </li>
                                                                         </ul>
                             </ul>
@@ -839,7 +849,7 @@ You can check the Dev Tools console for debugging information.</code></pre>
     --data "{
     \"name\": \"b\",
     \"description\": \"Eius et animi quos velit et.\",
-    \"is_active\": false
+    \"is_active\": true
 }"
 </code></pre></div>
 
@@ -857,7 +867,7 @@ const headers = {
 let body = {
     "name": "b",
     "description": "Eius et animi quos velit et.",
-    "is_active": false
+    "is_active": true
 };
 
 fetch(url, {
@@ -1015,7 +1025,7 @@ You can check the Dev Tools console for debugging information.</code></pre>
             <code>false</code>
         </label>
     <br>
-<p>Example: <code>false</code></p>
+<p>Example: <code>true</code></p>
         </div>
         </form>
 
@@ -2043,7 +2053,7 @@ You can check the Dev Tools console for debugging information.</code></pre>
     --data "{
     \"display_name\": \"architecto\",
     \"handle\": \"architecto\",
-    \"birth_date\": \"2026-10-08T15:15:51\",
+    \"birth_date\": \"2026-10-08T16:12:12\",
     \"gender\": \"architecto\",
     \"locale\": \"sr_BA\",
     \"account_type\": \"architecto\",
@@ -2066,7 +2076,7 @@ const headers = {
 let body = {
     "display_name": "architecto",
     "handle": "architecto",
-    "birth_date": "2026-10-08T15:15:51",
+    "birth_date": "2026-10-08T16:12:12",
     "gender": "architecto",
     "locale": "sr_BA",
     "account_type": "architecto",
@@ -2212,10 +2222,10 @@ You can check the Dev Tools console for debugging information.</code></pre>
  &nbsp;
                 <input type="text" style="display: none"
                               name="birth_date"                data-endpoint="PATCHapi-users--user_id-"
-               value="2026-10-08T15:15:51"
+               value="2026-10-08T16:12:12"
                data-component="body">
     <br>
-<p>Must be a valid date. Example: <code>2026-10-08T15:15:51</code></p>
+<p>Must be a valid date. Example: <code>2026-10-08T16:12:12</code></p>
         </div>
                 <div style=" padding-left: 28px;  clear: unset;">
             <b style="line-height: 2;"><code>gender</code></b>&nbsp;&nbsp;
@@ -7324,7 +7334,7 @@ You can check the Dev Tools console for debugging information.</code></pre>
     --header "Content-Type: application/json" \
     --header "Accept: application/json" \
     --data "{
-    \"birthDate\": \"2026-10-08T15:15:51\"
+    \"birthDate\": \"2026-10-08T16:12:12\"
 }"
 </code></pre></div>
 
@@ -7340,7 +7350,7 @@ const headers = {
 };
 
 let body = {
-    "birthDate": "2026-10-08T15:15:51"
+    "birthDate": "2026-10-08T16:12:12"
 };
 
 fetch(url, {
@@ -7432,10 +7442,10 @@ You can check the Dev Tools console for debugging information.</code></pre>
  &nbsp;
                 <input type="text" style="display: none"
                               name="birthDate"                data-endpoint="PUTapi-profile-birthdate"
-               value="2026-10-08T15:15:51"
+               value="2026-10-08T16:12:12"
                data-component="body">
     <br>
-<p>Must be a valid date. Example: <code>2026-10-08T15:15:51</code></p>
+<p>Must be a valid date. Example: <code>2026-10-08T16:12:12</code></p>
         </div>
         </form>
 
@@ -7456,7 +7466,7 @@ You can check the Dev Tools console for debugging information.</code></pre>
     --header "Content-Type: application/json" \
     --header "Accept: application/json" \
     --data "{
-    \"gender\": \"man\",
+    \"gender\": \"woman\",
     \"hidden\": false
 }"
 </code></pre></div>
@@ -7473,7 +7483,7 @@ const headers = {
 };
 
 let body = {
-    "gender": "man",
+    "gender": "woman",
     "hidden": false
 };
 
@@ -7566,10 +7576,10 @@ You can check the Dev Tools console for debugging information.</code></pre>
  &nbsp;
                 <input type="text" style="display: none"
                               name="gender"                data-endpoint="PUTapi-profile-gender"
-               value="man"
+               value="woman"
                data-component="body">
     <br>
-<p>Example: <code>man</code></p>
+<p>Example: <code>woman</code></p>
 Must be one of:
 <ul style="list-style-type: square;"><li><code>woman</code></li> <li><code>man</code></li> <li><code>other</code></li> <li><code>undisclosed</code></li></ul>
         </div>
@@ -7883,7 +7893,7 @@ You can check the Dev Tools console for debugging information.</code></pre>
     "http://localhost:8000/api/profile/avatar" \
     --header "Content-Type: multipart/form-data" \
     --header "Accept: application/json" \
-    --form "avatar=@C:\Users\DEUGOUE Floriane\AppData\Local\Temp\php6AA4.tmp" </code></pre></div>
+    --form "avatar=@C:\Users\DEUGOUE Floriane\AppData\Local\Temp\php3DE.tmp" </code></pre></div>
 
 
 <div class="javascript-example">
@@ -7991,7 +8001,7 @@ You can check the Dev Tools console for debugging information.</code></pre>
                value=""
                data-component="body">
     <br>
-<p>Must be an image. Must not be greater than 5120 kilobytes. Example: <code>C:\Users\DEUGOUE Floriane\AppData\Local\Temp\php6AA4.tmp</code></p>
+<p>Must be an image. Must not be greater than 5120 kilobytes. Example: <code>C:\Users\DEUGOUE Floriane\AppData\Local\Temp\php3DE.tmp</code></p>
         </div>
         </form>
 
@@ -8012,7 +8022,7 @@ You can check the Dev Tools console for debugging information.</code></pre>
     --header "Content-Type: application/json" \
     --header "Accept: application/json" \
     --data "{
-    \"step\": \"profile\"
+    \"step\": \"identity\"
 }"
 </code></pre></div>
 
@@ -8028,7 +8038,7 @@ const headers = {
 };
 
 let body = {
-    "step": "profile"
+    "step": "identity"
 };
 
 fetch(url, {
@@ -8120,10 +8130,10 @@ You can check the Dev Tools console for debugging information.</code></pre>
  &nbsp;
                 <input type="text" style="display: none"
                               name="step"                data-endpoint="POSTapi-onboarding-complete"
-               value="profile"
+               value="identity"
                data-component="body">
     <br>
-<p>Example: <code>profile</code></p>
+<p>Example: <code>identity</code></p>
 Must be one of:
 <ul style="list-style-type: square;"><li><code>credentials</code></li> <li><code>identity</code></li> <li><code>phone</code></li> <li><code>profile</code></li> <li><code>interests</code></li> <li><code>housing</code></li></ul>
         </div>
@@ -9601,138 +9611,6 @@ You can check the Dev Tools console for debugging information.</code></pre>
  &nbsp;
                 <input type="text" style="display: none"
                               name="password"                data-endpoint="POSTapi-settings-account-pause"
-               value="|]|{+-"
-               data-component="body">
-    <br>
-<p>Example: <code>|]|{+-</code></p>
-        </div>
-        </form>
-
-                    <h2 id="endpoints-DELETEapi-settings-account">DELETE api/settings/account</h2>
-
-<p>
-</p>
-
-
-
-<span id="example-requests-DELETEapi-settings-account">
-<blockquote>Example request:</blockquote>
-
-
-<div class="bash-example">
-    <pre><code class="language-bash">curl --request DELETE \
-    "http://localhost:8000/api/settings/account" \
-    --header "Content-Type: application/json" \
-    --header "Accept: application/json" \
-    --data "{
-    \"password\": \"|]|{+-\"
-}"
-</code></pre></div>
-
-
-<div class="javascript-example">
-    <pre><code class="language-javascript">const url = new URL(
-    "http://localhost:8000/api/settings/account"
-);
-
-const headers = {
-    "Content-Type": "application/json",
-    "Accept": "application/json",
-};
-
-let body = {
-    "password": "|]|{+-"
-};
-
-fetch(url, {
-    method: "DELETE",
-    headers,
-    body: JSON.stringify(body),
-}).then(response =&gt; response.json());</code></pre></div>
-
-</span>
-
-<span id="example-responses-DELETEapi-settings-account">
-</span>
-<span id="execution-results-DELETEapi-settings-account" hidden>
-    <blockquote>Received response<span
-                id="execution-response-status-DELETEapi-settings-account"></span>:
-    </blockquote>
-    <pre class="json"><code id="execution-response-content-DELETEapi-settings-account"
-      data-empty-response-text="<Empty response>" style="max-height: 400px;"></code></pre>
-</span>
-<span id="execution-error-DELETEapi-settings-account" hidden>
-    <blockquote>Request failed with error:</blockquote>
-    <pre><code id="execution-error-message-DELETEapi-settings-account">
-
-Tip: Check that you&#039;re properly connected to the network.
-If you&#039;re a maintainer of ths API, verify that your API is running and you&#039;ve enabled CORS.
-You can check the Dev Tools console for debugging information.</code></pre>
-</span>
-<form id="form-DELETEapi-settings-account" data-method="DELETE"
-      data-path="api/settings/account"
-      data-authed="0"
-      data-hasfiles="0"
-      data-isarraybody="0"
-      autocomplete="off"
-      onsubmit="event.preventDefault(); executeTryOut('DELETEapi-settings-account', this);">
-    <h3>
-        Request&nbsp;&nbsp;&nbsp;
-                    <button type="button"
-                    style="background-color: #8fbcd4; padding: 5px 10px; border-radius: 5px; border-width: thin;"
-                    id="btn-tryout-DELETEapi-settings-account"
-                    onclick="tryItOut('DELETEapi-settings-account');">Try it out ⚡
-            </button>
-            <button type="button"
-                    style="background-color: #c97a7e; padding: 5px 10px; border-radius: 5px; border-width: thin;"
-                    id="btn-canceltryout-DELETEapi-settings-account"
-                    onclick="cancelTryOut('DELETEapi-settings-account');" hidden>Cancel 🛑
-            </button>&nbsp;&nbsp;
-            <button type="submit"
-                    style="background-color: #6ac174; padding: 5px 10px; border-radius: 5px; border-width: thin;"
-                    id="btn-executetryout-DELETEapi-settings-account"
-                    data-initial-text="Send Request 💥"
-                    data-loading-text="⏱ Sending..."
-                    hidden>Send Request 💥
-            </button>
-            </h3>
-            <p>
-            <small class="badge badge-red">DELETE</small>
-            <b><code>api/settings/account</code></b>
-        </p>
-                <h4 class="fancy-heading-panel"><b>Headers</b></h4>
-                                <div style="padding-left: 28px; clear: unset;">
-                <b style="line-height: 2;"><code>Content-Type</code></b>&nbsp;&nbsp;
-&nbsp;
- &nbsp;
- &nbsp;
-                <input type="text" style="display: none"
-                              name="Content-Type"                data-endpoint="DELETEapi-settings-account"
-               value="application/json"
-               data-component="header">
-    <br>
-<p>Example: <code>application/json</code></p>
-            </div>
-                                <div style="padding-left: 28px; clear: unset;">
-                <b style="line-height: 2;"><code>Accept</code></b>&nbsp;&nbsp;
-&nbsp;
- &nbsp;
- &nbsp;
-                <input type="text" style="display: none"
-                              name="Accept"                data-endpoint="DELETEapi-settings-account"
-               value="application/json"
-               data-component="header">
-    <br>
-<p>Example: <code>application/json</code></p>
-            </div>
-                                <h4 class="fancy-heading-panel"><b>Body Parameters</b></h4>
-        <div style=" padding-left: 28px;  clear: unset;">
-            <b style="line-height: 2;"><code>password</code></b>&nbsp;&nbsp;
-<small>string</small>&nbsp;
- &nbsp;
- &nbsp;
-                <input type="text" style="display: none"
-                              name="password"                data-endpoint="DELETEapi-settings-account"
                value="|]|{+-"
                data-component="body">
     <br>
@@ -11655,6 +11533,302 @@ You can check the Dev Tools console for debugging information.</code></pre>
 <p>The ID of the operator. Example: <code>architecto</code></p>
             </div>
                     </form>
+
+                <h1 id="settings-profil">Settings - Profil</h1>
+
+    
+
+                                <h2 id="settings-profil-POSTapi-auth-restore-account">Restaurer un compte supprimé</h2>
+
+<p>
+</p>
+
+
+
+<span id="example-requests-POSTapi-auth-restore-account">
+<blockquote>Example request:</blockquote>
+
+
+<div class="bash-example">
+    <pre><code class="language-bash">curl --request POST \
+    "http://localhost:8000/api/auth/restore-account" \
+    --header "Content-Type: application/json" \
+    --header "Accept: application/json" \
+    --data "{
+    \"identifier\": \"architecto\",
+    \"password\": \"|]|{+-\"
+}"
+</code></pre></div>
+
+
+<div class="javascript-example">
+    <pre><code class="language-javascript">const url = new URL(
+    "http://localhost:8000/api/auth/restore-account"
+);
+
+const headers = {
+    "Content-Type": "application/json",
+    "Accept": "application/json",
+};
+
+let body = {
+    "identifier": "architecto",
+    "password": "|]|{+-"
+};
+
+fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+}).then(response =&gt; response.json());</code></pre></div>
+
+</span>
+
+<span id="example-responses-POSTapi-auth-restore-account">
+</span>
+<span id="execution-results-POSTapi-auth-restore-account" hidden>
+    <blockquote>Received response<span
+                id="execution-response-status-POSTapi-auth-restore-account"></span>:
+    </blockquote>
+    <pre class="json"><code id="execution-response-content-POSTapi-auth-restore-account"
+      data-empty-response-text="<Empty response>" style="max-height: 400px;"></code></pre>
+</span>
+<span id="execution-error-POSTapi-auth-restore-account" hidden>
+    <blockquote>Request failed with error:</blockquote>
+    <pre><code id="execution-error-message-POSTapi-auth-restore-account">
+
+Tip: Check that you&#039;re properly connected to the network.
+If you&#039;re a maintainer of ths API, verify that your API is running and you&#039;ve enabled CORS.
+You can check the Dev Tools console for debugging information.</code></pre>
+</span>
+<form id="form-POSTapi-auth-restore-account" data-method="POST"
+      data-path="api/auth/restore-account"
+      data-authed="0"
+      data-hasfiles="0"
+      data-isarraybody="0"
+      autocomplete="off"
+      onsubmit="event.preventDefault(); executeTryOut('POSTapi-auth-restore-account', this);">
+    <h3>
+        Request&nbsp;&nbsp;&nbsp;
+                    <button type="button"
+                    style="background-color: #8fbcd4; padding: 5px 10px; border-radius: 5px; border-width: thin;"
+                    id="btn-tryout-POSTapi-auth-restore-account"
+                    onclick="tryItOut('POSTapi-auth-restore-account');">Try it out ⚡
+            </button>
+            <button type="button"
+                    style="background-color: #c97a7e; padding: 5px 10px; border-radius: 5px; border-width: thin;"
+                    id="btn-canceltryout-POSTapi-auth-restore-account"
+                    onclick="cancelTryOut('POSTapi-auth-restore-account');" hidden>Cancel 🛑
+            </button>&nbsp;&nbsp;
+            <button type="submit"
+                    style="background-color: #6ac174; padding: 5px 10px; border-radius: 5px; border-width: thin;"
+                    id="btn-executetryout-POSTapi-auth-restore-account"
+                    data-initial-text="Send Request 💥"
+                    data-loading-text="⏱ Sending..."
+                    hidden>Send Request 💥
+            </button>
+            </h3>
+            <p>
+            <small class="badge badge-black">POST</small>
+            <b><code>api/auth/restore-account</code></b>
+        </p>
+                <h4 class="fancy-heading-panel"><b>Headers</b></h4>
+                                <div style="padding-left: 28px; clear: unset;">
+                <b style="line-height: 2;"><code>Content-Type</code></b>&nbsp;&nbsp;
+&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="Content-Type"                data-endpoint="POSTapi-auth-restore-account"
+               value="application/json"
+               data-component="header">
+    <br>
+<p>Example: <code>application/json</code></p>
+            </div>
+                                <div style="padding-left: 28px; clear: unset;">
+                <b style="line-height: 2;"><code>Accept</code></b>&nbsp;&nbsp;
+&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="Accept"                data-endpoint="POSTapi-auth-restore-account"
+               value="application/json"
+               data-component="header">
+    <br>
+<p>Example: <code>application/json</code></p>
+            </div>
+                                <h4 class="fancy-heading-panel"><b>Body Parameters</b></h4>
+        <div style=" padding-left: 28px;  clear: unset;">
+            <b style="line-height: 2;"><code>identifier</code></b>&nbsp;&nbsp;
+<small>string</small>&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="identifier"                data-endpoint="POSTapi-auth-restore-account"
+               value="architecto"
+               data-component="body">
+    <br>
+<p>Email ou téléphone. Example: <code>architecto</code></p>
+        </div>
+                <div style=" padding-left: 28px;  clear: unset;">
+            <b style="line-height: 2;"><code>password</code></b>&nbsp;&nbsp;
+<small>string</small>&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="password"                data-endpoint="POSTapi-auth-restore-account"
+               value="|]|{+-"
+               data-component="body">
+    <br>
+<p>Mot de passe. Example: <code>|]|{+-</code></p>
+        </div>
+        </form>
+
+                    <h2 id="settings-profil-DELETEapi-settings-account">Supprimer définitivement le compte</h2>
+
+<p>
+</p>
+
+
+
+<span id="example-requests-DELETEapi-settings-account">
+<blockquote>Example request:</blockquote>
+
+
+<div class="bash-example">
+    <pre><code class="language-bash">curl --request DELETE \
+    "http://localhost:8000/api/settings/account" \
+    --header "Content-Type: application/json" \
+    --header "Accept: application/json" \
+    --data "{
+    \"password\": \"|]|{+-\",
+    \"confirmation\": \"architecto\"
+}"
+</code></pre></div>
+
+
+<div class="javascript-example">
+    <pre><code class="language-javascript">const url = new URL(
+    "http://localhost:8000/api/settings/account"
+);
+
+const headers = {
+    "Content-Type": "application/json",
+    "Accept": "application/json",
+};
+
+let body = {
+    "password": "|]|{+-",
+    "confirmation": "architecto"
+};
+
+fetch(url, {
+    method: "DELETE",
+    headers,
+    body: JSON.stringify(body),
+}).then(response =&gt; response.json());</code></pre></div>
+
+</span>
+
+<span id="example-responses-DELETEapi-settings-account">
+</span>
+<span id="execution-results-DELETEapi-settings-account" hidden>
+    <blockquote>Received response<span
+                id="execution-response-status-DELETEapi-settings-account"></span>:
+    </blockquote>
+    <pre class="json"><code id="execution-response-content-DELETEapi-settings-account"
+      data-empty-response-text="<Empty response>" style="max-height: 400px;"></code></pre>
+</span>
+<span id="execution-error-DELETEapi-settings-account" hidden>
+    <blockquote>Request failed with error:</blockquote>
+    <pre><code id="execution-error-message-DELETEapi-settings-account">
+
+Tip: Check that you&#039;re properly connected to the network.
+If you&#039;re a maintainer of ths API, verify that your API is running and you&#039;ve enabled CORS.
+You can check the Dev Tools console for debugging information.</code></pre>
+</span>
+<form id="form-DELETEapi-settings-account" data-method="DELETE"
+      data-path="api/settings/account"
+      data-authed="0"
+      data-hasfiles="0"
+      data-isarraybody="0"
+      autocomplete="off"
+      onsubmit="event.preventDefault(); executeTryOut('DELETEapi-settings-account', this);">
+    <h3>
+        Request&nbsp;&nbsp;&nbsp;
+                    <button type="button"
+                    style="background-color: #8fbcd4; padding: 5px 10px; border-radius: 5px; border-width: thin;"
+                    id="btn-tryout-DELETEapi-settings-account"
+                    onclick="tryItOut('DELETEapi-settings-account');">Try it out ⚡
+            </button>
+            <button type="button"
+                    style="background-color: #c97a7e; padding: 5px 10px; border-radius: 5px; border-width: thin;"
+                    id="btn-canceltryout-DELETEapi-settings-account"
+                    onclick="cancelTryOut('DELETEapi-settings-account');" hidden>Cancel 🛑
+            </button>&nbsp;&nbsp;
+            <button type="submit"
+                    style="background-color: #6ac174; padding: 5px 10px; border-radius: 5px; border-width: thin;"
+                    id="btn-executetryout-DELETEapi-settings-account"
+                    data-initial-text="Send Request 💥"
+                    data-loading-text="⏱ Sending..."
+                    hidden>Send Request 💥
+            </button>
+            </h3>
+            <p>
+            <small class="badge badge-red">DELETE</small>
+            <b><code>api/settings/account</code></b>
+        </p>
+                <h4 class="fancy-heading-panel"><b>Headers</b></h4>
+                                <div style="padding-left: 28px; clear: unset;">
+                <b style="line-height: 2;"><code>Content-Type</code></b>&nbsp;&nbsp;
+&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="Content-Type"                data-endpoint="DELETEapi-settings-account"
+               value="application/json"
+               data-component="header">
+    <br>
+<p>Example: <code>application/json</code></p>
+            </div>
+                                <div style="padding-left: 28px; clear: unset;">
+                <b style="line-height: 2;"><code>Accept</code></b>&nbsp;&nbsp;
+&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="Accept"                data-endpoint="DELETEapi-settings-account"
+               value="application/json"
+               data-component="header">
+    <br>
+<p>Example: <code>application/json</code></p>
+            </div>
+                                <h4 class="fancy-heading-panel"><b>Body Parameters</b></h4>
+        <div style=" padding-left: 28px;  clear: unset;">
+            <b style="line-height: 2;"><code>password</code></b>&nbsp;&nbsp;
+<small>string</small>&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="password"                data-endpoint="DELETEapi-settings-account"
+               value="|]|{+-"
+               data-component="body">
+    <br>
+<p>Le mot de passe actuel. Example: <code>|]|{+-</code></p>
+        </div>
+                <div style=" padding-left: 28px;  clear: unset;">
+            <b style="line-height: 2;"><code>confirmation</code></b>&nbsp;&nbsp;
+<small>string</small>&nbsp;
+ &nbsp;
+ &nbsp;
+                <input type="text" style="display: none"
+                              name="confirmation"                data-endpoint="DELETEapi-settings-account"
+               value="architecto"
+               data-component="body">
+    <br>
+<p>Doit être exactement "SUPPRIMER". Example: <code>architecto</code></p>
+        </div>
+        </form>
 
             
 

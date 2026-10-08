@@ -44,6 +44,7 @@ class User extends Authenticatable
         'pending_email_code',
         'pending_email_expires_at',
         'pending_email_attempts',
+        'scheduled_for_deletion_at',
     ];
 
     protected $hidden = [
@@ -63,6 +64,7 @@ class User extends Authenticatable
             'onboarding_progress' => 'array',
             'gender' => Gender::class,
             'account_type' => AccountType::class,
+            'scheduled_for_deletion_at' => 'datetime',
         ];
     }
 

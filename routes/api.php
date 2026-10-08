@@ -47,6 +47,9 @@ Route::prefix('auth')->group(function () {
     Route::post('/reset-password/request', [\App\Http\Controllers\Auth\ResetPasswordController::class, 'requestLink']);
     // Définition du nouveau mot de passe après clic sur le lien magique
     Route::post('/reset-password', [\App\Http\Controllers\Auth\ResetPasswordController::class, 'reset']);
+
+    // Restaurer un compte supprimé (soft delete)
+    Route::post('/restore-account', [\App\Http\Controllers\Profile\AccountController::class, 'restore']);
 });
 
 Route::prefix('geo')->group(function () {
@@ -177,18 +180,29 @@ Route::middleware('auth:api')->group(function () {
 
         // --- GESTION DES USERS ---
         Route::prefix('users')->group(function () {
+            // Lister tous les utilisateurs (avec filtres, tris et pagination)
             Route::get('/', [\App\Http\Controllers\Admin\UserController::class, 'index']);
+            // Afficher les détails complets d'un utilisateur spécifique
             Route::get('/{user}', [\App\Http\Controllers\Admin\UserController::class, 'show']);
+            // Mettre à jour les informations de base d'un utilisateur (sauf mot de passe)
             Route::patch('/{user}', [\App\Http\Controllers\Admin\UserController::class, 'update']);
             
+            // Suspendre temporairement le compte d'un utilisateur (déconnexion immédiate)
             Route::post('/{user}/suspend', [\App\Http\Controllers\Admin\UserController::class, 'suspend']);
+            // Lever la suspension d'un compte utilisateur
             Route::post('/{user}/unsuspend', [\App\Http\Controllers\Admin\UserController::class, 'unsuspend']);
+            // Bloquer définitivement un utilisateur (accès interdit)
             Route::post('/{user}/block', [\App\Http\Controllers\Admin\UserController::class, 'block']);
+            // Débloquer un utilisateur précédemment bloqué
             Route::post('/{user}/unblock', [\App\Http\Controllers\Admin\UserController::class, 'unblock']);
+            // Supprimer un utilisateur (Soft delete : passe l'utilisateur en corbeille)
             Route::delete('/{user}', [\App\Http\Controllers\Admin\UserController::class, 'destroy']);
             
+            // Lister toutes les sessions (appareils) actives d'un utilisateur
             Route::get('/{user}/sessions', [\App\Http\Controllers\Admin\UserController::class, 'sessions']);
+            // Révoquer/Déconnecter toutes les sessions actives de l'utilisateur
             Route::delete('/{user}/sessions', [\App\Http\Controllers\Admin\UserController::class, 'revokeAllSessions']);
+            // Révoquer/Déconnecter une session spécifique de l'utilisateur
             Route::delete('/{user}/sessions/{session}', [\App\Http\Controllers\Admin\UserController::class, 'revokeSession']);
         });
 
