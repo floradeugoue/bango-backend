@@ -65,12 +65,13 @@ Ces API sont librement accessibles depuis le Frontend sans authentification.
 
 **Authentification (AUTH)**
 - `POST /api/auth/signup` : Inscription
-- `POST /api/auth/signin` : Connexion (inclut Rate Limiting)
+- `POST /api/auth/signin` : Connexion (inclut Rate Limiting). (Note: Renvoie `403 scheduled_for_deletion` si le compte est en cours de suppression).
 - `POST /api/auth/forgot-password` : Demande d'OTP de réinitialisation (Email/SMS)
 - `POST /api/auth/forgot-password/verify` : Validation de l'OTP
 - `POST /api/auth/forgot-password/reset` : Changer le mot de passe (via OTP)
 - `POST /api/auth/reset-password/request` : Demande de lien email de réinitialisation
 - `POST /api/auth/reset-password` : Changer le mot de passe (via lien Email)
+- `POST /api/auth/restore-account` : **[NOUVEAU]** Restaurer un compte supprimé (Nécessite `identifier` et `password`). Disponible pendant les 30 jours suivant la suppression.
 
 **Référentiel Géographique (GEO) - Lecture seule**
 - `GET /api/geo/countries` (et `/api/geo/countries/{id}`)
@@ -111,7 +112,9 @@ Nécessitent simplement un utilisateur authentifié et connecté avec l'applicat
 - **Email** : `/api/settings/email/request`, `verify`, `resend`, `cancel`
 - **Mot de passe** : `PUT /api/settings/password`
 - **Sessions & Sécurité** : `POST /api/settings/secure`, `GET /api/settings/sessions`, `POST /api/settings/sessions/{id}/acknowledge`
-- **Gestion du compte** : `POST /api/settings/account/pause`, `DELETE /api/settings/account`
+- **Gestion du compte** : 
+  - `POST /api/settings/account/pause` : Suspendre le compte.
+  - `DELETE /api/settings/account` : **[MIS A JOUR]** Supprimer le compte (Soft Delete). Nécessite `password` ET `confirmation: "SUPPRIMER"`. Planifie la suppression définitive dans 30 jours.
 
 ---
 
@@ -176,6 +179,14 @@ Certains endpoints renvoient un format custom JSON plutôt que l'erreur classiqu
   "existingHandle": "taken_user",
   "displayName": "Taken User",
   "avatarUrl": "https://..."
+}
+```
+
+**Exemple pour un compte en attente de suppression (Signin) :**
+```json
+{
+  "kind": "scheduled_for_deletion",
+  "scheduled_for_deletion_at": "2026-11-08T17:00:00Z"
 }
 ```
 

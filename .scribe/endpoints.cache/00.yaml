@@ -871,14 +871,14 @@ endpoints:
         name: birthDate
         description: 'Must be a valid date.'
         required: true
-        example: '2026-10-08T15:15:51'
+        example: '2026-10-08T16:12:12'
         type: string
         enumValues: []
         exampleWasSpecified: false
         nullable: false
         deprecated: false
     cleanBodyParameters:
-      birthDate: '2026-10-08T15:15:51'
+      birthDate: '2026-10-08T16:12:12'
     fileParameters: []
     responses: []
     responseFields: []
@@ -914,7 +914,7 @@ endpoints:
         name: gender
         description: ''
         required: true
-        example: man
+        example: woman
         type: string
         enumValues:
           - woman
@@ -936,7 +936,7 @@ endpoints:
         nullable: false
         deprecated: false
     cleanBodyParameters:
-      gender: man
+      gender: woman
       hidden: false
     fileParameters: []
     responses: []
@@ -1104,7 +1104,7 @@ endpoints:
         name: step
         description: ''
         required: true
-        example: profile
+        example: identity
         type: string
         enumValues:
           - credentials
@@ -1117,7 +1117,7 @@ endpoints:
         nullable: false
         deprecated: false
     cleanBodyParameters:
-      step: profile
+      step: identity
     fileParameters: []
     responses: []
     responseFields: []
@@ -1614,49 +1614,6 @@ endpoints:
     httpMethods:
       - POST
     uri: api/settings/account/pause
-    metadata:
-      custom: []
-      groupName: Endpoints
-      groupDescription: ''
-      subgroup: ''
-      subgroupDescription: ''
-      title: ''
-      description: ''
-      authenticated: false
-      deprecated: false
-    headers:
-      Content-Type: application/json
-      Accept: application/json
-    urlParameters: []
-    cleanUrlParameters: []
-    queryParameters: []
-    cleanQueryParameters: []
-    bodyParameters:
-      password:
-        custom: []
-        name: password
-        description: ''
-        required: true
-        example: '|]|{+-'
-        type: string
-        enumValues: []
-        exampleWasSpecified: false
-        nullable: false
-        deprecated: false
-    cleanBodyParameters:
-      password: '|]|{+-'
-    fileParameters: []
-    responses: []
-    responseFields: []
-    auth: []
-    controller: null
-    method: null
-    route: null
-  -
-    custom: []
-    httpMethods:
-      - DELETE
-    uri: api/settings/account
     metadata:
       custom: []
       groupName: Endpoints

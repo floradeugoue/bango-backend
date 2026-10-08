@@ -25,7 +25,8 @@ class SigninController extends Controller
             ], 429);
         }
 
-        $user = User::where('email', $request->identifier)
+        $user = User::withTrashed()
+                    ->where('email', $request->identifier)
                     ->orWhere('phone', $request->identifier)
                     ->first();
 
@@ -36,6 +37,17 @@ class SigninController extends Controller
                 'kind' => 'invalid-credentials',
                 'attemptsLeft' => RateLimiter::retriesLeft($key, 5)
             ], 401);
+        }
+
+        if ($user->trashed()) {
+            if ($user->scheduled_for_deletion_at && $user->scheduled_for_deletion_at->isFuture()) {
+                return response()->json([
+                    'kind' => 'scheduled_for_deletion',
+                    'scheduled_for_deletion_at' => $user->scheduled_for_deletion_at->toIso8601String()
+                ], 403);
+            }
+            // If the 30 days have passed, we don't let them log in or restore (or they are permanently deleted by a job)
+            return response()->json(['kind' => 'deleted'], 403);
         }
 
         if ($user->status === 'suspended' || $user->status === 'deleted') {
