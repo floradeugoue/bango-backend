@@ -255,7 +255,7 @@ endpoints:
         name: is_active
         description: ''
         required: false
-        example: true
+        example: false
         type: boolean
         enumValues: []
         exampleWasSpecified: false
@@ -264,7 +264,7 @@ endpoints:
     cleanBodyParameters:
       name: b
       description: 'Eius et animi quos velit et.'
-      is_active: true
+      is_active: false
     fileParameters: []
     responses: []
     responseFields: []

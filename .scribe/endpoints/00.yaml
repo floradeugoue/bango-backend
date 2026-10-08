@@ -241,10 +241,10 @@ endpoints:
       -
         custom: []
         status: 200
-        content: ''
+        content: '[]'
         headers:
-          content-type: 'text/html; charset=utf-8'
           cache-control: 'no-cache, private'
+          content-type: application/json
           access-control-allow-origin: '*'
         description: null
     responseFields: []
@@ -292,11 +292,14 @@ endpoints:
     responses:
       -
         custom: []
-        status: 200
-        content: ''
+        status: 500
+        content: |-
+          {
+              "message": "Server Error"
+          }
         headers:
-          content-type: 'text/html; charset=utf-8'
           cache-control: 'no-cache, private'
+          content-type: application/json
           access-control-allow-origin: '*'
         description: null
     responseFields: []
@@ -866,14 +869,14 @@ endpoints:
         name: birthDate
         description: 'Must be a valid date.'
         required: true
-        example: '2026-10-08T14:16:44'
+        example: '2026-10-08T15:15:51'
         type: string
         enumValues: []
         exampleWasSpecified: false
         nullable: false
         deprecated: false
     cleanBodyParameters:
-      birthDate: '2026-10-08T14:16:44'
+      birthDate: '2026-10-08T15:15:51'
     fileParameters: []
     responses: []
     responseFields: []
@@ -909,7 +912,7 @@ endpoints:
         name: gender
         description: ''
         required: true
-        example: woman
+        example: man
         type: string
         enumValues:
           - woman
@@ -924,15 +927,15 @@ endpoints:
         name: hidden
         description: ''
         required: true
-        example: true
+        example: false
         type: boolean
         enumValues: []
         exampleWasSpecified: false
         nullable: false
         deprecated: false
     cleanBodyParameters:
-      gender: woman
-      hidden: true
+      gender: man
+      hidden: false
     fileParameters: []
     responses: []
     responseFields: []
@@ -1099,7 +1102,7 @@ endpoints:
         name: step
         description: ''
         required: true
-        example: identity
+        example: profile
         type: string
         enumValues:
           - credentials
@@ -1112,7 +1115,7 @@ endpoints:
         nullable: false
         deprecated: false
     cleanBodyParameters:
-      step: identity
+      step: profile
     fileParameters: []
     responses: []
     responseFields: []
@@ -1188,7 +1191,7 @@ endpoints:
         name: intent
         description: ''
         required: false
-        example: browsing
+        example: 'no'
         type: string
         enumValues:
           - active
@@ -1264,7 +1267,7 @@ endpoints:
         nullable: true
         deprecated: false
     cleanBodyParameters:
-      intent: browsing
+      intent: 'no'
       currency: architecto
       city: architecto
       place: architecto
@@ -1712,8 +1715,80 @@ endpoints:
     cleanUrlParameters: []
     queryParameters: []
     cleanQueryParameters: []
-    bodyParameters: []
-    cleanBodyParameters: []
+    bodyParameters:
+      name:
+        custom: []
+        name: name
+        description: ''
+        required: true
+        example: architecto
+        type: string
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+      code:
+        custom: []
+        name: code
+        description: ''
+        required: true
+        example: architecto
+        type: string
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+      iso2:
+        custom: []
+        name: iso2
+        description: ''
+        required: true
+        example: architecto
+        type: string
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+      iso3:
+        custom: []
+        name: iso3
+        description: ''
+        required: true
+        example: architecto
+        type: string
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+      currency_id:
+        custom: []
+        name: currency_id
+        description: 'Must match an existing stored value.'
+        required: true
+        example: architecto
+        type: string
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+      is_active:
+        custom: []
+        name: is_active
+        description: ''
+        required: false
+        example: true
+        type: boolean
+        enumValues: []
+        exampleWasSpecified: false
+        nullable: false
+        deprecated: false
+    cleanBodyParameters:
+      name: architecto
+      code: architecto
+      iso2: architecto
+      iso3: architecto
+      currency_id: architecto
+      is_active: true
     fileParameters: []
     responses: []
     responseFields: []

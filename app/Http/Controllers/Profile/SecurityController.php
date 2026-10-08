@@ -39,24 +39,8 @@ class SecurityController extends Controller
         $currentTokenId = $user->currentAccessToken()->id;
         $signedOut = $user->tokens()->where('id', '!=', $currentTokenId)->delete();
 
-        // 2. Enable 2FA if disabled
-        if (!$user->two_factor_method) {
-            $user->two_factor_method = 'sms';
-        }
-
-        // 3. Generate backup codes
-        $codes = [];
-        for ($i = 0; $i < 8; $i++) {
-            $codes[] = strtoupper(Str::random(10));
-        }
-        $user->backup_codes = $codes;
-
-        $user->save();
-
         return response()->json([
             'signedOut' => $signedOut,
-            'twoFactorEnabled' => true,
-            'backupCodes' => $codes,
             'passwordPending' => true
         ]);
     }
