@@ -35,4 +35,10 @@ return [
         ],
     ],
 
+    'zomloa' => [
+        'api_key' => env('ZOMLOA_API_KEY'),
+        'base_url' => env('ZOMLOA_BASE_URL', 'https://api.sms.zomloa.app'),
+        'sender_id' => env('ZOMLOA_SENDER_ID', 'FlowSMS'),
+    ],
+
 ];

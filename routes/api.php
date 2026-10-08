@@ -33,6 +33,13 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('auth')->group(function () {
     Route::post('/signup', \App\Http\Controllers\Auth\SignupController::class);
     Route::post('/signin', \App\Http\Controllers\Auth\SigninController::class);
+    
+    Route::post('/forgot-password', [\App\Http\Controllers\Auth\ForgotPasswordController::class, 'forgotPassword']);
+    Route::post('/forgot-password/verify', [\App\Http\Controllers\Auth\ForgotPasswordController::class, 'verify']);
+    Route::post('/forgot-password/reset', [\App\Http\Controllers\Auth\ForgotPasswordController::class, 'reset']);
+
+    Route::post('/reset-password/request', [\App\Http\Controllers\Auth\ResetPasswordController::class, 'requestLink']);
+    Route::post('/reset-password', [\App\Http\Controllers\Auth\ResetPasswordController::class, 'reset']);
 });
 
 Route::prefix('geo')->group(function () {
@@ -49,6 +56,9 @@ Route::prefix('geo')->group(function () {
 // ==========================================
 Route::middleware('auth:api')->group(function () {
     
+    // --- AUTH (Déconnexion) ---
+    Route::post('/auth/logout', \App\Http\Controllers\Auth\LogoutController::class);
+
     Route::get('/user', function (Request $request) {
         return $request->user();
     });

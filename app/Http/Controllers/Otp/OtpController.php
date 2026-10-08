@@ -9,151 +9,165 @@ use App\Models\Otp;
 use App\Models\User;
 use Carbon\Carbon;
 use App\Enums\OtpFailure;
+use App\Enums\OtpChannel;
 use Illuminate\Support\Facades\RateLimiter;
-use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
+use App\Services\Otp\OtpEmailService;
+use App\Services\Sms\ZomloaSmsService;
+use Exception;
+use Illuminate\Support\Facades\Log;
+use App\Services\Otp\OtpService;
 
+/**
+ * @group Auth
+ *
+ * API de validation par OTP (One-Time Password).
+ */
 class OtpController extends Controller
 {
-    public function requestOtp(Request $request): JsonResponse
+    /**
+     * Request OTP
+     *
+     * Demande l'envoi d'un code OTP par SMS ou Email.
+     *
+     * @bodyParam channel string required Le canal d'envoi. Exemple: sms, email
+     * @bodyParam identifier string required L'identifiant (numéro de téléphone ou email).
+     *
+     * @response 200 {
+     *   "success": true
+     * }
+     * @response 422 {
+     *   "message": "The given data was invalid.",
+     *   "errors": { ... }
+     * }
+     * @response 409 {
+     *   "kind": "number-taken",
+     *   "handle": "pseudo",
+     *   "createdAt": "2026-10-07T19:00:00Z"
+     * }
+     * @response 429 {
+     *   "kind": "locked",
+     *   "minutes": 15,
+     *   "until": "2026-10-07T20:45:00Z"
+     * }
+     */
+    public function requestOtp(Request $request, OtpService $otpService): JsonResponse
     {
-        $request->validate(['phone' => 'required|string']);
+        $this->validateOtpRequest($request);
         
-        $phone = $request->phone;
-        $key = 'otp.request.' . $phone;
+        $channel = OtpChannel::from($request->channel);
+        $identifier = $request->identifier;
 
-        if (RateLimiter::tooManyAttempts($key, 3)) {
-            $seconds = RateLimiter::availableIn($key);
-            return response()->json([
-                'kind' => OtpFailure::Locked->value,
-                'minutes' => ceil($seconds / 60),
-                'until' => now()->addSeconds($seconds)->toIso8601String()
-            ], 429);
-        }
-
-        // Check if phone already taken by another user
-        $existing = User::where('phone', $phone)->first();
+        // Check if identifier already taken by another user
+        $field = $channel === OtpChannel::Sms ? 'phone' : 'email';
+        $existing = User::where($field, $identifier)->first();
         if ($existing && $request->user() && $existing->id !== $request->user()->id) {
             return response()->json([
-                'kind' => OtpFailure::NumberTaken->value,
+                'kind' => OtpFailure::NumberTaken->value, // Or EmailTaken, we reuse NumberTaken for now
                 'handle' => $existing->handle,
                 'createdAt' => $existing->created_at?->toIso8601String()
             ], 409);
         }
 
-        RateLimiter::hit($key, 60); // 1 minute delay between requests
+        $result = $otpService->sendOtp($identifier, $channel, 'default');
 
-        $code = str_pad(rand(0, 999999), 6, '0', STR_PAD_LEFT);
-        
-        Otp::updateOrCreate(
-            ['identifier' => $phone],
-            [
-                'code' => $code,
-                'attempts' => 0,
-                'expires_at' => now()->addMinutes(10),
-                'locked_until' => null
-            ]
-        );
-
-        // Here we would dispatch an SMS job: SendSmsJob::dispatch($phone, $code)
-        // For development, we assume it's sent.
+        if (is_array($result)) {
+            return response()->json($result['data'], $result['status']);
+        }
 
         return response()->json(['success' => true]);
     }
 
-    public function verifyOtp(Request $request): JsonResponse
+    /**
+     * Verify OTP
+     *
+     * Valide un code OTP pour un canal spécifique.
+     *
+     * @bodyParam channel string required Le canal. Exemple: sms, email
+     * @bodyParam identifier string required L'identifiant (numéro de téléphone ou email).
+     * @bodyParam code string required Le code à 6 chiffres. Exemple: 123456
+     *
+     * @response 200 {
+     *   "success": true
+     * }
+     */
+    public function verifyOtp(Request $request, OtpService $otpService): JsonResponse
     {
-        $request->validate([
-            'phone' => 'required|string',
-            'code' => 'required|string|size:6'
-        ]);
+        $this->validateOtpRequest($request, true);
 
-        $phone = $request->phone;
-        $otp = Otp::where('identifier', $phone)->first();
+        $channel = OtpChannel::from($request->channel);
+        $identifier = $request->identifier;
 
-        if (!$otp) {
-            return response()->json([
-                'kind' => OtpFailure::Invalid->value,
-                'attemptsLeft' => 0
-            ], 422);
+        $result = $otpService->verifyOtp($identifier, $request->code, $channel, 'default');
+
+        if (is_array($result)) {
+            return response()->json($result['data'], $result['status']);
         }
-
-        if ($otp->locked_until && $otp->locked_until->isFuture()) {
-            return response()->json([
-                'kind' => OtpFailure::Locked->value,
-                'minutes' => ceil(now()->diffInMinutes($otp->locked_until)),
-                'until' => $otp->locked_until->toIso8601String()
-            ], 429);
-        }
-
-        if ($otp->expires_at->isPast()) {
-            return response()->json([
-                'kind' => OtpFailure::Expired->value
-            ], 422);
-        }
-
-        if ($otp->code !== $request->code) {
-            $otp->increment('attempts');
-            
-            if ($otp->attempts >= 3) {
-                $otp->update(['locked_until' => now()->addMinutes(15)]);
-                return response()->json([
-                    'kind' => OtpFailure::Locked->value,
-                    'minutes' => 15,
-                    'until' => now()->addMinutes(15)->toIso8601String()
-                ], 429);
-            }
-
-            return response()->json([
-                'kind' => OtpFailure::Invalid->value,
-                'attemptsLeft' => 3 - $otp->attempts
-            ], 422);
-        }
-
-        // Verified!
-        $otp->delete();
 
         if ($request->user()) {
-            $request->user()->update(['phone' => $phone]);
+            if ($channel === OtpChannel::Sms) {
+                $request->user()->update([
+                    'phone' => $identifier,
+                    'phone_verified_at' => now()
+                ]);
+            } else if ($channel === OtpChannel::Email) {
+                $request->user()->update([
+                    'email' => $identifier,
+                    'email_verified_at' => now()
+                ]);
+            }
         }
 
         return response()->json(['success' => true]);
     }
 
-    public function resendOtp(Request $request): JsonResponse
+    /**
+     * Resend OTP
+     *
+     * Renvoie un nouveau code OTP.
+     *
+     * @bodyParam channel string required Le canal. Exemple: sms, email
+     * @bodyParam identifier string required L'identifiant (numéro de téléphone ou email).
+     *
+     * @response 200 {
+     *   "success": true,
+     *   "resendAfterSeconds": 60
+     * }
+     */
+    public function resendOtp(Request $request, OtpService $otpService): JsonResponse
     {
-        $request->validate([
-            'phone' => 'required|string',
-            'method' => 'nullable|in:sms,email,call'
-        ]);
+        $this->validateOtpRequest($request);
 
-        // Logic similar to requestOtp but we return a resendAfterSeconds
-        $phone = $request->phone;
-        $key = 'otp.resend.' . $phone;
+        $channel = OtpChannel::from($request->channel);
+        $identifier = $request->identifier;
+        
+        $result = $otpService->sendOtp($identifier, $channel, 'default');
 
-        if (RateLimiter::tooManyAttempts($key, 3)) {
-            $seconds = RateLimiter::availableIn($key);
-            return response()->json([
-                'kind' => OtpFailure::Locked->value,
-                'minutes' => ceil($seconds / 60),
-                'until' => now()->addSeconds($seconds)->toIso8601String()
-            ], 429);
+        if (is_array($result)) {
+            return response()->json($result['data'], $result['status']);
         }
 
-        RateLimiter::hit($key, 60);
-
-        $code = str_pad(rand(0, 999999), 6, '0', STR_PAD_LEFT);
-        Otp::updateOrCreate(
-            ['identifier' => $phone],
-            [
-                'code' => $code,
-                'attempts' => 0,
-                'expires_at' => now()->addMinutes(10),
-                'locked_until' => null
-            ]
-        );
-
         return response()->json([
+            'success' => true,
             'resendAfterSeconds' => 60
         ]);
+    }
+
+    private function validateOtpRequest(Request $request, bool $withCode = false): void
+    {
+        $rules = [
+            'channel' => ['required', Rule::enum(OtpChannel::class)],
+            'identifier' => ['required', 'string']
+        ];
+
+        if ($request->channel === OtpChannel::Email->value) {
+            $rules['identifier'][] = 'email';
+        }
+
+        if ($withCode) {
+            $rules['code'] = ['required', 'string', 'size:6'];
+        }
+
+        $request->validate($rules);
     }
 }

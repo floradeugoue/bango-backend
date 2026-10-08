@@ -11,6 +11,7 @@ return new class extends Migration
         Schema::create('otps', function (Blueprint $table) {
             $table->id();
             $table->string('identifier')->index();
+            $table->string('channel')->default('sms');
             $table->string('code');
             $table->integer('attempts')->default(0);
             $table->timestamp('expires_at');
