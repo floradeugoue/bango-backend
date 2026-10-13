@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\SignupRequest;
+use App\Models\Role;
 use App\Models\User;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 
 class SignupController extends Controller
 {
@@ -15,37 +17,60 @@ class SignupController extends Controller
         // Custom password validation since FormRequest handles the error format
         $pwd = $request->password;
         $failedRules = [];
-        if (strlen($pwd) < 8) $failedRules[] = 'min-length';
-        if (!preg_match('/\d/', $pwd)) $failedRules[] = 'needs-digit';
-        if (preg_match('/1234|abcd|qwerty|qwertz|azerty/i', $pwd)) $failedRules[] = 'no-sequence';
-        
-        if (!empty($failedRules)) {
+        if (strlen($pwd) < 8) {
+            $failedRules[] = 'min-length';
+        }
+        if (! preg_match('/\d/', $pwd)) {
+            $failedRules[] = 'needs-digit';
+        }
+        if (preg_match('/1234|abcd|qwerty|qwertz|azerty/i', $pwd)) {
+            $failedRules[] = 'no-sequence';
+        }
+
+        if (! empty($failedRules)) {
             return response()->json([
                 'kind' => 'weak-password',
-                'failed' => $failedRules
+                'failed' => $failedRules,
             ], 422);
         }
 
-        $user = clone new User();
+        $user = new User;
         $user->name = $request->name ?? explode('@', $request->email)[0];
         $user->email = $request->email;
         $user->password = Hash::make($request->password);
-        
-        $userRole = \App\Models\Role::where('slug', 'user')->first();
-        if ($userRole) {
-            $user->role_id = $userRole->id;
+
+        $userRole = Role::firstOrCreate(
+            ['slug' => 'user'],
+            ['name' => 'Utilisateur', 'description' => 'Utilisateur standard']
+        );
+        $user->role_id = $userRole->id;
+
+        $localPart = explode('@', $request->email)[0];
+        $baseHandle = strtolower(preg_replace('/[^a-z0-9.]/', '', Str::slug($localPart, '.')));
+        if (strlen($baseHandle) < 3) {
+            $baseHandle = 'user'.random_int(100, 999);
         }
+        $candidate = substr($baseHandle, 0, 16);
+        $counter = 1;
+        while (User::where('handle', $candidate)->exists()) {
+            $candidate = substr($baseHandle, 0, 14).$counter;
+            $counter++;
+        }
+        $user->handle = $candidate;
+        $user->display_name = $user->name;
 
         $user->save();
 
-        $token = $user->createToken('auth_token')->accessToken;
+        $token = $user->createToken('Application mobile')->accessToken;
 
         return response()->json([
             'token' => $token,
             'user' => [
                 'id' => $user->id,
                 'email' => $user->email,
-            ]
+                'handle' => $user->handle,
+                'displayName' => $user->display_name,
+            ],
         ], 201);
     }
 }
