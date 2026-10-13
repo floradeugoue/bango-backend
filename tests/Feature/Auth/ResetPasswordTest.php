@@ -1,6 +1,6 @@
 <?php
 
-use App\Models\ResetPasswordToken;
+use App\Models\Auth\ResetPasswordToken;
 use App\Models\User;
 use App\Services\Auth\ResetPasswordService;
 use Illuminate\Foundation\Testing\RefreshDatabase;

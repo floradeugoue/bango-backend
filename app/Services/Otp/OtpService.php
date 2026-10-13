@@ -4,7 +4,7 @@ namespace App\Services\Otp;
 
 use App\Enums\OtpChannel;
 use App\Enums\OtpFailure;
-use App\Models\Otp;
+use App\Models\Auth\Otp;
 use App\Services\Sms\ZomloaSmsService;
 use Exception;
 use Illuminate\Support\Facades\Hash;

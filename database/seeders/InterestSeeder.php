@@ -2,7 +2,7 @@
 
 namespace Database\Seeders;
 
-use App\Models\Interest;
+use App\Models\Profile\Interest;
 use Illuminate\Database\Seeder;
 
 class InterestSeeder extends Seeder

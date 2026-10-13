@@ -5,7 +5,7 @@ namespace App\Http\Controllers\Otp;
 use App\Enums\OtpChannel;
 use App\Enums\OtpFailure;
 use App\Http\Controllers\Controller;
-use App\Models\Otp;
+use App\Models\Auth\Otp;
 use App\Models\User;
 use App\Services\Otp\OtpService;
 use Illuminate\Http\JsonResponse;

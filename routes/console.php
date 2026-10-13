@@ -3,8 +3,8 @@
 use App\Http\Controllers\Auth\ForgotPasswordController;
 use App\Http\Controllers\Auth\ResetPasswordController;
 use App\Http\Controllers\Otp\OtpController;
-use App\Models\Otp;
-use App\Models\ResetPasswordToken;
+use App\Models\Auth\Otp;
+use App\Models\Auth\ResetPasswordToken;
 use App\Models\User;
 use App\Services\Auth\ResetPasswordService;
 use App\Services\Otp\OtpService;

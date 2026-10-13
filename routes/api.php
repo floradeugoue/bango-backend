@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Controllers\Admin\RoleController;
+use App\Http\Controllers\Admin\SubscriptionCatalogController;
+use App\Http\Controllers\Admin\SubscriptionManagementController;
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Auth\AccountStateController;
 use App\Http\Controllers\Auth\ForgotPasswordController;
@@ -29,8 +31,10 @@ use App\Http\Controllers\Profile\PrivacyController;
 use App\Http\Controllers\Profile\ProfileController;
 use App\Http\Controllers\Profile\QrController;
 use App\Http\Controllers\Profile\SecurityController;
+use App\Http\Controllers\Subscription\CatalogController;
+use App\Http\Controllers\Subscription\SubscriptionController;
 use App\Http\Resources\UserResource;
-use App\Models\Interest;
+use App\Models\Profile\Interest;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -95,13 +99,24 @@ Route::prefix('auth')->group(function () {
 });
 
 // Centres d'intérêt (public)
+// Lister tous les centres d'intérêt disponibles
 Route::get('/interests', function () {
     return response()->json(Interest::all());
 });
 
 // Résolution de QR Code & Profils publics (public, PR-16 / PR-17)
+// Résoudre un lien ou QR Code de profil (redirection ou données de contact)
 Route::match(['get', 'post'], '/qr/resolve', [QrController::class, 'resolve']);
+// Consulter un profil public par son identifiant ou son handle
 Route::get('/profiles/{identifier}', [ProfileController::class, 'showPublic']);
+
+// Catalogue des offres & abonnements (public)
+Route::prefix('catalog')->group(function () {
+    // Lister les offres et badges disponibles au catalogue public
+    Route::get('/', [CatalogController::class, 'index']);
+    // Afficher les détails d'une offre spécifique par son code produit
+    Route::get('/{code}', [CatalogController::class, 'show']);
+});
 
 // --------------------------------------------------------------------------
 // GEO (public, lecture seule)
@@ -147,6 +162,7 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/', [ProfileController::class, 'show']);
         // Consulter un profil public (par ID ou handle, PR-07 / PR-08 / PR-09)
         Route::get('/public/{identifier}', [ProfileController::class, 'showPublic']);
+        // Alias : consulter un profil utilisateur public par ID ou handle
         Route::get('/user/{identifier}', [ProfileController::class, 'showPublic']);
 
         // Vérifier la disponibilité d'un identifiant (handle/pseudo)
@@ -171,26 +187,43 @@ Route::middleware('auth:api')->group(function () {
         Route::put('/privacy', [PrivacyController::class, 'update']);
 
         // Abonnés & Abonnements (PR-11, PR-12)
+        // Obtenir la liste des abonnés du compte connecté
         Route::get('/followers', [FollowController::class, 'followers']);
+        // Obtenir la liste des abonnements (comptes suivis) du compte connecté
         Route::get('/following', [FollowController::class, 'following']);
+        // Obtenir la liste des abonnés d'un utilisateur cible
         Route::get('/{id}/followers', [FollowController::class, 'followers']);
+        // Obtenir la liste des abonnements d'un utilisateur cible
         Route::get('/{id}/following', [FollowController::class, 'following']);
+        // Suivre un utilisateur ou soumettre une demande d'abonnement
         Route::post('/{id}/follow', [FollowController::class, 'follow']);
+        // Ne plus suivre un utilisateur (verbe DELETE)
         Route::delete('/{id}/follow', [FollowController::class, 'unfollow']);
+        // Ne plus suivre un utilisateur (verbe POST)
         Route::post('/{id}/unfollow', [FollowController::class, 'unfollow']);
+        // Basculer l'état de suivi (suivre / ne plus suivre)
         Route::post('/{id}/toggle-follow', [FollowController::class, 'toggle']);
 
         // Demandes d'abonnement pour comptes privés (PR-08)
+        // Liste des demandes d'abonnement reçues en attente
         Route::get('/follow-requests', [FollowRequestController::class, 'index']);
+        // Liste des demandes d'abonnement envoyées par l'utilisateur
         Route::get('/follow-requests/sent', [FollowRequestController::class, 'sent']);
+        // Accepter toutes les demandes d'abonnement reçues en attente
         Route::post('/follow-requests/accept-all', [FollowRequestController::class, 'acceptAll']);
+        // Accepter une demande d'abonnement spécifique
         Route::post('/follow-requests/{id}/accept', [FollowRequestController::class, 'accept']);
+        // Refuser une demande d'abonnement spécifique
         Route::post('/follow-requests/{id}/reject', [FollowRequestController::class, 'reject']);
 
         // Comptes bloqués (PR-09)
+        // Liste des utilisateurs bloqués par l'utilisateur connecté
         Route::get('/blocked', [BlockController::class, 'index']);
+        // Bloquer un utilisateur
         Route::post('/{id}/block', [BlockController::class, 'block']);
+        // Débloquer un utilisateur (verbe DELETE)
         Route::delete('/{id}/block', [BlockController::class, 'unblock']);
+        // Débloquer un utilisateur (verbe POST)
         Route::post('/{id}/unblock', [BlockController::class, 'unblock']);
     });
 
@@ -255,6 +288,33 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/account/pause', [AccountController::class, 'pause']);
         // Supprimer définitivement le compte
         Route::delete('/account', [AccountController::class, 'delete']);
+    });
+
+    // --------------------------------------------------------------------------
+    // SUB & BADGES (Abonnements, Offres & Badges)
+    // --------------------------------------------------------------------------
+    Route::prefix('subscriptions')->group(function () {
+        // Lister l'historique des abonnements de l'utilisateur connecté
+        Route::get('/', [SubscriptionController::class, 'index']);
+        // Consulter le catalogue des offres et plans d'abonnement disponibles
+        Route::get('/plans', [CatalogController::class, 'index']);
+        // Obtenir le statut courant des abonnements et badges actifs de l'utilisateur
+        Route::get('/status', [SubscriptionController::class, 'status']);
+        // Souscrire à une nouvelle formule d'abonnement
+        Route::post('/subscribe', [SubscriptionController::class, 'subscribe']);
+        // Afficher les détails d'un abonnement spécifique
+        Route::get('/{id}', [SubscriptionController::class, 'show']);
+        // Changer de plan d'abonnement (migration de formule)
+        Route::post('/{id}/change-plan', [SubscriptionController::class, 'changePlan']);
+        // Résilier le renouvellement automatique d'un abonnement
+        Route::post('/{id}/cancel', [SubscriptionController::class, 'cancel']);
+    });
+
+    Route::prefix('badges')->group(function () {
+        // Obtenir la liste et le statut des badges actifs de l'utilisateur
+        Route::get('/status', [SubscriptionController::class, 'status']);
+        // Consulter l'historique d'attribution, expiration et révocation des badges
+        Route::get('/history', [SubscriptionController::class, 'history']);
     });
 });
 
@@ -323,4 +383,43 @@ Route::middleware(['auth:api', 'admin'])->group(function () {
         // Créer, modifier ou supprimer un Opérateur
         Route::apiResource('operators', OperatorController::class)->except(['index', 'show']);
     });
+
+    // --------------------------------------------------------------------------
+    // SUB CATALOG (Administration des offres & tarifs)
+    // --------------------------------------------------------------------------
+    Route::prefix('admin/catalog')->group(function () {
+        // Lister tous les produits d'abonnement du catalogue (actifs et archivés)
+        Route::get('/products', [SubscriptionCatalogController::class, 'index']);
+        // Créer un nouveau produit d'abonnement
+        Route::post('/products', [SubscriptionCatalogController::class, 'store']);
+        // Afficher les détails d'un produit avec ses tarifs associés
+        Route::get('/products/{id}', [SubscriptionCatalogController::class, 'show']);
+        // Mettre à jour les informations d'un produit d'abonnement
+        Route::put('/products/{id}', [SubscriptionCatalogController::class, 'update']);
+        // Ajouter une nouvelle grille tarifaire (prix / période) à un produit
+        Route::post('/products/{id}/prices', [SubscriptionCatalogController::class, 'addPrice']);
+        // Modifier un tarif existant (ajustement de prix, activation/désactivation)
+        Route::put('/prices/{priceId}', [SubscriptionCatalogController::class, 'updatePrice']);
+    });
+
+    // --------------------------------------------------------------------------
+    // SUBSCRIPTIONS & BADGES (Supervision & Support)
+    // --------------------------------------------------------------------------
+    Route::prefix('admin/subscriptions')->group(function () {
+        // Lister et filtrer tous les abonnements de la plateforme
+        Route::get('/', [SubscriptionManagementController::class, 'index']);
+        // Afficher les détails complets d'un abonnement et son journal d'événements
+        Route::get('/{id}', [SubscriptionManagementController::class, 'show']);
+        // Suspendre administrativement un abonnement
+        Route::post('/{id}/suspend', [SubscriptionManagementController::class, 'suspend']);
+        // Réactiver un abonnement précédemment suspendu
+        Route::post('/{id}/reactivate', [SubscriptionManagementController::class, 'reactivate']);
+        // Prolonger la durée de validité d'un abonnement
+        Route::post('/{id}/extend', [SubscriptionManagementController::class, 'extend']);
+        // Révoquer définitivement un abonnement et supprimer le badge associé
+        Route::post('/{id}/revoke', [SubscriptionManagementController::class, 'revoke']);
+    });
+
+    // Journal d'audit global des attributions et modifications de badges
+    Route::get('admin/badges/history', [SubscriptionManagementController::class, 'badgeHistories']);
 });

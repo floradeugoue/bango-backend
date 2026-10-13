@@ -1,7 +1,7 @@
 <?php
 
+use App\Models\Auth\Role;
 use App\Models\Geo\Currency;
-use App\Models\Role;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;

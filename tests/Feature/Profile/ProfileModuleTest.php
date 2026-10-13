@@ -1,6 +1,6 @@
 <?php
 
-use App\Models\FollowRequest;
+use App\Models\Profile\FollowRequest;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;

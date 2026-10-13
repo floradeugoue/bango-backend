@@ -4,9 +4,15 @@ namespace App\Models;
 
 use App\Enums\AccountType;
 use App\Enums\Gender;
+use App\Models\Auth\Role;
 use App\Models\Geo\City;
 use App\Models\Geo\Country;
 use App\Models\Geo\Neighbourhood;
+use App\Models\Housing\HousingSearch;
+use App\Models\Profile\FollowRequest;
+use App\Models\Profile\Interest;
+use App\Models\Subscription\BadgeHistory;
+use App\Models\Subscription\Subscription;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -248,5 +254,46 @@ class User extends Authenticatable
         }
 
         return $this->isFollowing($target);
+    }
+
+    /**
+     * All subscriptions of this user.
+     */
+    public function subscriptions(): HasMany
+    {
+        return $this->hasMany(Subscription::class)->orderByDesc('created_at');
+    }
+
+    /**
+     * Active or usable subscriptions (including grace period).
+     */
+    public function activeSubscriptions(): HasMany
+    {
+        return $this->hasMany(Subscription::class)
+            ->where(function ($query) {
+                $query->where(function ($q) {
+                    $q->where('state', 'active')
+                        ->where('current_period_end', '>', now());
+                })->orWhere(function ($q) {
+                    $q->where('state', 'grace')
+                        ->where('grace_until', '>', now());
+                });
+            });
+    }
+
+    /**
+     * Badge history entries for this user.
+     */
+    public function badgeHistories(): HasMany
+    {
+        return $this->hasMany(BadgeHistory::class)->orderByDesc('created_at');
+    }
+
+    /**
+     * Check if user has an active or usable subscription for a badge.
+     */
+    public function hasActiveSubscription(string $badge): bool
+    {
+        return $this->activeSubscriptions()->where('badge_type', $badge)->exists();
     }
 }
