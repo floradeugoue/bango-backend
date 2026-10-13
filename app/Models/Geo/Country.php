@@ -2,14 +2,15 @@
 
 namespace App\Models\Geo;
 
+use Database\Factories\Geo\CountryFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class Country extends Model
 {
-    /** @use HasFactory<\Database\Factories\Geo\CountryFactory> */
+    /** @use HasFactory<CountryFactory> */
     use HasFactory;
-    
+
     protected $guarded = [];
 
     public function currency()

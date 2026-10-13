@@ -3,12 +3,12 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
-use Illuminate\Http\JsonResponse;
-use App\Models\User;
 use App\Models\ResetPasswordToken;
-use Illuminate\Support\Facades\Hash;
+use App\Models\User;
 use App\Services\Auth\ResetPasswordService;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
 
 /**
  * @group Auth
@@ -33,7 +33,7 @@ class ResetPasswordController extends Controller
     public function requestLink(Request $request, ResetPasswordService $service): JsonResponse
     {
         $request->validate([
-            'email' => ['required', 'email']
+            'email' => ['required', 'email'],
         ]);
 
         $user = User::where('email', $request->email)->first();
@@ -49,7 +49,7 @@ class ResetPasswordController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'If your account exists, a reset link has been sent to your email.'
+            'message' => 'If your account exists, a reset link has been sent to your email.',
         ]);
     }
 
@@ -74,17 +74,17 @@ class ResetPasswordController extends Controller
     {
         $request->validate([
             'token' => ['required', 'string'],
-            'password' => ['required', 'string', 'min:8', 'confirmed']
+            'password' => ['required', 'string', 'min:8', 'confirmed'],
         ]);
 
         $tokenRecord = ResetPasswordToken::where('token', $request->token)->first();
 
         // Check if token exists, hasn't been used, and isn't expired
-        if (!$tokenRecord || 
-            $tokenRecord->used_at !== null || 
+        if (! $tokenRecord ||
+            $tokenRecord->used_at !== null ||
             $tokenRecord->expires_at->isPast()) {
             return response()->json([
-                'message' => 'Invalid or expired token.'
+                'message' => 'Invalid or expired token.',
             ], 422);
         }
 
@@ -92,12 +92,12 @@ class ResetPasswordController extends Controller
 
         // Reset password
         $user->update([
-            'password' => Hash::make($request->password)
+            'password' => Hash::make($request->password),
         ]);
 
         // Invalidate token
         $tokenRecord->update([
-            'used_at' => now()
+            'used_at' => now(),
         ]);
 
         // Revoke all existing sessions/tokens
@@ -105,7 +105,7 @@ class ResetPasswordController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Password reset successfully.'
+            'message' => 'Password reset successfully.',
         ]);
     }
 }

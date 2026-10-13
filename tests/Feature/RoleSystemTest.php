@@ -3,6 +3,7 @@
 use App\Models\Role;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 
 uses(RefreshDatabase::class);
 
@@ -23,7 +24,7 @@ it('is idempotent and does not create duplicates', function () {
 
 it('assigns the user role by default to a new user during signup', function () {
     $this->artisan('db:seed', ['--class' => 'RoleSeeder']);
-    \Illuminate\Support\Facades\Artisan::call('passport:client', ['--personal' => true, '--name' => 'Test']);
+    Artisan::call('passport:client', ['--personal' => true, '--name' => 'Test']);
 
     $response = $this->postJson('/api/auth/signup', [
         'name' => 'Test User',
@@ -32,7 +33,7 @@ it('assigns the user role by default to a new user during signup', function () {
     ]);
 
     $response->assertStatus(201);
-    
+
     $user = User::where('email', 'testrole@example.com')->first();
     expect($user->role->slug)->toBe('user');
     expect($user->hasRole('user'))->toBeTrue();
@@ -41,7 +42,7 @@ it('assigns the user role by default to a new user during signup', function () {
 
 it('validates role relationships', function () {
     $this->artisan('db:seed', ['--class' => 'RoleSeeder']);
-    
+
     $role = Role::where('slug', 'user')->first();
     $user = User::factory()->create(['role_id' => $role->id]);
 

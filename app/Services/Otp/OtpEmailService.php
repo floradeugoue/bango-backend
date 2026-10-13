@@ -2,18 +2,18 @@
 
 namespace App\Services\Otp;
 
-use Resend\Laravel\Facades\Resend;
-use Illuminate\Support\Facades\Log;
 use Exception;
+use Illuminate\Support\Facades\Log;
+use Resend\Laravel\Facades\Resend;
 
 class OtpEmailService
 {
     /**
      * Envoie le code OTP par email via Resend.
      *
-     * @param string $email L'adresse email de destination.
-     * @param string $code Le code OTP à envoyer.
-     * @return void
+     * @param  string  $email  L'adresse email de destination.
+     * @param  string  $code  Le code OTP à envoyer.
+     *
      * @throws Exception
      */
     public function send(string $email, string $code): void

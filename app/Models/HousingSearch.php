@@ -3,6 +3,9 @@
 namespace App\Models;
 
 use App\Enums\HousingIntent;
+use App\Models\Geo\City;
+use App\Models\Geo\Currency;
+use App\Models\Geo\Neighbourhood;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -36,16 +39,16 @@ class HousingSearch extends Model
 
     public function currency()
     {
-        return $this->belongsTo(\App\Models\Geo\Currency::class);
+        return $this->belongsTo(Currency::class);
     }
 
     public function city()
     {
-        return $this->belongsTo(\App\Models\Geo\City::class);
+        return $this->belongsTo(City::class);
     }
 
     public function neighbourhoods()
     {
-        return $this->belongsToMany(\App\Models\Geo\Neighbourhood::class, 'housing_search_neighbourhood');
+        return $this->belongsToMany(Neighbourhood::class, 'housing_search_neighbourhood');
     }
 }

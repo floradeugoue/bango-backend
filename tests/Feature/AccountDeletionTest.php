@@ -1,18 +1,19 @@
 <?php
 
 use App\Models\User;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Hash;
 
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
-    \Illuminate\Support\Facades\Artisan::call('passport:client', ['--personal' => true, '--name' => 'Test Client']);
+    Artisan::call('passport:client', ['--personal' => true, '--name' => 'Test Client']);
 });
 
 it('can soft delete an account with correct password and confirmation', function () {
     $user = User::factory()->create([
-        'password' => Hash::make('password123')
+        'password' => Hash::make('password123'),
     ]);
 
     $response = $this->actingAs($user, 'api')
@@ -22,10 +23,10 @@ it('can soft delete an account with correct password and confirmation', function
         ]);
 
     $response->assertStatus(200)
-             ->assertJson(['success' => true]);
+        ->assertJson(['success' => true]);
 
     $this->assertSoftDeleted('users', ['id' => $user->id]);
-    
+
     $user->refresh();
     expect($user->scheduled_for_deletion_at)->not->toBeNull();
     expect($user->scheduled_for_deletion_at->isFuture())->toBeTrue();
@@ -33,7 +34,7 @@ it('can soft delete an account with correct password and confirmation', function
 
 it('prevents account deletion with wrong password', function () {
     $user = User::factory()->create([
-        'password' => Hash::make('password123')
+        'password' => Hash::make('password123'),
     ]);
 
     $response = $this->actingAs($user, 'api')
@@ -43,14 +44,14 @@ it('prevents account deletion with wrong password', function () {
         ]);
 
     $response->assertStatus(403)
-             ->assertJson(['kind' => 'bad-password']);
+        ->assertJson(['kind' => 'bad-password']);
 
     $this->assertDatabaseHas('users', ['id' => $user->id, 'deleted_at' => null]);
 });
 
 it('prevents account deletion with wrong confirmation word', function () {
     $user = User::factory()->create([
-        'password' => Hash::make('password123')
+        'password' => Hash::make('password123'),
     ]);
 
     $response = $this->actingAs($user, 'api')
@@ -60,7 +61,7 @@ it('prevents account deletion with wrong confirmation word', function () {
         ]);
 
     $response->assertStatus(400)
-             ->assertJson(['kind' => 'bad-confirmation']);
+        ->assertJson(['kind' => 'bad-confirmation']);
 
     $this->assertDatabaseHas('users', ['id' => $user->id, 'deleted_at' => null]);
 });
@@ -82,7 +83,7 @@ it('can restore a soft deleted account', function () {
     ]);
 
     $response->assertStatus(200)
-             ->assertJson(['success' => true]);
+        ->assertJson(['success' => true]);
 
     $this->assertDatabaseHas('users', [
         'id' => $user->id,
@@ -108,5 +109,5 @@ it('prevents sign in for soft deleted accounts', function () {
     ]);
 
     $response->assertStatus(403)
-             ->assertJson(['kind' => 'scheduled_for_deletion']);
+        ->assertJson(['kind' => 'scheduled_for_deletion']);
 });

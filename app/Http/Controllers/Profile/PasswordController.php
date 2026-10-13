@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Http\Controllers\Profile;
 
 use App\Http\Controllers\Controller;
@@ -17,14 +18,14 @@ class PasswordController extends Controller
 
         $user = $request->user();
 
-        if (!Hash::check($request->current_password, $user->password)) {
+        if (! Hash::check($request->current_password, $user->password)) {
             return response()->json([
-                'kind' => 'bad-password'
+                'kind' => 'bad-password',
             ], 403);
         }
 
         $user->update([
-            'password' => Hash::make($request->password)
+            'password' => Hash::make($request->password),
         ]);
 
         // Revoke other tokens ? (Optional for now)

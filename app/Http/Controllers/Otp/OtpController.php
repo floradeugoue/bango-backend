@@ -2,21 +2,15 @@
 
 namespace App\Http\Controllers\Otp;
 
+use App\Enums\OtpChannel;
+use App\Enums\OtpFailure;
 use App\Http\Controllers\Controller;
-use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 use App\Models\Otp;
 use App\Models\User;
-use Carbon\Carbon;
-use App\Enums\OtpFailure;
-use App\Enums\OtpChannel;
-use Illuminate\Support\Facades\RateLimiter;
-use Illuminate\Validation\Rule;
-use App\Services\Otp\OtpEmailService;
-use App\Services\Sms\ZomloaSmsService;
-use Exception;
-use Illuminate\Support\Facades\Log;
 use App\Services\Otp\OtpService;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 /**
  * @group Auth
@@ -54,7 +48,7 @@ class OtpController extends Controller
     public function requestOtp(Request $request, OtpService $otpService): JsonResponse
     {
         $this->validateOtpRequest($request);
-        
+
         $channel = OtpChannel::from($request->channel);
         $identifier = $request->identifier;
 
@@ -65,7 +59,7 @@ class OtpController extends Controller
             return response()->json([
                 'kind' => OtpFailure::NumberTaken->value, // Or EmailTaken, we reuse NumberTaken for now
                 'handle' => $existing->handle,
-                'createdAt' => $existing->created_at?->toIso8601String()
+                'createdAt' => $existing->created_at?->toIso8601String(),
             ], 409);
         }
 
@@ -108,12 +102,12 @@ class OtpController extends Controller
             if ($channel === OtpChannel::Sms) {
                 $request->user()->update([
                     'phone' => $identifier,
-                    'phone_verified_at' => now()
+                    'phone_verified_at' => now(),
                 ]);
-            } else if ($channel === OtpChannel::Email) {
+            } elseif ($channel === OtpChannel::Email) {
                 $request->user()->update([
                     'email' => $identifier,
-                    'email_verified_at' => now()
+                    'email_verified_at' => now(),
                 ]);
             }
         }
@@ -140,7 +134,7 @@ class OtpController extends Controller
 
         $channel = OtpChannel::from($request->channel);
         $identifier = $request->identifier;
-        
+
         $result = $otpService->sendOtp($identifier, $channel, 'default');
 
         if (is_array($result)) {
@@ -149,7 +143,7 @@ class OtpController extends Controller
 
         return response()->json([
             'success' => true,
-            'resendAfterSeconds' => 60
+            'resendAfterSeconds' => 60,
         ]);
     }
 
@@ -157,7 +151,7 @@ class OtpController extends Controller
     {
         $rules = [
             'channel' => ['required', Rule::enum(OtpChannel::class)],
-            'identifier' => ['required', 'string']
+            'identifier' => ['required', 'string'],
         ];
 
         if ($request->channel === OtpChannel::Email->value) {

@@ -2,12 +2,12 @@
 
 namespace App\Services\Auth;
 
-use Resend\Laravel\Facades\Resend;
-use Illuminate\Support\Facades\Log;
-use App\Models\User;
 use App\Models\ResetPasswordToken;
-use Illuminate\Support\Str;
+use App\Models\User;
 use Exception;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
+use Resend\Laravel\Facades\Resend;
 
 class ResetPasswordService
 {
@@ -31,7 +31,7 @@ class ResetPasswordService
         // e.g. bango://reset-password?token=XYZ
         // If there's an app url in config, use it. Otherwise use generic structure.
         $appUrl = config('app.url');
-        $resetLink = rtrim($appUrl, '/') . "/reset-password?token={$token}";
+        $resetLink = rtrim($appUrl, '/')."/reset-password?token={$token}";
 
         // 4. Send email via Resend
         try {

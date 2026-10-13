@@ -2,15 +2,15 @@
 
 namespace App\Http\Controllers\Auth;
 
+use App\Enums\OtpChannel;
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
-use Illuminate\Http\JsonResponse;
 use App\Models\User;
 use App\Services\Otp\OtpService;
-use App\Enums\OtpChannel;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 /**
@@ -45,10 +45,10 @@ class ForgotPasswordController extends Controller
         $user = User::where($field, $identifier)->first();
 
         // Security: Avoid account enumeration. Always return success even if user doesn't exist.
-        if (!$user) {
+        if (! $user) {
             return response()->json([
                 'success' => true,
-                'message' => 'If your account exists, an OTP has been sent.'
+                'message' => 'If your account exists, an OTP has been sent.',
             ]);
         }
 
@@ -60,6 +60,7 @@ class ForgotPasswordController extends Controller
             if ($result['status'] === 429) {
                 return response()->json($result['data'], $result['status']);
             }
+
             // For 503, just fail silently to not leak existence, or we can return 503.
             // Returning 503 is okay as it just says service is down.
             return response()->json($result['data'], $result['status']);
@@ -67,7 +68,7 @@ class ForgotPasswordController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'If your account exists, an OTP has been sent.'
+            'message' => 'If your account exists, an OTP has been sent.',
         ]);
     }
 
@@ -99,7 +100,7 @@ class ForgotPasswordController extends Controller
         }
 
         $token = Str::random(64);
-        
+
         DB::table('password_reset_tokens')->updateOrInsert(
             ['email' => $identifier],
             ['token' => Hash::make($token), 'created_at' => now()]
@@ -107,7 +108,7 @@ class ForgotPasswordController extends Controller
 
         return response()->json([
             'success' => true,
-            'reset_token' => $token
+            'reset_token' => $token,
         ]);
     }
 
@@ -133,39 +134,40 @@ class ForgotPasswordController extends Controller
             'channel' => ['required', Rule::enum(OtpChannel::class)],
             'identifier' => ['required', 'string'],
             'token' => ['required', 'string'],
-            'password' => ['required', 'string', 'min:8', 'confirmed']
+            'password' => ['required', 'string', 'min:8', 'confirmed'],
         ]);
 
         $channel = OtpChannel::from($request->channel);
         $identifier = $request->identifier;
-        
+
         $field = $channel === OtpChannel::Sms ? 'phone' : 'email';
         $user = User::where($field, $identifier)->first();
 
-        if (!$user) {
+        if (! $user) {
             return response()->json([
-                'message' => 'Invalid token or identifier.'
+                'message' => 'Invalid token or identifier.',
             ], 422);
         }
 
         $record = DB::table('password_reset_tokens')->where('email', $identifier)->first();
 
-        if (!$record || !Hash::check($request->token, $record->token)) {
+        if (! $record || ! Hash::check($request->token, $record->token)) {
             return response()->json([
-                'message' => 'Invalid or expired reset token.'
+                'message' => 'Invalid or expired reset token.',
             ], 422);
         }
 
         // Expire token after 60 minutes
         if (now()->diffInMinutes($record->created_at) > 60) {
             DB::table('password_reset_tokens')->where('email', $identifier)->delete();
+
             return response()->json([
-                'message' => 'Token has expired.'
+                'message' => 'Token has expired.',
             ], 422);
         }
 
         $user->update([
-            'password' => Hash::make($request->password)
+            'password' => Hash::make($request->password),
         ]);
 
         DB::table('password_reset_tokens')->where('email', $identifier)->delete();
@@ -175,7 +177,7 @@ class ForgotPasswordController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Password reset successfully.'
+            'message' => 'Password reset successfully.',
         ]);
     }
 
@@ -183,7 +185,7 @@ class ForgotPasswordController extends Controller
     {
         $rules = [
             'channel' => ['required', Rule::enum(OtpChannel::class)],
-            'identifier' => ['required', 'string']
+            'identifier' => ['required', 'string'],
         ];
 
         if ($request->channel === OtpChannel::Email->value) {

@@ -1,27 +1,27 @@
 <?php
 
 use App\Models\User;
-use Laravel\Passport\Passport;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 
 uses(RefreshDatabase::class);
 
 it('successfully logs out the user and revokes the token', function () {
-    \Illuminate\Support\Facades\Artisan::call('passport:client', ['--personal' => true, '--name' => 'Laravel Personal Access Client', '--no-interaction' => true]);
-    
+    Artisan::call('passport:client', ['--personal' => true, '--name' => 'Laravel Personal Access Client', '--no-interaction' => true]);
+
     $user = User::factory()->create();
     $tokenResult = $user->createToken('TestToken');
     $token = $tokenResult->accessToken;
 
     $response = $this->withHeaders([
-        'Authorization' => 'Bearer ' . $token,
+        'Authorization' => 'Bearer '.$token,
     ])->postJson('/api/auth/logout');
 
     $response->assertStatus(200)
-             ->assertJson([
-                 'success' => true,
-                 'message' => 'Déconnexion réussie.'
-             ]);
+        ->assertJson([
+            'success' => true,
+            'message' => 'Déconnexion réussie.',
+        ]);
 
     $this->assertDatabaseHas('oauth_access_tokens', [
         'id' => $tokenResult->token->id,
@@ -30,7 +30,7 @@ it('successfully logs out the user and revokes the token', function () {
 });
 
 it('cannot access protected routes after logout', function () {
-    \Illuminate\Support\Facades\Artisan::call('passport:client', ['--personal' => true, '--name' => 'Laravel Personal Access Client', '--no-interaction' => true]);
+    Artisan::call('passport:client', ['--personal' => true, '--name' => 'Laravel Personal Access Client', '--no-interaction' => true]);
 
     $user = User::factory()->create();
     $tokenResult = $user->createToken('TestToken');
@@ -38,14 +38,14 @@ it('cannot access protected routes after logout', function () {
 
     // Logout
     $this->withHeaders([
-        'Authorization' => 'Bearer ' . $token,
+        'Authorization' => 'Bearer '.$token,
     ])->postJson('/api/auth/logout');
 
     // Trying to access a protected route with the revoked token
     auth()->forgetGuards();
 
     $response = $this->withHeaders([
-        'Authorization' => 'Bearer ' . $token,
+        'Authorization' => 'Bearer '.$token,
     ])->getJson('/api/profile');
 
     $response->assertStatus(401);

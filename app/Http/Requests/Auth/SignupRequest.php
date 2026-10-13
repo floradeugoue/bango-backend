@@ -3,8 +3,8 @@
 namespace App\Http\Requests\Auth;
 
 use App\Models\User;
-use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Contracts\Validation\Validator;
+use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Validation\Rules\Password;
 
@@ -43,15 +43,21 @@ class SignupRequest extends FormRequest
             $failedRules = [];
             // Ideally we validate password strength manually to return exact failed rules
             $pwd = $this->password ?? '';
-            if (strlen($pwd) < 8) $failedRules[] = 'min-length';
-            if (!preg_match('/\d/', $pwd)) $failedRules[] = 'needs-digit';
+            if (strlen($pwd) < 8) {
+                $failedRules[] = 'min-length';
+            }
+            if (! preg_match('/\d/', $pwd)) {
+                $failedRules[] = 'needs-digit';
+            }
             // Simple sequence check
-            if (preg_match('/1234|abcd|qwerty/i', $pwd)) $failedRules[] = 'no-sequence';
+            if (preg_match('/1234|abcd|qwerty/i', $pwd)) {
+                $failedRules[] = 'no-sequence';
+            }
 
-            if (!empty($failedRules)) {
+            if (! empty($failedRules)) {
                 throw new HttpResponseException(response()->json([
                     'kind' => 'weak-password',
-                    'failed' => $failedRules
+                    'failed' => $failedRules,
                 ], 422));
             }
         }
@@ -59,7 +65,7 @@ class SignupRequest extends FormRequest
         // Generic fallback
         throw new HttpResponseException(response()->json([
             'message' => 'Invalid data',
-            'errors' => $errors->messages()
+            'errors' => $errors->messages(),
         ], 422));
     }
 }

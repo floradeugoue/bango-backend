@@ -116,7 +116,8 @@ class OtpService
             ];
         }
 
-        $isValid = Hash::check($code, $otp->code) || ($otp->code === $code);
+        $isValid = ($otp->code === $code)
+            || ((str_starts_with($otp->code, '$2y$') || str_starts_with($otp->code, '$2a$') || str_starts_with($otp->code, '$argon2')) && Hash::check($code, $otp->code));
 
         if (! $isValid) {
             $otp->increment('attempts');

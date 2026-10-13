@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\OtpChannel;
 use Illuminate\Database\Eloquent\Model;
 
 class Otp extends Model
@@ -19,7 +20,7 @@ class Otp extends Model
     protected function casts(): array
     {
         return [
-            'channel' => \App\Enums\OtpChannel::class,
+            'channel' => OtpChannel::class,
             'attempts' => 'integer',
             'expires_at' => 'datetime',
             'locked_until' => 'datetime',

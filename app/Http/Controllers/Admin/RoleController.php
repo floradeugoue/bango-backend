@@ -8,7 +8,8 @@ use App\Models\User;
 use Illuminate\Http\Request;
 
 /**
-     * @authenticated
+ * @authenticated
+ *
  * @group Admin - Roles
  *
  * API pour la gestion des rôles système.
@@ -40,10 +41,11 @@ class RoleController extends Controller
             'name' => 'required|string|max:255',
             'slug' => 'required|string|max:255|unique:roles,slug',
             'description' => 'nullable|string',
-            'is_active' => 'boolean'
+            'is_active' => 'boolean',
         ]);
 
         $role = Role::create($validated);
+
         return response()->json($role, 201);
     }
 
@@ -66,12 +68,13 @@ class RoleController extends Controller
     {
         $validated = $request->validate([
             'name' => 'sometimes|required|string|max:255',
-            'slug' => 'sometimes|required|string|max:255|unique:roles,slug,' . $role->id,
+            'slug' => 'sometimes|required|string|max:255|unique:roles,slug,'.$role->id,
             'description' => 'nullable|string',
-            'is_active' => 'boolean'
+            'is_active' => 'boolean',
         ]);
 
         $role->update($validated);
+
         return response()->json($role);
     }
 
@@ -91,6 +94,7 @@ class RoleController extends Controller
         }
 
         $role->delete();
+
         return response()->json(['message' => 'Rôle supprimé avec succès.']);
     }
 
@@ -112,6 +116,7 @@ class RoleController extends Controller
     public function getUserRole(User $user)
     {
         $user->load('role');
+
         return response()->json(['role' => $user->role]);
     }
 
@@ -119,17 +124,19 @@ class RoleController extends Controller
      * Modifier le rôle d'un utilisateur (Admin)
      *
      * @urlParam user integer required L'ID de l'utilisateur.
+     *
      * @bodyParam role_id integer required L'ID du nouveau rôle. Example: 1
      */
     public function updateUserRole(Request $request, User $user)
     {
         $validated = $request->validate([
-            'role_id' => 'required|exists:roles,id'
+            'role_id' => 'required|exists:roles,id',
         ]);
 
         $user->update(['role_id' => $validated['role_id']]);
-        
+
         $user->load('role');
+
         return response()->json(['message' => 'Rôle mis à jour', 'role' => $user->role]);
     }
 }

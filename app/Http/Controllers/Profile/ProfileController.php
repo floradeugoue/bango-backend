@@ -3,16 +3,21 @@
 namespace App\Http\Controllers\Profile;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\PublicProfileResource;
 use App\Http\Resources\UserResource;
 use App\Models\Geo\City;
 use App\Models\Geo\Country;
 use App\Models\Geo\Neighbourhood;
+use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class ProfileController extends Controller
 {
+    /**
+     * Display the authenticated user's profile.
+     */
     public function show(Request $request): UserResource
     {
         $user = $request->user()->load('interests');
@@ -20,21 +25,76 @@ class ProfileController extends Controller
         return new UserResource($user);
     }
 
+    /**
+     * Display a public profile by user ID or handle (PR-07 / PR-08 / PR-09).
+     */
+    public function showPublic(Request $request, string $identifier): JsonResponse|PublicProfileResource
+    {
+        $cleanHandle = ltrim(trim($identifier), '@');
+
+        /** @var User|null $user */
+        $user = User::withTrashed()
+            ->where(function ($query) use ($cleanHandle, $identifier) {
+                if (is_numeric($identifier)) {
+                    $query->where('id', (int) $identifier);
+                } else {
+                    $query->where('handle', strtolower($cleanHandle));
+                }
+            })
+            ->first();
+
+        if (! $user || $user->trashed()) {
+            return response()->json([
+                'kind' => 'not-found',
+                'message' => 'Ce compte n\'existe plus.',
+            ], 404);
+        }
+
+        if ($user->status === 'blocked') {
+            return response()->json([
+                'kind' => 'blocked',
+                'message' => 'Ce compte est bloqué.',
+            ], 403);
+        }
+
+        if ($user->status === 'suspended') {
+            return response()->json([
+                'kind' => 'suspended',
+                'message' => 'Ce compte est suspendu.',
+            ], 403);
+        }
+
+        return new PublicProfileResource($user);
+    }
+
+    /**
+     * Update identity: handle, displayName, and optionally bio.
+     */
     public function updateIdentity(Request $request): JsonResponse
     {
         $request->validate([
             'handle' => ['required', 'string', 'min:3', 'max:20', 'regex:/^[a-z0-9.]+$/', 'unique:users,handle,'.$request->user()->id],
             'displayName' => ['nullable', 'string', 'max:50'],
+            'bio' => ['nullable', 'string', 'max:500'],
         ]);
 
-        $request->user()->update([
-            'handle' => $request->handle,
+        $updates = [
+            'handle' => strtolower($request->handle),
             'display_name' => $request->displayName,
-        ]);
+        ];
+
+        if ($request->has('bio')) {
+            $updates['bio'] = $request->bio;
+        }
+
+        $request->user()->update($updates);
 
         return response()->json(['success' => true]);
     }
 
+    /**
+     * Update birthdate (must be 18+).
+     */
     public function updateBirthdate(Request $request): JsonResponse
     {
         $request->validate([
@@ -48,6 +108,9 @@ class ProfileController extends Controller
         return response()->json(['success' => true]);
     }
 
+    /**
+     * Update gender and public visibility.
+     */
     public function updateGender(Request $request): JsonResponse
     {
         $request->validate([
@@ -63,6 +126,9 @@ class ProfileController extends Controller
         return response()->json(['success' => true]);
     }
 
+    /**
+     * Update location (country, city, neighbourhood).
+     */
     public function updateLocation(Request $request): JsonResponse
     {
         $request->validate([
@@ -115,6 +181,9 @@ class ProfileController extends Controller
         return response()->json(['success' => true]);
     }
 
+    /**
+     * Update biography.
+     */
     public function updateBio(Request $request): JsonResponse
     {
         $request->validate([
@@ -128,6 +197,9 @@ class ProfileController extends Controller
         return response()->json(['success' => true]);
     }
 
+    /**
+     * Update user interests (min 3 items).
+     */
     public function updateInterests(Request $request): JsonResponse
     {
         $request->validate([

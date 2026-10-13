@@ -42,7 +42,7 @@ return new class extends Migration
                 'handle', 'display_name', 'avatar_url', 'birth_date',
                 'gender', 'gender_hidden', 'phone', 'country_code',
                 'city', 'neighbourhood', 'locale', 'account_type',
-                'is_verified', 'status', 'locked_until', 'onboarding_progress'
+                'is_verified', 'status', 'locked_until', 'onboarding_progress',
             ]);
             $table->dropSoftDeletes();
         });
