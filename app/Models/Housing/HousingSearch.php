@@ -1,6 +1,8 @@
 <?php
 
-namespace App\Models;
+namespace App\Models\Housing;
+ 
+use App\Models\User;
 
 use App\Enums\HousingIntent;
 use App\Models\Geo\City;

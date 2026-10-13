@@ -2,7 +2,7 @@
 
 namespace App\Services\Auth;
 
-use App\Models\ResetPasswordToken;
+use App\Models\Auth\ResetPasswordToken;
 use App\Models\User;
 use Exception;
 use Illuminate\Support\Facades\Log;

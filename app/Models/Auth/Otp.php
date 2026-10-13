@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Models;
+namespace App\Models\Auth;
 
 use App\Enums\OtpChannel;
 use Illuminate\Database\Eloquent\Model;

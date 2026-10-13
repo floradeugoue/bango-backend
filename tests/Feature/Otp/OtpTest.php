@@ -1,7 +1,7 @@
 <?php
 
 use App\Enums\OtpFailure;
-use App\Models\Otp;
+use App\Models\Auth\Otp;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;

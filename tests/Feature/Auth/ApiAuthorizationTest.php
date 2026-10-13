@@ -1,6 +1,6 @@
 <?php
 
-use App\Models\Role;
+use App\Models\Auth\Role;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Passport\Passport;

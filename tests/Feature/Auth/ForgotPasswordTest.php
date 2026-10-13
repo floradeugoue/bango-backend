@@ -1,6 +1,6 @@
 <?php
 
-use App\Models\Otp;
+use App\Models\Auth\Otp;
 use App\Models\User;
 use App\Services\Otp\OtpEmailService;
 use App\Services\Sms\ZomloaSmsService;
