@@ -2,8 +2,8 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
@@ -21,7 +21,7 @@ return new class extends Migration
             SET country_id = (SELECT id FROM countries c WHERE c.iso2 = users.country_code OR c.code = users.country_code LIMIT 1)
             WHERE users.country_code IS NOT NULL
         ');
-        
+
         DB::statement('
             UPDATE users 
             SET city_id = (SELECT id FROM cities c WHERE c.name = users.city LIMIT 1)

@@ -1,7 +1,9 @@
 <?php
+
 namespace App\Http\Controllers\Profile;
 
 use App\Http\Controllers\Controller;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 
@@ -15,7 +17,7 @@ class AccountController extends Controller
 
         $user = $request->user();
 
-        if (!Hash::check($request->password, $user->password)) {
+        if (! Hash::check($request->password, $user->password)) {
             return response()->json(['kind' => 'bad-password'], 403);
         }
 
@@ -27,8 +29,9 @@ class AccountController extends Controller
 
     /**
      * Supprimer définitivement le compte
-     * 
+     *
      * @group Settings - Profil
+     *
      * @bodyParam password string required Le mot de passe actuel.
      * @bodyParam confirmation string required Doit être exactement "SUPPRIMER".
      */
@@ -41,7 +44,7 @@ class AccountController extends Controller
 
         $user = $request->user();
 
-        if (!Hash::check($request->password, $user->password)) {
+        if (! Hash::check($request->password, $user->password)) {
             return response()->json(['kind' => 'bad-password'], 403);
         }
 
@@ -62,8 +65,9 @@ class AccountController extends Controller
 
     /**
      * Restaurer un compte supprimé
-     * 
+     *
      * @group Settings - Profil
+     *
      * @bodyParam identifier string required Email ou téléphone.
      * @bodyParam password string required Mot de passe.
      */
@@ -74,16 +78,16 @@ class AccountController extends Controller
             'password' => 'required|string',
         ]);
 
-        $user = \App\Models\User::withTrashed()
-                    ->where('email', $request->identifier)
-                    ->orWhere('phone', $request->identifier)
-                    ->first();
+        $user = User::withTrashed()
+            ->where('email', $request->identifier)
+            ->orWhere('phone', $request->identifier)
+            ->first();
 
-        if (!$user || !Hash::check($request->password, $user->password)) {
+        if (! $user || ! Hash::check($request->password, $user->password)) {
             return response()->json(['kind' => 'invalid-credentials'], 401);
         }
 
-        if (!$user->trashed()) {
+        if (! $user->trashed()) {
             return response()->json(['kind' => 'not-deleted'], 400);
         }
 

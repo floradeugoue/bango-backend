@@ -3,8 +3,8 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 /**
  * @group Auth
@@ -20,12 +20,11 @@ class LogoutController extends Controller
      * Cette action ne révoque que le token utilisé pour la requête.
      *
      * @authenticated
-     * 
+     *
      * @response 200 {
      *   "success": true,
      *   "message": "Déconnexion réussie."
      * }
-     * 
      * @response 401 {
      *   "message": "Unauthenticated."
      * }
@@ -37,7 +36,7 @@ class LogoutController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Déconnexion réussie.'
+            'message' => 'Déconnexion réussie.',
         ], 200);
     }
 }

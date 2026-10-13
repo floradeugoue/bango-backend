@@ -19,10 +19,15 @@ use App\Http\Controllers\Onboarding\OnboardingController;
 use App\Http\Controllers\Otp\OtpController;
 use App\Http\Controllers\Profile\AccountController;
 use App\Http\Controllers\Profile\AvatarController;
+use App\Http\Controllers\Profile\BlockController;
 use App\Http\Controllers\Profile\EmailController;
+use App\Http\Controllers\Profile\FollowController;
+use App\Http\Controllers\Profile\FollowRequestController;
 use App\Http\Controllers\Profile\HandleCheckController;
 use App\Http\Controllers\Profile\PasswordController;
+use App\Http\Controllers\Profile\PrivacyController;
 use App\Http\Controllers\Profile\ProfileController;
+use App\Http\Controllers\Profile\QrController;
 use App\Http\Controllers\Profile\SecurityController;
 use App\Http\Resources\UserResource;
 use App\Models\Interest;
@@ -94,6 +99,10 @@ Route::get('/interests', function () {
     return response()->json(Interest::all());
 });
 
+// Résolution de QR Code & Profils publics (public, PR-16 / PR-17)
+Route::match(['get', 'post'], '/qr/resolve', [QrController::class, 'resolve']);
+Route::get('/profiles/{identifier}', [ProfileController::class, 'showPublic']);
+
 // --------------------------------------------------------------------------
 // GEO (public, lecture seule)
 // --------------------------------------------------------------------------
@@ -136,9 +145,13 @@ Route::middleware('auth:api')->group(function () {
     Route::prefix('profile')->group(function () {
         // Afficher les données complètes du profil de l'utilisateur
         Route::get('/', [ProfileController::class, 'show']);
+        // Consulter un profil public (par ID ou handle, PR-07 / PR-08 / PR-09)
+        Route::get('/public/{identifier}', [ProfileController::class, 'showPublic']);
+        Route::get('/user/{identifier}', [ProfileController::class, 'showPublic']);
+
         // Vérifier la disponibilité d'un identifiant (handle/pseudo)
         Route::post('/handle-check', HandleCheckController::class);
-        // Mettre à jour le nom et l'identifiant
+        // Mettre à jour le nom et l'identifiant (et bio)
         Route::put('/identity', [ProfileController::class, 'updateIdentity']);
         // Mettre à jour la date de naissance
         Route::put('/birthdate', [ProfileController::class, 'updateBirthdate']);
@@ -152,6 +165,33 @@ Route::middleware('auth:api')->group(function () {
         Route::put('/interests', [ProfileController::class, 'updateInterests']);
         // Mettre à jour la photo de profil (Avatar)
         Route::put('/avatar', AvatarController::class);
+
+        // Confidentialité du profil (ST-14)
+        Route::get('/privacy', [PrivacyController::class, 'show']);
+        Route::put('/privacy', [PrivacyController::class, 'update']);
+
+        // Abonnés & Abonnements (PR-11, PR-12)
+        Route::get('/followers', [FollowController::class, 'followers']);
+        Route::get('/following', [FollowController::class, 'following']);
+        Route::get('/{id}/followers', [FollowController::class, 'followers']);
+        Route::get('/{id}/following', [FollowController::class, 'following']);
+        Route::post('/{id}/follow', [FollowController::class, 'follow']);
+        Route::delete('/{id}/follow', [FollowController::class, 'unfollow']);
+        Route::post('/{id}/unfollow', [FollowController::class, 'unfollow']);
+        Route::post('/{id}/toggle-follow', [FollowController::class, 'toggle']);
+
+        // Demandes d'abonnement pour comptes privés (PR-08)
+        Route::get('/follow-requests', [FollowRequestController::class, 'index']);
+        Route::get('/follow-requests/sent', [FollowRequestController::class, 'sent']);
+        Route::post('/follow-requests/accept-all', [FollowRequestController::class, 'acceptAll']);
+        Route::post('/follow-requests/{id}/accept', [FollowRequestController::class, 'accept']);
+        Route::post('/follow-requests/{id}/reject', [FollowRequestController::class, 'reject']);
+
+        // Comptes bloqués (PR-09)
+        Route::get('/blocked', [BlockController::class, 'index']);
+        Route::post('/{id}/block', [BlockController::class, 'block']);
+        Route::delete('/{id}/block', [BlockController::class, 'unblock']);
+        Route::post('/{id}/unblock', [BlockController::class, 'unblock']);
     });
 
     // --------------------------------------------------------------------------
@@ -197,6 +237,10 @@ Route::middleware('auth:api')->group(function () {
 
         // Mettre à jour le mot de passe depuis l'espace utilisateur
         Route::put('/password', [PasswordController::class, 'update']);
+
+        // Confidentialité du compte (ST-14)
+        Route::get('/privacy', [PrivacyController::class, 'show']);
+        Route::put('/privacy', [PrivacyController::class, 'update']);
 
         // Bouton d'urgence : Sécuriser le compte (déconnecter autres appareils)
         Route::post('/secure', [SecurityController::class, 'secureAccount']);

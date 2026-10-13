@@ -10,6 +10,7 @@ use App\Models\Geo\Neighbourhood;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -57,6 +58,11 @@ class User extends Authenticatable
         'pending_email_expires_at',
         'pending_email_attempts',
         'scheduled_for_deletion_at',
+        'is_private',
+        'privacy_settings',
+        'badge',
+        'verification_lapsed',
+        'restricted_until',
     ];
 
     protected $hidden = [
@@ -85,6 +91,10 @@ class User extends Authenticatable
             'gender' => Gender::class,
             'account_type' => AccountType::class,
             'scheduled_for_deletion_at' => 'datetime',
+            'is_private' => 'boolean',
+            'privacy_settings' => 'array',
+            'verification_lapsed' => 'boolean',
+            'restricted_until' => 'datetime',
         ];
     }
 
@@ -126,5 +136,117 @@ class User extends Authenticatable
     public function neighbourhood()
     {
         return $this->belongsTo(Neighbourhood::class);
+    }
+
+    /**
+     * Users who follow this user.
+     */
+    public function followers(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'follows', 'following_id', 'follower_id')
+            ->withTimestamps();
+    }
+
+    /**
+     * Users whom this user follows.
+     */
+    public function following(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'follows', 'follower_id', 'following_id')
+            ->withTimestamps();
+    }
+
+    /**
+     * Follow requests received by this user.
+     */
+    public function receivedFollowRequests(): HasMany
+    {
+        return $this->hasMany(FollowRequest::class, 'to_id');
+    }
+
+    /**
+     * Follow requests sent by this user.
+     */
+    public function sentFollowRequests(): HasMany
+    {
+        return $this->hasMany(FollowRequest::class, 'from_id');
+    }
+
+    /**
+     * Users blocked by this user.
+     */
+    public function blockedUsers(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'user_blocks', 'blocker_id', 'blocked_id')
+            ->withTimestamps();
+    }
+
+    /**
+     * Users who have blocked this user.
+     */
+    public function blockedByUsers(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'user_blocks', 'blocked_id', 'blocker_id')
+            ->withTimestamps();
+    }
+
+    /**
+     * Check if this user is following another user.
+     */
+    public function isFollowing(int|string|User $user): bool
+    {
+        $id = $user instanceof User ? $user->id : (int) $user;
+
+        return $this->following()->where('following_id', $id)->exists();
+    }
+
+    /**
+     * Check if this user sent a pending follow request to another user.
+     */
+    public function hasRequestedToFollow(int|string|User $user): bool
+    {
+        $id = $user instanceof User ? $user->id : (int) $user;
+
+        return $this->sentFollowRequests()->where('to_id', $id)->where('status', 'pending')->exists();
+    }
+
+    /**
+     * Check if this user has blocked another user.
+     */
+    public function hasBlocked(int|string|User $user): bool
+    {
+        $id = $user instanceof User ? $user->id : (int) $user;
+
+        return $this->blockedUsers()->where('blocked_id', $id)->exists();
+    }
+
+    /**
+     * Check if this user is blocked by another user.
+     */
+    public function isBlockedBy(int|string|User $user): bool
+    {
+        $id = $user instanceof User ? $user->id : (int) $user;
+
+        return $this->blockedByUsers()->where('blocker_id', $id)->exists();
+    }
+
+    /**
+     * Check if this user can view the full content of another user.
+     */
+    public function canViewContentOf(User $target): bool
+    {
+        if ($this->id === $target->id) {
+            return true;
+        }
+
+        if ($this->hasBlocked($target) || $this->isBlockedBy($target)) {
+            return false;
+        }
+
+        if (! $target->is_private) {
+            return true;
+        }
+
+        return $this->isFollowing($target);
     }
 }

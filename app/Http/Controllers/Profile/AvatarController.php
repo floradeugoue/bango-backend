@@ -23,15 +23,15 @@ class AvatarController extends Controller
         }
 
         $path = $request->file('avatar')->store('avatars', 'public');
-        
+
         $url = Storage::url($path);
-        
+
         $user->update([
-            'avatar_url' => $url
+            'avatar_url' => $url,
         ]);
 
         return response()->json([
-            'avatarUrl' => $url
+            'avatarUrl' => $url,
         ]);
     }
 }

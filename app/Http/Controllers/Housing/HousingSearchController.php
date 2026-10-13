@@ -5,15 +5,14 @@ namespace App\Http\Controllers\Housing;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use App\Models\HousingSearch;
 
 class HousingSearchController extends Controller
 {
     public function show(Request $request): JsonResponse
     {
         $search = $request->user()->housingSearch;
-        
-        if (!$search) {
+
+        if (! $search) {
             return response()->json(null);
         }
 

@@ -4,7 +4,6 @@ namespace App\Policies;
 
 use App\Models\Geo\City;
 use App\Models\User;
-use Illuminate\Auth\Access\Response;
 
 class CityPolicy
 {

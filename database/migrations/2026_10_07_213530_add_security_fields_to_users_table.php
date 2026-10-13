@@ -24,7 +24,7 @@ return new class extends Migration
         Schema::table('users', function (Blueprint $table) {
             $table->dropColumn([
                 'two_factor_method', 'two_factor_secret', 'backup_codes',
-                'pending_email', 'pending_email_code', 'pending_email_expires_at', 'pending_email_attempts'
+                'pending_email', 'pending_email_code', 'pending_email_expires_at', 'pending_email_attempts',
             ]);
         });
     }

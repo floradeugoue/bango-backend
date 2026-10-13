@@ -2,26 +2,30 @@
 
 use App\Models\Geo\Country;
 use App\Models\Geo\Currency;
+use App\Models\Role;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
+use Laravel\Passport\Passport;
 
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
-    \Illuminate\Support\Facades\Artisan::call('passport:client', ['--personal' => true, '--name' => 'Test']);
-    $role = \App\Models\Role::firstOrCreate(['slug' => 'admin'], ['name' => 'Admin']);
-    $this->user = \App\Models\User::factory()->create(['role_id' => $role->id]);
-    \Laravel\Passport\Passport::actingAs($this->user, ['*']);
+    Artisan::call('passport:client', ['--personal' => true, '--name' => 'Test']);
+    $role = Role::firstOrCreate(['slug' => 'admin'], ['name' => 'Admin']);
+    $this->user = User::factory()->create(['role_id' => $role->id]);
+    Passport::actingAs($this->user, ['*']);
     $this->currency = Currency::create(['name' => 'Franc CFA', 'code' => 'XAF']);
 });
 
 it('can list countries', function () {
     Country::create(['name' => 'Cameroun', 'code' => 'CM', 'iso2' => 'CM', 'iso3' => 'CMR', 'currency_id' => $this->currency->id]);
-    
+
     $response = $this->getJson('/api/geo/countries');
-    
+
     $response->assertStatus(200)
-             ->assertJsonCount(1)
-             ->assertJsonPath('0.name', 'Cameroun');
+        ->assertJsonCount(1)
+        ->assertJsonPath('0.name', 'Cameroun');
 });
 
 it('can create a country', function () {
@@ -31,7 +35,7 @@ it('can create a country', function () {
         'iso2' => 'SN',
         'iso3' => 'SEN',
         'currency_id' => $this->currency->id,
-        'is_active' => true
+        'is_active' => true,
     ]);
 
     $response->assertStatus(201)->assertJsonPath('name', 'Senegal');

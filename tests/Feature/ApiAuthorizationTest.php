@@ -2,8 +2,8 @@
 
 use App\Models\Role;
 use App\Models\User;
-use Laravel\Passport\Passport;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Laravel\Passport\Passport;
 
 uses(RefreshDatabase::class);
 
@@ -22,7 +22,7 @@ it('denies access to protected routes without token', function () {
 });
 
 it('allows user access with passport token and user role', function () {
-    $user = clone new User();
+    $user = clone new User;
     $user->name = 'Normal User';
     $user->email = 'user@example.com';
     $user->password = bcrypt('password');
@@ -36,7 +36,7 @@ it('allows user access with passport token and user role', function () {
 });
 
 it('denies admin access to user with passport token and user role', function () {
-    $user = clone new User();
+    $user = clone new User;
     $user->name = 'Normal User';
     $user->email = 'user2@example.com';
     $user->password = bcrypt('password');
@@ -50,7 +50,7 @@ it('denies admin access to user with passport token and user role', function () 
 });
 
 it('allows admin access with passport token and admin role', function () {
-    $admin = clone new User();
+    $admin = clone new User;
     $admin->name = 'Admin User';
     $admin->email = 'admin@example.com';
     $admin->password = bcrypt('password');
