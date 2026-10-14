@@ -118,3 +118,36 @@ Artisan::command('test:forgot-password {identifier}', function () {
         $this->error("Aucun code OTP trouvé en DB (probablement supprimé suite à un échec d'envoi).");
     }
 });
+
+// --------------------------------------------------------------------------
+// PLANIFICATEUR DES ABONNEMENTS (Rappels, Relances et Cycle de vie)
+// --------------------------------------------------------------------------
+use Illuminate\Support\Facades\Schedule;
+
+// 1. Rappels avant échéance (J-7, J-3, J-1) tous les matins à 08:00
+Schedule::command('subscription:send-renewal-reminders')
+    ->dailyAt('08:00')
+    ->withoutOverlapping()
+    ->onOneServer();
+
+// 2. Relances après échec de paiement toutes les heures
+Schedule::command('subscription:send-failed-payment-reminders')
+    ->hourly()
+    ->withoutOverlapping()
+    ->onOneServer();
+
+// 3. Traitement du cycle de vie (période de grâce & expiration) deux fois par jour
+Schedule::command('subscription:process-lifecycle')
+    ->twiceDaily(0, 12)
+    ->withoutOverlapping()
+    ->onOneServer();
+
+// --------------------------------------------------------------------------
+// PLANIFICATEUR DES PAIEMENTS (Réconciliation serveur-à-serveur)
+// --------------------------------------------------------------------------
+// 4. Réconciliation automatique des paiements en cours ou indéterminés
+Schedule::command('payment:reconcile')
+    ->everyTenMinutes()
+    ->withoutOverlapping()
+    ->runInBackground()
+    ->onOneServer();

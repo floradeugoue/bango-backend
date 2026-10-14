@@ -1,13 +1,12 @@
 <?php
 
 namespace App\Models\Housing;
- 
-use App\Models\User;
 
 use App\Enums\HousingIntent;
 use App\Models\Geo\City;
 use App\Models\Geo\Currency;
 use App\Models\Geo\Neighbourhood;
+use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 

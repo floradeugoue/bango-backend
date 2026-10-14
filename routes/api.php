@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Admin\AdminPaymentController;
 use App\Http\Controllers\Admin\RoleController;
 use App\Http\Controllers\Admin\SubscriptionCatalogController;
 use App\Http\Controllers\Admin\SubscriptionManagementController;
@@ -19,6 +20,8 @@ use App\Http\Controllers\Geo\OperatorController;
 use App\Http\Controllers\Housing\HousingSearchController;
 use App\Http\Controllers\Onboarding\OnboardingController;
 use App\Http\Controllers\Otp\OtpController;
+use App\Http\Controllers\Payment\MonetbilWebhookController;
+use App\Http\Controllers\Payment\PaymentController;
 use App\Http\Controllers\Profile\AccountController;
 use App\Http\Controllers\Profile\AvatarController;
 use App\Http\Controllers\Profile\BlockController;
@@ -33,6 +36,7 @@ use App\Http\Controllers\Profile\QrController;
 use App\Http\Controllers\Profile\SecurityController;
 use App\Http\Controllers\Subscription\CatalogController;
 use App\Http\Controllers\Subscription\SubscriptionController;
+use App\Http\Controllers\Subscription\SubscriptionRenewalController;
 use App\Http\Resources\UserResource;
 use App\Models\Profile\Interest;
 use Illuminate\Http\Request;
@@ -132,6 +136,14 @@ Route::prefix('geo')->group(function () {
     Route::apiResource('neighbourhoods', NeighbourhoodController::class)->only(['index', 'show']);
     // Lister et afficher un opérateur téléphonique/internet
     Route::apiResource('operators', OperatorController::class)->only(['index', 'show']);
+});
+
+// --------------------------------------------------------------------------
+// WEBHOOKS (Publics avec contrôle d'intégrité et signature cryptographique)
+// --------------------------------------------------------------------------
+Route::prefix('webhooks/payments')->group(function () {
+    // Webhook IPN Monetbil (vérification de signature MD5 timing-safe)
+    Route::post('/monetbil', [MonetbilWebhookController::class, 'handle'])->name('api.webhooks.payments.monetbil');
 });
 
 // --------------------------------------------------------------------------
@@ -308,6 +320,13 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/{id}/change-plan', [SubscriptionController::class, 'changePlan']);
         // Résilier le renouvellement automatique d'un abonnement
         Route::post('/{id}/cancel', [SubscriptionController::class, 'cancel']);
+
+        // --------------------------------------------------------------------------
+        // PHASE 6 : RENOUVELLEMENT MANUEL ASSISTÉ (Info, Devis Certifié & Confirmation)
+        // --------------------------------------------------------------------------
+        Route::get('/{id}/renewal', [SubscriptionRenewalController::class, 'renewalInfo']);
+        Route::post('/{id}/renewal/quote', [SubscriptionRenewalController::class, 'quote']);
+        Route::post('/{id}/renewal/confirm', [SubscriptionRenewalController::class, 'confirm']);
     });
 
     Route::prefix('badges')->group(function () {
@@ -315,6 +334,24 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/status', [SubscriptionController::class, 'status']);
         // Consulter l'historique d'attribution, expiration et révocation des badges
         Route::get('/history', [SubscriptionController::class, 'history']);
+    });
+
+    // --------------------------------------------------------------------------
+    // PAY (Paiements Mobile Money, Devis, Statut & Historique)
+    // --------------------------------------------------------------------------
+    Route::prefix('payments')->group(function () {
+        // Consulter le catalogue des offres et prestations payantes
+        Route::get('/catalog', [PaymentController::class, 'catalog']);
+        // Établir un devis certifié serveur avant confirmation
+        Route::post('/quote', [PaymentController::class, 'quote']);
+        // Initier un paiement Mobile Money (Push USSD)
+        Route::post('/initiate', [PaymentController::class, 'initiate']);
+        // Obtenir le statut en temps réel d'un paiement (polling 120s / reprise réseau)
+        Route::get('/{id}/status', [PaymentController::class, 'status']);
+        // Annuler un paiement en attente
+        Route::post('/{id}/cancel', [PaymentController::class, 'cancel']);
+        // Consulter l'historique paginé des transactions du client
+        Route::get('/history', [PaymentController::class, 'history']);
     });
 });
 
@@ -422,4 +459,26 @@ Route::middleware(['auth:api', 'admin'])->group(function () {
 
     // Journal d'audit global des attributions et modifications de badges
     Route::get('admin/badges/history', [SubscriptionManagementController::class, 'badgeHistories']);
+
+    // --------------------------------------------------------------------------
+    // PAY MODULE - BACK-OFFICE (Supervision, Audits, Litiges, Remboursements)
+    // --------------------------------------------------------------------------
+    Route::prefix('admin/payments')->group(function () {
+        // Transactions : Supervision, recherche et détail
+        Route::get('/transactions', [AdminPaymentController::class, 'index']);
+        Route::get('/transactions/{id}', [AdminPaymentController::class, 'show']);
+        Route::get('/transactions/{id}/events', [AdminPaymentController::class, 'events']);
+        Route::post('/transactions/{id}/refund', [AdminPaymentController::class, 'refund']);
+
+        // Litiges & Contestations
+        Route::get('/disputes', [AdminPaymentController::class, 'disputes']);
+        Route::post('/disputes', [AdminPaymentController::class, 'createDispute']);
+        Route::get('/disputes/{id}', [AdminPaymentController::class, 'showDispute']);
+        Route::post('/disputes/{id}/status', [AdminPaymentController::class, 'updateDisputeStatus']);
+        Route::post('/disputes/{id}/notes', [AdminPaymentController::class, 'addDisputeNote']);
+
+        // Réclamations Doubles Débits
+        Route::get('/double-charge-claims', [AdminPaymentController::class, 'doubleChargeClaims']);
+        Route::post('/double-charge-claims', [AdminPaymentController::class, 'createDoubleChargeClaim']);
+    });
 });
