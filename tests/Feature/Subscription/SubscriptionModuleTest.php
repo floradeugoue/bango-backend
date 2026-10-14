@@ -3,9 +3,11 @@
 use App\Models\Auth\Role;
 use App\Models\Subscription\Subscription;
 use App\Models\Subscription\SubscriptionPrice;
+use App\Models\Subscription\SubscriptionProduct;
 use App\Models\User;
 use App\Services\Subscription\BadgeResolutionService;
 use App\Services\Subscription\SubscriptionService;
+use Database\Seeders\DatabaseSeeder;
 use Database\Seeders\RoleSeeder;
 use Database\Seeders\SubscriptionCatalogSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -466,4 +468,18 @@ it('enters grace period on renewal failure and expires when grace period passes'
 
     $user->refresh();
     expect($user->badge)->toBe('none');
+});
+
+it('DatabaseSeeder seeds subscription catalog idempotently without duplicates', function () {
+    // Re-run DatabaseSeeder to verify idempotence
+    $this->seed(DatabaseSeeder::class);
+
+    expect(SubscriptionProduct::count())->toBe(4)
+        ->and(SubscriptionPrice::count())->toBe(6);
+
+    // Re-run again to ensure no duplicate products or prices are created
+    $this->seed(DatabaseSeeder::class);
+
+    expect(SubscriptionProduct::count())->toBe(4)
+        ->and(SubscriptionPrice::count())->toBe(6);
 });

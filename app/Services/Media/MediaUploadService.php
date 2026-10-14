@@ -7,7 +7,7 @@ use App\Models\User;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use InvalidArgumentException;
+use Illuminate\Validation\ValidationException;
 
 class MediaUploadService
 {
@@ -66,15 +66,21 @@ class MediaUploadService
         $isVideo = in_array($mime, self::ALLOWED_VIDEO_MIMES, true);
 
         if (! $isImage && ! $isVideo) {
-            throw new InvalidArgumentException("Format de fichier non autorisé ({$mime}). Formats supportés : JPEG, PNG, WEBP, MP4, MOV.");
+            throw ValidationException::withMessages([
+                'file' => ["Format de fichier non autorisé ({$mime}). Formats supportés : JPEG, PNG, WEBP, MP4, MOV."],
+            ]);
         }
 
         if ($isImage && $size > self::MAX_IMAGE_BYTES) {
-            throw new InvalidArgumentException('La taille de l\'image dépasse la limite maximale autorisée (15 MB).');
+            throw ValidationException::withMessages([
+                'file' => ['La taille de l\'image dépasse la limite maximale autorisée (15 MB).'],
+            ]);
         }
 
         if ($isVideo && $size > self::MAX_VIDEO_BYTES) {
-            throw new InvalidArgumentException('La taille de la vidéo dépasse la limite maximale autorisée (100 MB).');
+            throw ValidationException::withMessages([
+                'file' => ['La taille de la vidéo dépasse la limite maximale autorisée (100 MB).'],
+            ]);
         }
 
         $kind = $isImage ? PostMediaKind::Photo : PostMediaKind::Video;

@@ -100,6 +100,72 @@ class Post extends Model
     }
 
     /**
+     * Likes reçus sur la publication.
+     */
+    public function likes(): HasMany
+    {
+        return $this->hasMany(PostLike::class);
+    }
+
+    /**
+     * Utilisateurs ayant aimé cette publication.
+     */
+    public function likedByUsers(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'post_likes')->withTimestamps();
+    }
+
+    /**
+     * Vérifie si un utilisateur donné a aimé cette publication.
+     */
+    public function isLikedBy(?User $user): bool
+    {
+        if (! $user) {
+            return false;
+        }
+
+        if ($this->relationLoaded('likes')) {
+            return $this->likes->contains('user_id', $user->id);
+        }
+
+        return $this->likes()->where('user_id', $user->id)->exists();
+    }
+
+    /**
+     * Commentaires et réponses rattachés à cette publication.
+     */
+    public function comments(): HasMany
+    {
+        return $this->hasMany(PostComment::class)->orderBy('created_at', 'asc');
+    }
+
+    /**
+     * Partages enregistrés de cette publication.
+     */
+    public function shares(): HasMany
+    {
+        return $this->hasMany(PostShare::class);
+    }
+
+    /**
+     * URL stable de partage de la publication.
+     */
+    public function shareUrl(): string
+    {
+        return url("/posts/{$this->id}");
+    }
+
+    /**
+     * Commentaires de premier niveau (hors réponses).
+     */
+    public function rootComments(): HasMany
+    {
+        return $this->hasMany(PostComment::class)
+            ->whereNull('parent_id')
+            ->orderBy('created_at', 'asc');
+    }
+
+    /**
      * Vérifie si l'utilisateur donné est l'auteur de la publication.
      */
     public function isAuthoredBy(User|int $user): bool
