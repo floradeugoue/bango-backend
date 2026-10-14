@@ -18,6 +18,7 @@ use App\Http\Controllers\Geo\CurrencyController;
 use App\Http\Controllers\Geo\NeighbourhoodController;
 use App\Http\Controllers\Geo\OperatorController;
 use App\Http\Controllers\Housing\HousingSearchController;
+use App\Http\Controllers\Media\MediaUploadController;
 use App\Http\Controllers\Onboarding\OnboardingController;
 use App\Http\Controllers\Otp\OtpController;
 use App\Http\Controllers\Payment\MonetbilWebhookController;
@@ -34,11 +35,19 @@ use App\Http\Controllers\Profile\PrivacyController;
 use App\Http\Controllers\Profile\ProfileController;
 use App\Http\Controllers\Profile\QrController;
 use App\Http\Controllers\Profile\SecurityController;
+use App\Http\Controllers\Search\HashtagSearchController;
+use App\Http\Controllers\Search\PeopleSearchController;
+use App\Http\Controllers\Search\PlaceSearchController;
+use App\Http\Controllers\Square\PostArchiveController;
+use App\Http\Controllers\Square\PostAudienceController;
+use App\Http\Controllers\Square\PostCaptionController;
+use App\Http\Controllers\Square\PostCommentsStatusController;
+use App\Http\Controllers\Square\PostController;
+use App\Http\Controllers\Square\PostFeedController;
 use App\Http\Controllers\Subscription\CatalogController;
 use App\Http\Controllers\Subscription\SubscriptionController;
 use App\Http\Controllers\Subscription\SubscriptionRenewalController;
 use App\Http\Resources\UserResource;
-use App\Models\Profile\Interest;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -352,6 +361,50 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/{id}/cancel', [PaymentController::class, 'cancel']);
         // Consulter l'historique paginé des transactions du client
         Route::get('/history', [PaymentController::class, 'history']);
+    });
+
+    // --------------------------------------------------------------------------
+    // SQUARE — CR1 (Création, Médias, Carrousel, Recherche, Feed & Actions SQ-15)
+    // --------------------------------------------------------------------------
+    Route::prefix('square-cr1')->group(function () {
+        // Fil Square paginé (CR-11 et flux découverte, abonnés, voisinage)
+        Route::get('/square/feed', [PostFeedController::class, 'index'])->name('api.square.feed');
+
+        // Créer une nouvelle publication avec texte, médias, tags, lieu et options (CR-01 à CR-12)
+        Route::post('/posts', [PostController::class, 'store'])->name('api.posts.store');
+
+        // Afficher les détails d'une publication spécifique selon les règles d'audience
+        Route::get('/posts/{post}', [PostController::class, 'show'])->name('api.posts.show');
+
+        // Supprimer une publication (SQ-15, réservé à l'auteur)
+        Route::delete('/posts/{post}', [PostController::class, 'destroy'])->name('api.posts.destroy');
+
+        // Modifier la légende d'une publication (SQ-15, max 2 200 caractères, réservé à l'auteur)
+        Route::patch('/posts/{post}/caption', [PostCaptionController::class, 'update'])->name('api.posts.caption');
+
+        // Modifier la visibilité et l'audience d'une publication (SQ-15 : public, followers, neighbourhood)
+        Route::patch('/posts/{post}/audience', [PostAudienceController::class, 'update'])->name('api.posts.audience');
+
+        // Modifier les options de commentaires (SQ-15 : fermer/ouvrir, filtrer par audience)
+        Route::patch('/posts/{post}/comments-status', [PostCommentsStatusController::class, 'update'])->name('api.posts.comments_status');
+
+        // Archiver une publication pour la masquer des flux publics (SQ-15, réservé à l'auteur)
+        Route::post('/posts/{post}/archive', [PostArchiveController::class, 'archive'])->name('api.posts.archive');
+
+        // Désarchiver une publication pour rétablir sa visibilité publique (SQ-15, réservé à l'auteur)
+        Route::post('/posts/{post}/unarchive', [PostArchiveController::class, 'unarchive'])->name('api.posts.unarchive');
+
+        // Téléverser un média photo ou vidéo sécurisé pour le carrousel Square (CR-02, CR-04, CR-12)
+        Route::post('/media/upload', [MediaUploadController::class, 'upload'])->name('api.media.upload');
+
+        // Rechercher des personnes pour les identifier sur une photo ou les mentionner (CR-08)
+        Route::get('/search/people', [PeopleSearchController::class, 'index'])->name('api.search.people');
+
+        // Rechercher et lister les hashtags tendances ordonnés par volume de publications (CR-07)
+        Route::get('/search/hashtags/trending', [HashtagSearchController::class, 'trending'])->name('api.search.hashtags.trending');
+
+        // Rechercher des lieux contextuels réels issus de la base géographique BANGO (CR-09)
+        Route::get('/search/places', [PlaceSearchController::class, 'index'])->name('api.search.places');
     });
 });
 

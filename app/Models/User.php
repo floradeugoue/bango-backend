@@ -12,6 +12,8 @@ use App\Models\Housing\HousingSearch;
 use App\Models\Payment\PaymentTransaction;
 use App\Models\Profile\FollowRequest;
 use App\Models\Profile\Interest;
+use App\Models\Square\Post;
+use App\Models\Square\PostTag;
 use App\Models\Subscription\BadgeHistory;
 use App\Models\Subscription\Subscription;
 use Database\Factories\UserFactory;
@@ -304,5 +306,21 @@ class User extends Authenticatable
     public function paymentTransactions(): HasMany
     {
         return $this->hasMany(PaymentTransaction::class)->orderByDesc('created_at');
+    }
+
+    /**
+     * Publications Square créées par cet utilisateur.
+     */
+    public function posts(): HasMany
+    {
+        return $this->hasMany(Post::class)->orderByDesc('created_at');
+    }
+
+    /**
+     * Identifications de cet utilisateur sur des médias photos Square.
+     */
+    public function taggedInMedia(): HasMany
+    {
+        return $this->hasMany(PostTag::class);
     }
 }
