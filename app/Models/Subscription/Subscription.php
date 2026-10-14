@@ -2,6 +2,7 @@
 
 namespace App\Models\Subscription;
 
+use App\Models\Payment\PaymentTransaction;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -126,5 +127,21 @@ class Subscription extends Model
         }
 
         return $this->current_period_end && $this->current_period_end->isPast();
+    }
+
+    /**
+     * Financial transactions associated with this subscription.
+     */
+    public function paymentTransactions(): HasMany
+    {
+        return $this->hasMany(PaymentTransaction::class, 'subscription_id')->orderByDesc('created_at');
+    }
+
+    /**
+     * Reminder notifications history for this subscription.
+     */
+    public function reminders(): HasMany
+    {
+        return $this->hasMany(SubscriptionReminder::class, 'subscription_id')->orderByDesc('sent_at');
     }
 }

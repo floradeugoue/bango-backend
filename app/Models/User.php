@@ -9,6 +9,7 @@ use App\Models\Geo\City;
 use App\Models\Geo\Country;
 use App\Models\Geo\Neighbourhood;
 use App\Models\Housing\HousingSearch;
+use App\Models\Payment\PaymentTransaction;
 use App\Models\Profile\FollowRequest;
 use App\Models\Profile\Interest;
 use App\Models\Subscription\BadgeHistory;
@@ -295,5 +296,13 @@ class User extends Authenticatable
     public function hasActiveSubscription(string $badge): bool
     {
         return $this->activeSubscriptions()->where('badge_type', $badge)->exists();
+    }
+
+    /**
+     * Financial transactions belonging to this user.
+     */
+    public function paymentTransactions(): HasMany
+    {
+        return $this->hasMany(PaymentTransaction::class)->orderByDesc('created_at');
     }
 }
