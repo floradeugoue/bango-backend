@@ -13,6 +13,10 @@ use App\Models\Payment\PaymentTransaction;
 use App\Models\Profile\FollowRequest;
 use App\Models\Profile\Interest;
 use App\Models\Square\Post;
+use App\Models\Square\PostComment;
+use App\Models\Square\PostCommentReaction;
+use App\Models\Square\PostLike;
+use App\Models\Square\PostShare;
 use App\Models\Square\PostTag;
 use App\Models\Subscription\BadgeHistory;
 use App\Models\Subscription\Subscription;
@@ -237,6 +241,38 @@ class User extends Authenticatable
         $id = $user instanceof User ? $user->id : (int) $user;
 
         return $this->blockedByUsers()->where('blocker_id', $id)->exists();
+    }
+
+    /**
+     * Likes effectués par cet utilisateur sur les publications Square.
+     */
+    public function postLikes(): HasMany
+    {
+        return $this->hasMany(PostLike::class);
+    }
+
+    /**
+     * Commentaires rédigés par cet utilisateur sur Square.
+     */
+    public function postComments(): HasMany
+    {
+        return $this->hasMany(PostComment::class);
+    }
+
+    /**
+     * Réactions (likes / dislikes) sur les commentaires de Square.
+     */
+    public function postCommentReactions(): HasMany
+    {
+        return $this->hasMany(PostCommentReaction::class);
+    }
+
+    /**
+     * Partages effectués par cet utilisateur sur les publications Square.
+     */
+    public function postShares(): HasMany
+    {
+        return $this->hasMany(PostShare::class);
     }
 
     /**

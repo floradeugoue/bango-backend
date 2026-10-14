@@ -3,6 +3,8 @@
 namespace App\Providers;
 
 use App\Models\Square\Post;
+use App\Models\Square\PostComment;
+use App\Policies\PostCommentPolicy;
 use App\Policies\PostPolicy;
 use App\Services\Payment\Contracts\PaymentGatewayInterface;
 use App\Services\Payment\PaymentGatewayManager;
@@ -33,6 +35,11 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(
             Post::class,
             PostPolicy::class
+        );
+
+        Gate::policy(
+            PostComment::class,
+            PostCommentPolicy::class
         );
     }
 }

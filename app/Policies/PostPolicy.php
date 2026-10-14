@@ -24,6 +24,11 @@ class PostPolicy
             return true;
         }
 
+        // Si l'un des deux utilisateurs a bloqué l'autre, l'accès est refusé
+        if ($user && ($user->hasBlocked($post->user_id) || $user->isBlockedBy($post->user_id))) {
+            return false;
+        }
+
         // Audience publique
         if ($post->audience === PostAudience::Public) {
             return true;
@@ -76,5 +81,21 @@ class PostPolicy
     public function delete(User $user, Post $post): bool
     {
         return (int) $post->user_id === (int) $user->id;
+    }
+
+    /**
+     * Détermine si l'utilisateur peut partager la publication.
+     */
+    public function share(User $user, Post $post): bool
+    {
+        if (! $this->view($user, $post)) {
+            return false;
+        }
+
+        if ($post->is_archived) {
+            return false;
+        }
+
+        return (bool) $post->allow_share;
     }
 }

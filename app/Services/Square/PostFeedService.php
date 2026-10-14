@@ -30,8 +30,35 @@ class PostFeedService
             ->with(['media.tags.user', 'hashtags', 'user'])
             ->orderByDesc('created_at');
 
+        if ($user) {
+            $query->with(['likes' => fn ($q) => $q->where('user_id', $user->id)]);
+        }
+
+        // Exclure les auteurs supprimés ou suspendus
+        $query->whereHas('user', function (Builder $u) {
+            $u->where('status', '!=', 'suspended');
+        });
+
+        // Exclure les utilisateurs bloqués si l'utilisateur est connecté
+        if ($user) {
+            $blockedIds = $user->blockedUsers()->pluck('blocked_id')
+                ->merge($user->blockedByUsers()->pluck('blocker_id'))
+                ->unique()
+                ->all();
+
+            if (! empty($blockedIds)) {
+                $query->whereNotIn('user_id', $blockedIds);
+            }
+        }
+
         // Si consultation des posts d'un profil spécifique
         if ($authorId) {
+            if ($user && (int) $user->id !== $authorId) {
+                if ($user->hasBlocked($authorId) || $user->isBlockedBy($authorId)) {
+                    $query->whereRaw('1 = 0');
+                }
+            }
+
             $query->where('user_id', $authorId);
 
             // Si c'est l'auteur lui-même, il peut voir ses archives si demandé, sinon posts actifs
@@ -57,14 +84,18 @@ class PostFeedService
             $query->whereIn('user_id', $followingIds);
         } elseif ($tab === 'neighbourhood' && $user) {
             // Posts dans le même quartier ou la même ville
-            $query->where(function (Builder $q) use ($user) {
-                if ($user->neighbourhood) {
-                    $q->where('place_neighbourhood', $user->neighbourhood);
-                }
-                if ($user->city) {
-                    $q->orWhere('place_city', $user->city);
-                }
-            });
+            if (! $user->neighbourhood && ! $user->city) {
+                $query->whereRaw('1 = 0');
+            } else {
+                $query->where(function (Builder $q) use ($user) {
+                    if ($user->neighbourhood) {
+                        $q->where('place_neighbourhood', $user->neighbourhood);
+                    }
+                    if ($user->city) {
+                        $q->orWhere('place_city', $user->city);
+                    }
+                });
+            }
         } else {
             // Onglet découverte / public : posts d'audience publique
             // ou posts de l'utilisateur connecté

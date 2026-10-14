@@ -68,7 +68,7 @@ class HashtagExtractionService
 
         if (! empty($toDetach)) {
             $post->hashtags()->detach($toDetach);
-            Hashtag::whereIn('id', $toDetach)->decrement('posts_count');
+            Hashtag::whereIn('id', $toDetach)->where('posts_count', '>', 0)->decrement('posts_count');
         }
 
         if (! empty($toAttach)) {
@@ -86,7 +86,7 @@ class HashtagExtractionService
 
         if (! empty($hashtagIds)) {
             $post->hashtags()->detach($hashtagIds);
-            Hashtag::whereIn('id', $hashtagIds)->decrement('posts_count');
+            Hashtag::whereIn('id', $hashtagIds)->where('posts_count', '>', 0)->decrement('posts_count');
         }
     }
 }

@@ -116,8 +116,8 @@ class FollowController extends Controller
         /** @var User $target */
         $target = $id ? User::findOrFail($id) : $actor;
 
-        if ($actor->id !== $target->id && $target->is_private && ! $actor->isFollowing($target)) {
-            return response()->json(['message' => 'Ce compte est privé.'], 403);
+        if ($actor->id !== $target->id && ! $actor->canViewContentOf($target)) {
+            return response()->json(['message' => 'Ce compte est privé ou inaccessible.'], 403);
         }
 
         $query = $target->followers();
@@ -145,8 +145,8 @@ class FollowController extends Controller
         /** @var User $target */
         $target = $id ? User::findOrFail($id) : $actor;
 
-        if ($actor->id !== $target->id && $target->is_private && ! $actor->isFollowing($target)) {
-            return response()->json(['message' => 'Ce compte est privé.'], 403);
+        if ($actor->id !== $target->id && ! $actor->canViewContentOf($target)) {
+            return response()->json(['message' => 'Ce compte est privé ou inaccessible.'], 403);
         }
 
         $query = $target->following();

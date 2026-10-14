@@ -41,13 +41,18 @@ use App\Http\Controllers\Search\PlaceSearchController;
 use App\Http\Controllers\Square\PostArchiveController;
 use App\Http\Controllers\Square\PostAudienceController;
 use App\Http\Controllers\Square\PostCaptionController;
+use App\Http\Controllers\Square\PostCommentController;
+use App\Http\Controllers\Square\PostCommentReactionController;
 use App\Http\Controllers\Square\PostCommentsStatusController;
 use App\Http\Controllers\Square\PostController;
 use App\Http\Controllers\Square\PostFeedController;
+use App\Http\Controllers\Square\PostLikeController;
+use App\Http\Controllers\Square\PostShareController;
 use App\Http\Controllers\Subscription\CatalogController;
 use App\Http\Controllers\Subscription\SubscriptionController;
 use App\Http\Controllers\Subscription\SubscriptionRenewalController;
 use App\Http\Resources\UserResource;
+use App\Models\Profile\Interest;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -393,6 +398,26 @@ Route::middleware('auth:api')->group(function () {
 
         // Désarchiver une publication pour rétablir sa visibilité publique (SQ-15, réservé à l'auteur)
         Route::post('/posts/{post}/unarchive', [PostArchiveController::class, 'unarchive'])->name('api.posts.unarchive');
+
+        // Likes des publications (SQ - Interactions)
+        Route::post('/posts/{post}/like', [PostLikeController::class, 'store'])->name('api.posts.like');
+        Route::delete('/posts/{post}/like', [PostLikeController::class, 'destroy'])->name('api.posts.unlike');
+
+        // Partages des publications (SQ - Interactions)
+        Route::post('/posts/{post}/share', [PostShareController::class, 'store'])->name('api.posts.share');
+
+        // Commentaires des publications (SQ - Interactions)
+        Route::get('/posts/{post}/comments', [PostCommentController::class, 'index'])->name('api.posts.comments.index');
+        Route::post('/posts/{post}/comments', [PostCommentController::class, 'store'])->name('api.posts.comments.store');
+
+        // Réponses et gestion des commentaires (SQ - Interactions)
+        Route::get('/comments/{comment}/replies', [PostCommentController::class, 'replies'])->name('api.comments.replies');
+        Route::patch('/comments/{comment}', [PostCommentController::class, 'update'])->name('api.comments.update');
+        Route::delete('/comments/{comment}', [PostCommentController::class, 'destroy'])->name('api.comments.destroy');
+
+        // Réactions sur les commentaires (SQ - Likes / Dislikes)
+        Route::put('/comments/{comment}/reaction', [PostCommentReactionController::class, 'react'])->name('api.comments.reaction.set');
+        Route::delete('/comments/{comment}/reaction', [PostCommentReactionController::class, 'destroy'])->name('api.comments.reaction.destroy');
 
         // Téléverser un média photo ou vidéo sécurisé pour le carrousel Square (CR-02, CR-04, CR-12)
         Route::post('/media/upload', [MediaUploadController::class, 'upload'])->name('api.media.upload');

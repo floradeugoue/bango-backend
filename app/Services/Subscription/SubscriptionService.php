@@ -98,6 +98,7 @@ class SubscriptionService
             // Find existing subscription for this badge type or create new
             $subscription = Subscription::where('user_id', $user->id)
                 ->where('badge_type', $product->badge_type ?: $product->code)
+                ->lockForUpdate()
                 ->first();
 
             $oldState = $subscription?->state;
@@ -212,29 +213,31 @@ class SubscriptionService
      */
     public function cancelSubscription(Subscription $subscription, ?string $reason = null, ?string $feedback = null, ?User $actor = null): Subscription
     {
-        $subscription->update([
-            'auto_renew' => false,
-            'canceled_at' => now(),
-            'cancel_reason' => $reason,
-            'cancel_feedback' => $feedback,
-        ]);
+        return DB::transaction(function () use ($subscription, $reason, $feedback, $actor) {
+            $subscription->update([
+                'auto_renew' => false,
+                'canceled_at' => now(),
+                'cancel_reason' => $reason,
+                'cancel_feedback' => $feedback,
+            ]);
 
-        SubscriptionEvent::create([
-            'subscription_id' => $subscription->id,
-            'user_id' => $subscription->user_id,
-            'event_type' => 'canceled',
-            'old_state' => $subscription->state,
-            'new_state' => $subscription->state,
-            'actor_id' => $actor?->id ?? $subscription->user_id,
-            'actor_role' => $actor && $actor->isAdmin() ? 'admin' : 'user',
-            'reason' => $reason,
-            'payload' => [
-                'feedback' => $feedback,
-                'expires_at' => $subscription->current_period_end->toIso8601String(),
-            ],
-        ]);
+            SubscriptionEvent::create([
+                'subscription_id' => $subscription->id,
+                'user_id' => $subscription->user_id,
+                'event_type' => 'canceled',
+                'old_state' => $subscription->state,
+                'new_state' => $subscription->state,
+                'actor_id' => $actor?->id ?? $subscription->user_id,
+                'actor_role' => $actor && $actor->isAdmin() ? 'admin' : 'user',
+                'reason' => $reason,
+                'payload' => [
+                    'feedback' => $feedback,
+                    'expires_at' => $subscription->current_period_end->toIso8601String(),
+                ],
+            ]);
 
-        return $subscription;
+            return $subscription;
+        });
     }
 
     /**
@@ -242,30 +245,32 @@ class SubscriptionService
      */
     public function enterGracePeriod(Subscription $subscription, ?string $failureReason = null): Subscription
     {
-        $graceUntil = now()->addDays(7);
-        $oldState = $subscription->state;
+        return DB::transaction(function () use ($subscription, $failureReason) {
+            $graceUntil = now()->addDays(7);
+            $oldState = $subscription->state;
 
-        $subscription->update([
-            'state' => 'grace',
-            'grace_until' => $graceUntil,
-            'failed_attempts' => $subscription->failed_attempts + 1,
-        ]);
+            $subscription->update([
+                'state' => 'grace',
+                'grace_until' => $graceUntil,
+                'failed_attempts' => $subscription->failed_attempts + 1,
+            ]);
 
-        SubscriptionEvent::create([
-            'subscription_id' => $subscription->id,
-            'user_id' => $subscription->user_id,
-            'event_type' => 'grace_entered',
-            'old_state' => $oldState,
-            'new_state' => 'grace',
-            'actor_role' => 'system',
-            'reason' => $failureReason ?? 'Échec du prélèvement à l\'échéance',
-            'payload' => [
-                'grace_until' => $graceUntil->toIso8601String(),
-                'attempt' => $subscription->failed_attempts,
-            ],
-        ]);
+            SubscriptionEvent::create([
+                'subscription_id' => $subscription->id,
+                'user_id' => $subscription->user_id,
+                'event_type' => 'grace_entered',
+                'old_state' => $oldState,
+                'new_state' => 'grace',
+                'actor_role' => 'system',
+                'reason' => $failureReason ?? 'Échec du prélèvement à l\'échéance',
+                'payload' => [
+                    'grace_until' => $graceUntil->toIso8601String(),
+                    'attempt' => $subscription->failed_attempts,
+                ],
+            ]);
 
-        return $subscription;
+            return $subscription;
+        });
     }
 
     /**
@@ -273,28 +278,30 @@ class SubscriptionService
      */
     public function expireSubscription(Subscription $subscription, string $reason = 'Échéance dépassée sans régularisation'): Subscription
     {
-        $oldState = $subscription->state;
+        return DB::transaction(function () use ($subscription, $reason) {
+            $oldState = $subscription->state;
 
-        $subscription->update([
-            'state' => 'expired',
-            'grace_until' => null,
-            'auto_renew' => false,
-        ]);
+            $subscription->update([
+                'state' => 'expired',
+                'grace_until' => null,
+                'auto_renew' => false,
+            ]);
 
-        SubscriptionEvent::create([
-            'subscription_id' => $subscription->id,
-            'user_id' => $subscription->user_id,
-            'event_type' => 'expired',
-            'old_state' => $oldState,
-            'new_state' => 'expired',
-            'actor_role' => 'system',
-            'reason' => $reason,
-        ]);
+            SubscriptionEvent::create([
+                'subscription_id' => $subscription->id,
+                'user_id' => $subscription->user_id,
+                'event_type' => 'expired',
+                'old_state' => $oldState,
+                'new_state' => 'expired',
+                'actor_role' => 'system',
+                'reason' => $reason,
+            ]);
 
-        // Re-evaluate badge status
-        $this->badgeService->syncUserBadge($subscription->user, 'system', null, $reason);
+            // Re-evaluate badge status
+            $this->badgeService->syncUserBadge($subscription->user, 'system', null, $reason);
 
-        return $subscription;
+            return $subscription;
+        });
     }
 
     /**
@@ -302,80 +309,86 @@ class SubscriptionService
      */
     public function adminSuspend(Subscription $subscription, User $admin, string $reason): Subscription
     {
-        $oldState = $subscription->state;
+        return DB::transaction(function () use ($subscription, $admin, $reason) {
+            $oldState = $subscription->state;
 
-        $subscription->update([
-            'state' => 'suspended',
-        ]);
+            $subscription->update([
+                'state' => 'suspended',
+            ]);
 
-        SubscriptionEvent::create([
-            'subscription_id' => $subscription->id,
-            'user_id' => $subscription->user_id,
-            'event_type' => 'suspended',
-            'old_state' => $oldState,
-            'new_state' => 'suspended',
-            'actor_id' => $admin->id,
-            'actor_role' => 'admin',
-            'reason' => $reason,
-        ]);
+            SubscriptionEvent::create([
+                'subscription_id' => $subscription->id,
+                'user_id' => $subscription->user_id,
+                'event_type' => 'suspended',
+                'old_state' => $oldState,
+                'new_state' => 'suspended',
+                'actor_id' => $admin->id,
+                'actor_role' => 'admin',
+                'reason' => $reason,
+            ]);
 
-        $this->badgeService->syncUserBadge($subscription->user, 'admin', $admin, "Suspension administrative : {$reason}");
+            $this->badgeService->syncUserBadge($subscription->user, 'admin', $admin, "Suspension administrative : {$reason}");
 
-        return $subscription;
+            return $subscription;
+        });
     }
 
     public function adminReactivate(Subscription $subscription, User $admin, string $reason): Subscription
     {
-        $oldState = $subscription->state;
+        return DB::transaction(function () use ($subscription, $admin, $reason) {
+            $oldState = $subscription->state;
 
-        $subscription->update([
-            'state' => 'active',
-        ]);
+            $subscription->update([
+                'state' => 'active',
+            ]);
 
-        SubscriptionEvent::create([
-            'subscription_id' => $subscription->id,
-            'user_id' => $subscription->user_id,
-            'event_type' => 'reactivated',
-            'old_state' => $oldState,
-            'new_state' => 'active',
-            'actor_id' => $admin->id,
-            'actor_role' => 'admin',
-            'reason' => $reason,
-        ]);
+            SubscriptionEvent::create([
+                'subscription_id' => $subscription->id,
+                'user_id' => $subscription->user_id,
+                'event_type' => 'reactivated',
+                'old_state' => $oldState,
+                'new_state' => 'active',
+                'actor_id' => $admin->id,
+                'actor_role' => 'admin',
+                'reason' => $reason,
+            ]);
 
-        $this->badgeService->syncUserBadge($subscription->user, 'admin', $admin, "Réactivation administrative : {$reason}");
+            $this->badgeService->syncUserBadge($subscription->user, 'admin', $admin, "Réactivation administrative : {$reason}");
 
-        return $subscription;
+            return $subscription;
+        });
     }
 
     public function adminExtend(Subscription $subscription, int $days, User $admin, string $reason): Subscription
     {
-        $newEnd = $subscription->current_period_end->copy()->addDays($days);
+        return DB::transaction(function () use ($subscription, $days, $admin, $reason) {
+            $newEnd = $subscription->current_period_end->copy()->addDays($days);
 
-        $subscription->update([
-            'current_period_end' => $newEnd,
-            'next_renewal' => $newEnd,
-            'state' => 'active',
-            'grace_until' => null,
-        ]);
+            $subscription->update([
+                'current_period_end' => $newEnd,
+                'next_renewal' => $newEnd,
+                'state' => 'active',
+                'grace_until' => null,
+            ]);
 
-        SubscriptionEvent::create([
-            'subscription_id' => $subscription->id,
-            'user_id' => $subscription->user_id,
-            'event_type' => 'extended',
-            'old_state' => $subscription->state,
-            'new_state' => 'active',
-            'actor_id' => $admin->id,
-            'actor_role' => 'admin',
-            'reason' => $reason,
-            'payload' => [
-                'added_days' => $days,
-                'new_end' => $newEnd->toIso8601String(),
-            ],
-        ]);
+            SubscriptionEvent::create([
+                'subscription_id' => $subscription->id,
+                'user_id' => $subscription->user_id,
+                'event_type' => 'extended',
+                'old_state' => $subscription->state,
+                'new_state' => 'active',
+                'actor_id' => $admin->id,
+                'actor_role' => 'admin',
+                'reason' => $reason,
+                'payload' => [
+                    'added_days' => $days,
+                    'new_end' => $newEnd->toIso8601String(),
+                ],
+            ]);
 
-        $this->badgeService->syncUserBadge($subscription->user, 'admin', $admin, "Prolongation de {$days} jours : {$reason}");
+            $this->badgeService->syncUserBadge($subscription->user, 'admin', $admin, "Prolongation de {$days} jours : {$reason}");
 
-        return $subscription;
+            return $subscription;
+        });
     }
 }
