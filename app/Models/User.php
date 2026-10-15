@@ -29,6 +29,7 @@ use App\Models\Story\StoryReply;
 use App\Models\Story\StoryView;
 use App\Models\Subscription\BadgeHistory;
 use App\Models\Subscription\Subscription;
+use App\Models\Visit\VisitReservation;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -510,5 +511,29 @@ class User extends Authenticatable
     {
         return $this->belongsToMany(Listing::class, 'listing_saves', 'user_id', 'listing_id')
             ->withTimestamps();
+    }
+
+    /**
+     * Visites demandées par cet utilisateur en tant que prospect.
+     */
+    public function prospectVisits(): HasMany
+    {
+        return $this->hasMany(VisitReservation::class, 'prospect_id')->orderByDesc('created_at');
+    }
+
+    /**
+     * Demandes de visite reçues par cet utilisateur en tant que bailleur.
+     */
+    public function landlordVisits(): HasMany
+    {
+        return $this->hasMany(VisitReservation::class, 'owner_id')->orderByDesc('created_at');
+    }
+
+    /**
+     * Visites assignées à cet utilisateur en tant qu'agent mandaté.
+     */
+    public function agentVisits(): HasMany
+    {
+        return $this->hasMany(VisitReservation::class, 'agent_id')->orderByDesc('created_at');
     }
 }

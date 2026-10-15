@@ -66,6 +66,8 @@ use App\Http\Controllers\Story\StoryController;
 use App\Http\Controllers\Subscription\CatalogController;
 use App\Http\Controllers\Subscription\SubscriptionController;
 use App\Http\Controllers\Subscription\SubscriptionRenewalController;
+use App\Http\Controllers\Visit\LandlordVisitController;
+use App\Http\Controllers\Visit\ProspectVisitController;
 use App\Http\Resources\UserResource;
 use App\Models\Profile\Interest;
 use Illuminate\Http\Request;
@@ -197,6 +199,10 @@ Route::prefix('listings')->group(function () {
     // Fiche détaillée d'une annonce immobilière et ventilation des frais d'entrée (IM-05)
     // Ressource : Listing | Accès : Public (les données privées d'adresse restent masquées aux tiers)
     Route::get('/{id}', [ListingController::class, 'show'])->whereUuid('id')->name('api.listings.show');
+
+    // Créneaux disponibles pour une annonce immobilière (IM-05 / slots.tsx)
+    // Ressource : VisitSlot (grille 5 jours, capacité, verrous de 15min déduits) | Accès : Public
+    Route::get('/{id}/slots', [ProspectVisitController::class, 'slots'])->whereUuid('id')->name('api.listings.slots');
 });
 
 // --------------------------------------------------------------------------
@@ -381,6 +387,53 @@ Route::middleware('auth:api')->group(function () {
         // Supprimer un média associé à une annonce et purger le fichier physique
         // Ressource : ListingMedia | Accès : Authentifié (propriétaire ou agent délégué)
         Route::delete('/{id}/media/{mediaId}', [ListingMediaController::class, 'destroy'])->whereUuid('id')->whereUuid('mediaId')->name('api.listings.media.destroy');
+
+        // Poser une réservation avec verrou temporaire de 15 minutes et transaction PAY (IM-05 / booking.tsx)
+        // Ressource : VisitReservation | Accès : Authentifié (prospect) | Transactionnel et atomique
+        Route::post('/{id}/visits', [ProspectVisitController::class, 'book'])->whereUuid('id')->name('api.listings.visits.book');
+    });
+
+    // --------------------------------------------------------------------------
+    // IM — GESTION DES VISITES DU PROSPECT (IM-06 / visit.tsx, visits.tsx)
+    // --------------------------------------------------------------------------
+    Route::prefix('visits')->group(function () {
+        // Historique paginé des visites de l'utilisateur connecté
+        Route::get('/mine', [ProspectVisitController::class, 'mine'])->name('api.visits.mine');
+
+        // Consultation détaillée d'une réservation de visite
+        Route::get('/{id}', [ProspectVisitController::class, 'show'])->whereUuid('id')->name('api.visits.show');
+
+        // Confirmation post-paiement côté client (vérification de preuve serveur)
+        Route::post('/{id}/confirm', [ProspectVisitController::class, 'confirm'])->whereUuid('id')->name('api.visits.confirm');
+
+        // Annuler une visite (avec application de la politique de remboursement 24h IM-14)
+        Route::post('/{id}/cancel', [ProspectVisitController::class, 'cancel'])->whereUuid('id')->name('api.visits.cancel');
+
+        // Répondre à une proposition de créneau alternatif par le bailleur
+        Route::post('/{id}/proposal/respond', [ProspectVisitController::class, 'respondToProposal'])->whereUuid('id')->name('api.visits.proposal.respond');
+
+        // Télécharger ou consulter le reçu officiel de visite
+        Route::get('/{id}/receipt', [ProspectVisitController::class, 'receipt'])->whereUuid('id')->name('api.visits.receipt');
+    });
+
+    // --------------------------------------------------------------------------
+    // BL & AG — ESPACES BAILLEUR ET AGENT : GESTION DES VISITES (BL-04, BL-07, AG-02, AG-03)
+    // --------------------------------------------------------------------------
+    Route::prefix('landlord')->group(function () {
+        // Consulter la liste des créneaux configurés pour un bien (BL-04)
+        Route::get('/properties/{id}/slots', [LandlordVisitController::class, 'slots'])->whereUuid('id')->name('api.landlord.properties.slots');
+
+        // Créer un créneau de disponibilité personnalisé pour un bien (BL-04)
+        Route::post('/properties/{id}/slots', [LandlordVisitController::class, 'createSlot'])->whereUuid('id')->name('api.landlord.properties.slots.create');
+
+        // Fermer un créneau de disponibilité (BL-04)
+        Route::delete('/properties/{id}/slots/{slotId}', [LandlordVisitController::class, 'closeSlot'])->whereUuid('id')->whereUuid('slotId')->name('api.landlord.properties.slots.close');
+
+        // Consulter les demandes et réservations de visite d'un bien (BL-07)
+        Route::get('/properties/{id}/visit-requests', [LandlordVisitController::class, 'visitRequests'])->whereUuid('id')->name('api.landlord.properties.visit_requests');
+
+        // Accepter, proposer une alternative ou décliner une visite (BL-07 / AG-03)
+        Route::post('/visits/{id}/answer', [LandlordVisitController::class, 'answer'])->whereUuid('id')->name('api.landlord.visits.answer');
     });
 
     // --------------------------------------------------------------------------
