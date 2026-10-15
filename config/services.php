@@ -41,4 +41,11 @@ return [
         'sender_id' => env('ZOMLOA_SENDER_ID', 'FlowSMS'),
     ],
 
+    'cloudflare_stream' => [
+        'account_id' => env('CLOUDFLARE_STREAM_ACCOUNT_ID'),
+        'api_token' => env('CLOUDFLARE_STREAM_API_TOKEN'),
+        'customer_subdomain' => env('CLOUDFLARE_STREAM_CUSTOMER_SUBDOMAIN'),
+        'webhook_secret' => env('CLOUDFLARE_STREAM_WEBHOOK_SECRET'),
+    ],
+
 ];

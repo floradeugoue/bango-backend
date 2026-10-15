@@ -6,7 +6,7 @@ Le téléversement de médias Square s'appuie sur le disque configuré dans Lara
 ### 1.1. Flux de Téléversement Client-Serveur
 1. L'application mobile sélectionne et retouche une ou plusieurs photos/vidéos (CR-02, CR-05).
 2. L'application envoie chaque fichier via une requête multipart vers `POST /api/v1/media/upload`.
-3. Le serveur valide le type MIME, calcule les dimensions (pour les photos), génère un nom non prévisible et stocke le fichier dans `storage/app/public/square/{user_id}/`.
+3. Le serveur valide le type MIME, calcule les dimensions (pour les photos), génère un nom non prévisible et stocke le fichier dans le dossier dédié (`storage/app/public/square/images/{user_id}/` pour les photos, ou `storage/app/public/square/videos/{user_id}/` pour les vidéos).
 4. Le serveur renvoie l'objet média contenant l'identifiant unique, l'URL publique, le type, la taille et les dimensions.
 5. Lorsque tous les médias sont prêts, l'application soumet le payload final à `POST /api/v1/posts` avec la liste des médias ordonnés (`display_order`).
 
