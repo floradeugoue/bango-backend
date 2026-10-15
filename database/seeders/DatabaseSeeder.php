@@ -21,6 +21,7 @@ class DatabaseSeeder extends Seeder
             InterestSeeder::class,
             GeoSeeder::class,
             SubscriptionCatalogSeeder::class,
+            SoundSeeder::class,
         ]);
 
         $adminRole = Role::where('slug', 'admin')->first();

@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Admin\AdminPaymentController;
+use App\Http\Controllers\Admin\AdminSoundCatalogController;
 use App\Http\Controllers\Admin\RoleController;
 use App\Http\Controllers\Admin\SubscriptionCatalogController;
 use App\Http\Controllers\Admin\SubscriptionManagementController;
@@ -35,6 +36,12 @@ use App\Http\Controllers\Profile\PrivacyController;
 use App\Http\Controllers\Profile\ProfileController;
 use App\Http\Controllers\Profile\QrController;
 use App\Http\Controllers\Profile\SecurityController;
+use App\Http\Controllers\Reel\CloudflareStreamWebhookController;
+use App\Http\Controllers\Reel\ReelCommentController;
+use App\Http\Controllers\Reel\ReelFeedController;
+use App\Http\Controllers\Reel\ReelInteractionController;
+use App\Http\Controllers\Reel\SoundController;
+use App\Http\Controllers\Reel\StudioReelController;
 use App\Http\Controllers\Search\HashtagSearchController;
 use App\Http\Controllers\Search\PeopleSearchController;
 use App\Http\Controllers\Search\PlaceSearchController;
@@ -158,6 +165,30 @@ Route::prefix('geo')->group(function () {
 Route::prefix('webhooks/payments')->group(function () {
     // Webhook IPN Monetbil (vérification de signature MD5 timing-safe)
     Route::post('/monetbil', [MonetbilWebhookController::class, 'handle'])->name('api.webhooks.payments.monetbil');
+});
+
+// Webhook Cloudflare Stream pour le suivi asynchrone du transcodage vidéo (RL / CR2)
+Route::post('/webhooks/cloudflare-stream', [CloudflareStreamWebhookController::class, 'handle'])->name('api.webhooks.cloudflare_stream');
+
+// --------------------------------------------------------------------------
+// REELS & SONS — CATALOGUE & CONSULTATION (Public / Mobile)
+// --------------------------------------------------------------------------
+Route::prefix('reels')->group(function () {
+    // Fil vertical des Reels (RL-01, RL-08 Découvrir)
+    Route::get('/feed', [ReelFeedController::class, 'feed'])->name('api.reels.feed');
+
+    // Catalogue des sons et détails (RL-05)
+    Route::get('/sounds', [SoundController::class, 'index'])->name('api.reels.sounds.index');
+    Route::get('/sounds/{id}', [SoundController::class, 'show'])->name('api.reels.sounds.show');
+    Route::get('/sounds/{id}/reels', [SoundController::class, 'reels'])->name('api.reels.sounds.reels');
+
+    // Consultation d'un Reel et commentaires (restreint aux UUIDs pour éviter toute collision)
+    Route::get('/{id}', [ReelFeedController::class, 'show'])->whereUuid('id')->name('api.reels.show');
+    Route::get('/{reel}/comments', [ReelCommentController::class, 'index'])->whereUuid('reel')->name('api.reels.comments.index');
+    Route::get('/comments/{comment}/replies', [ReelCommentController::class, 'replies'])->name('api.reels.comments.replies');
+
+    // Enregistrement d'une vue (avec déduplication anti-abus 30 minutes)
+    Route::post('/{reel}/view', [ReelInteractionController::class, 'view'])->whereUuid('reel')->name('api.reels.view');
 });
 
 // --------------------------------------------------------------------------
@@ -431,6 +462,56 @@ Route::middleware('auth:api')->group(function () {
         // Rechercher des lieux contextuels réels issus de la base géographique BANGO (CR-09)
         Route::get('/search/places', [PlaceSearchController::class, 'index'])->name('api.search.places');
     });
+
+    // --------------------------------------------------------------------------
+    // CR2 & RL — STUDIO REEL, REELS ET SONS (Actions authentifiées)
+    // --------------------------------------------------------------------------
+    Route::prefix('reels')->group(function () {
+        // Studio Reel : Brouillons & Reprise (CR-14, CR-17 à CR-29)
+        Route::post('/drafts', [StudioReelController::class, 'saveDraft'])->name('api.reels.drafts.save');
+        Route::get('/drafts', [StudioReelController::class, 'listDrafts'])->name('api.reels.drafts.index');
+        Route::get('/drafts/{id}', [StudioReelController::class, 'getDraft'])->name('api.reels.drafts.show');
+        Route::delete('/drafts/{id}', [StudioReelController::class, 'deleteDraft'])->name('api.reels.drafts.destroy');
+
+        // Studio Reel : Téléversement médias (vidéos / couverture)
+        Route::post('/media/upload', [StudioReelController::class, 'uploadMedia'])->name('api.reels.media.upload');
+
+        // Studio Reel : Lancement de la publication asynchrone (Queue Job)
+        Route::post('/publish', [StudioReelController::class, 'publish'])->name('api.reels.publish');
+
+        // Gestion du Reel (suppression par l'auteur RL-06)
+        Route::delete('/{reel}', [ReelFeedController::class, 'destroy'])->name('api.reels.destroy');
+
+        // Interactions sociales : Likes & Dislikes (Exclusivité stricte)
+        Route::post('/{reel}/reaction', [ReelInteractionController::class, 'react'])->name('api.reels.reaction.set');
+        Route::delete('/{reel}/reaction', [ReelInteractionController::class, 'removeReaction'])->name('api.reels.reaction.destroy');
+        Route::post('/{reel}/like', [ReelInteractionController::class, 'like'])->name('api.reels.like');
+        Route::delete('/{reel}/like', [ReelInteractionController::class, 'unlike'])->name('api.reels.unlike');
+        Route::post('/{reel}/dislike', [ReelInteractionController::class, 'dislike'])->name('api.reels.dislike');
+        Route::delete('/{reel}/dislike', [ReelInteractionController::class, 'undislike'])->name('api.reels.undislike');
+
+        // Partage (incrément atomique et idempotence)
+        Route::post('/{reel}/share', [ReelInteractionController::class, 'share'])->name('api.reels.share');
+
+        // Favoris / Sauvegardes
+        Route::post('/{reel}/save', [ReelInteractionController::class, 'toggleSave'])->name('api.reels.save');
+        Route::get('/user/saved', [ReelInteractionController::class, 'listSaved'])->name('api.reels.saved.list');
+
+        // Pas intéressé (RL-06)
+        Route::post('/{reel}/not-interested', [ReelInteractionController::class, 'markNotInterested'])->name('api.reels.not_interested');
+
+        // Commentaires & Réponses (RL-03)
+        Route::post('/{reel}/comments', [ReelCommentController::class, 'store'])->name('api.reels.comments.store');
+        Route::patch('/comments/{comment}', [ReelCommentController::class, 'update'])->name('api.reels.comments.update');
+        Route::delete('/comments/{comment}', [ReelCommentController::class, 'destroy'])->name('api.reels.comments.destroy');
+        Route::put('/comments/{comment}/reaction', [ReelCommentController::class, 'react'])->name('api.reels.comments.reaction.set');
+        Route::delete('/comments/{comment}/reaction', [ReelCommentController::class, 'removeReaction'])->name('api.reels.comments.reaction.destroy');
+
+        // Sons : Favoris et verrouillage de son original
+        Route::post('/sounds/{id}/favourite', [SoundController::class, 'toggleFavourite'])->name('api.reels.sounds.favourite');
+        Route::get('/sounds/user/favourites', [SoundController::class, 'favourites'])->name('api.reels.sounds.favourites');
+        Route::put('/{id}/original-sound/lock', [SoundController::class, 'lockOriginal'])->name('api.reels.sounds.lock');
+    });
 });
 
 /*
@@ -558,5 +639,20 @@ Route::middleware(['auth:api', 'admin'])->group(function () {
         // Réclamations Doubles Débits
         Route::get('/double-charge-claims', [AdminPaymentController::class, 'doubleChargeClaims']);
         Route::post('/double-charge-claims', [AdminPaymentController::class, 'createDoubleChargeClaim']);
+    });
+
+    // --------------------------------------------------------------------------
+    // REELS SOUND CATALOG (Administration & alimentation réelle du catalogue audio)
+    // --------------------------------------------------------------------------
+    Route::prefix('admin/sounds')->group(function () {
+        Route::get('/', [AdminSoundCatalogController::class, 'index'])->name('api.admin.sounds.index');
+        Route::post('/', [AdminSoundCatalogController::class, 'store'])->name('api.admin.sounds.store');
+        Route::get('/{id}', [AdminSoundCatalogController::class, 'show'])->name('api.admin.sounds.show');
+        Route::post('/{id}', [AdminSoundCatalogController::class, 'update'])->name('api.admin.sounds.update');
+        Route::patch('/{id}/publication', [AdminSoundCatalogController::class, 'togglePublication'])->name('api.admin.sounds.publication');
+        Route::patch('/{id}/rights', [AdminSoundCatalogController::class, 'updateRights'])->name('api.admin.sounds.rights');
+        Route::delete('/{id}', [AdminSoundCatalogController::class, 'removeFromCatalog'])->name('api.admin.sounds.remove');
+        Route::post('/{id}/restore', [AdminSoundCatalogController::class, 'restore'])->name('api.admin.sounds.restore');
+        Route::delete('/{id}/force', [AdminSoundCatalogController::class, 'destroy'])->name('api.admin.sounds.destroy');
     });
 });

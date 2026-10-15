@@ -3,13 +3,13 @@
 namespace App\Http\Controllers\Profile;
 
 use App\Http\Controllers\Controller;
+use App\Services\Media\MediaStorageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
 
 class AvatarController extends Controller
 {
-    public function __invoke(Request $request): JsonResponse
+    public function __invoke(Request $request, MediaStorageService $storageService): JsonResponse
     {
         $request->validate([
             'avatar' => ['required', 'image', 'mimes:jpeg,png,jpg,gif,webp', 'max:5120'], // 5MB max
@@ -18,13 +18,13 @@ class AvatarController extends Controller
         $user = $request->user();
 
         if ($user->avatar_url) {
-            $oldPath = str_replace(Storage::url(''), '', $user->avatar_url);
-            Storage::disk('public')->delete($oldPath);
+            $storageService->delete($user->avatar_url, 'public');
         }
 
-        $path = $request->file('avatar')->store('avatars', 'public');
+        $directory = $storageService->pathFor('avatars');
+        $path = $request->file('avatar')->store($directory, 'public');
 
-        $url = Storage::url($path);
+        $url = $storageService->getUrl($path, 'public');
 
         $user->update([
             'avatar_url' => $url,

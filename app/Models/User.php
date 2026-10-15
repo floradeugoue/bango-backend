@@ -12,6 +12,10 @@ use App\Models\Housing\HousingSearch;
 use App\Models\Payment\PaymentTransaction;
 use App\Models\Profile\FollowRequest;
 use App\Models\Profile\Interest;
+use App\Models\Reel\Reel;
+use App\Models\Reel\ReelComment;
+use App\Models\Reel\ReelReaction;
+use App\Models\Reel\Sound;
 use App\Models\Square\Post;
 use App\Models\Square\PostComment;
 use App\Models\Square\PostCommentReaction;
@@ -358,5 +362,56 @@ class User extends Authenticatable
     public function taggedInMedia(): HasMany
     {
         return $this->hasMany(PostTag::class);
+    }
+
+    /**
+     * Reels créés par cet utilisateur (publiés et brouillons).
+     */
+    public function reels(): HasMany
+    {
+        return $this->hasMany(Reel::class)->orderByDesc('created_at');
+    }
+
+    /**
+     * Réactions (likes et dislikes) de cet utilisateur sur des Reels.
+     */
+    public function reelReactions(): HasMany
+    {
+        return $this->hasMany(ReelReaction::class);
+    }
+
+    /**
+     * Commentaires émis par cet utilisateur sur des Reels.
+     */
+    public function reelComments(): HasMany
+    {
+        return $this->hasMany(ReelComment::class);
+    }
+
+    /**
+     * Sons ajoutés aux favoris par cet utilisateur.
+     */
+    public function favouriteSounds(): BelongsToMany
+    {
+        return $this->belongsToMany(Sound::class, 'user_favourite_sounds', 'user_id', 'sound_id')
+            ->withTimestamps();
+    }
+
+    /**
+     * Reels sauvegardés par cet utilisateur.
+     */
+    public function savedReels(): BelongsToMany
+    {
+        return $this->belongsToMany(Reel::class, 'user_saved_reels', 'user_id', 'reel_id')
+            ->withTimestamps();
+    }
+
+    /**
+     * Reels marqués "Ça ne m'intéresse pas" par cet utilisateur.
+     */
+    public function notInterestedReels(): BelongsToMany
+    {
+        return $this->belongsToMany(Reel::class, 'user_not_interested_reels', 'user_id', 'reel_id')
+            ->withTimestamps();
     }
 }
