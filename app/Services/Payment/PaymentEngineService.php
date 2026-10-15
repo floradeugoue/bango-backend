@@ -10,8 +10,10 @@ use App\Enums\Payment\PaymentStatus;
 use App\Exceptions\Payment\IdempotencyConflictException;
 use App\Models\Payment\PaymentTransaction;
 use App\Models\User;
+use App\Models\Visit\VisitReservation;
 use App\Services\Payment\DTO\PriceQuote;
 use App\Services\Subscription\SubscriptionService;
+use App\Services\Visit\VisitReservationService;
 use DomainException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -205,6 +207,11 @@ class PaymentEngineService
                             'reference' => $lockedTx->reference,
                         ],
                     ]);
+
+                    // Fulfiller métier pour les visites immobilières
+                    if ($lockedTx->service_type === PaymentServiceType::Visit && $lockedTx->payable_type === VisitReservation::class && $lockedTx->payable_id) {
+                        app(VisitReservationService::class)->confirmPaymentFromWebhook($lockedTx);
+                    }
                 }
             }
 
@@ -272,8 +279,8 @@ class PaymentEngineService
      */
     public function refundTransaction(
         PaymentTransaction $transaction,
-        User $adminUser,
-        string $reason,
+        ?User $adminUser = null,
+        string $reason = 'Remboursement',
         ?float $amount = null,
         ?string $externalRefundReference = null,
         array $metadata = []
@@ -325,8 +332,12 @@ class PaymentEngineService
             // 4. Preuve d'opération externe obligatoire
             $cleanExternalRef = trim((string) $externalRefundReference);
             if (empty($cleanExternalRef)) {
-                throw new DomainException('Une référence d\'opération externe (reçu de virement Mobile Money) est obligatoire.');
+                $cleanExternalRef = 'REFUND-SYSTEM-'.(string) Str::uuid();
             }
+
+            $adminId = $adminUser?->id;
+            $adminName = $adminUser?->name ?? 'Système BANGO (Automatique)';
+            $source = $adminUser ? PaymentEventSource::Admin : PaymentEventSource::System;
 
             // 5. Enregistrement des données dans les métadonnées de la transaction
             $meta = $lockedTx->metadata ?? [];
@@ -334,8 +345,8 @@ class PaymentEngineService
                 'refunded_amount' => $refundAmount,
                 'external_reference' => $cleanExternalRef,
                 'reason' => $cleanReason,
-                'admin_id' => $adminUser->id,
-                'admin_name' => $adminUser->name,
+                'admin_id' => $adminId,
+                'admin_name' => $adminName,
                 'refunded_at' => now()->toIso8601String(),
             ]);
             $lockedTx->metadata = $meta;
@@ -343,11 +354,11 @@ class PaymentEngineService
             // 6. Transition d'état vers Refunded
             $lockedTx->transitionTo(
                 targetStatus: PaymentStatus::Refunded,
-                source: PaymentEventSource::Admin,
+                source: $source,
                 reason: $cleanReason,
                 payload: [
-                    'admin_id' => $adminUser->id,
-                    'admin_name' => $adminUser->name,
+                    'admin_id' => $adminId,
+                    'admin_name' => $adminName,
                     'amount_refunded' => $refundAmount,
                     'external_reference' => $cleanExternalRef,
                 ]
@@ -356,13 +367,13 @@ class PaymentEngineService
             // 7. Journalisation d'audit immuable spécifique pour le remboursement
             $lockedTx->events()->create([
                 'event_type' => 'refund_processed',
-                'source' => PaymentEventSource::Admin->value,
+                'source' => $source->value,
                 'from_status' => PaymentStatus::Confirmed->value,
                 'to_status' => PaymentStatus::Refunded->value,
                 'payload' => [
-                    'correlation_id' => 'ADMIN-REFUND-'.(string) Str::uuid(),
-                    'admin_id' => $adminUser->id,
-                    'admin_name' => $adminUser->name,
+                    'correlation_id' => 'REFUND-'.(string) Str::uuid(),
+                    'admin_id' => $adminId,
+                    'admin_name' => $adminName,
                     'amount_refunded' => $refundAmount,
                     'external_reference' => $cleanExternalRef,
                     'reason' => $cleanReason,

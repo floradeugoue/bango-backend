@@ -5,8 +5,11 @@ namespace App\Models\Listing;
 use App\Enums\Listing\ListingKind;
 use App\Enums\Listing\ListingMode;
 use App\Enums\Listing\ListingStatus;
+use App\Enums\Visit\VisitReservationStatus;
 use App\Models\Reel\Reel;
 use App\Models\User;
+use App\Models\Visit\VisitReservation;
+use App\Models\Visit\VisitSlot;
 use Database\Factories\Listing\ListingFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
@@ -181,6 +184,33 @@ class Listing extends Model
     public function reels(): HasMany
     {
         return $this->hasMany(Reel::class, 'listing_id');
+    }
+
+    /**
+     * Créneaux de visite programmés sur cette annonce.
+     */
+    public function visitSlots(): HasMany
+    {
+        return $this->hasMany(VisitSlot::class, 'listing_id');
+    }
+
+    /**
+     * Réservations de visites associées à cette annonce.
+     */
+    public function visitReservations(): HasMany
+    {
+        return $this->hasMany(VisitReservation::class, 'listing_id');
+    }
+
+    /**
+     * Détermine si un utilisateur dispose d'une visite formellement confirmée sur ce bien.
+     */
+    public function hasConfirmedVisitBy(User $user): bool
+    {
+        return $this->visitReservations()
+            ->where('prospect_id', $user->id)
+            ->where('status', VisitReservationStatus::Confirmed->value)
+            ->exists();
     }
 
     /**

@@ -20,7 +20,7 @@ class ListingDetailResource extends JsonResource
     public function toArray(Request $request): array
     {
         $viewer = $request->user();
-        $isPrivileged = $viewer && ($viewer->isAdmin() || $viewer->id === $this->owner_id || ($this->agent_id && $viewer->id === $this->agent_id));
+        $isPrivileged = $viewer && ($viewer->isAdmin() || $viewer->id === $this->owner_id || ($this->agent_id && $viewer->id === $this->agent_id) || $this->hasConfirmedVisitBy($viewer));
 
         // Calcul de la ventilation des frais d'entrée (CR-45)
         $pricingService = app(ListingPricingService::class);

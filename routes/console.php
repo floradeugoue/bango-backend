@@ -160,3 +160,18 @@ Schedule::command('stories:expire')
     ->everyFifteenMinutes()
     ->withoutOverlapping()
     ->onOneServer();
+
+// --------------------------------------------------------------------------
+// PLANIFICATEUR DES VISITES (Étape 2 — Verrous 15min & Délais 18h)
+// --------------------------------------------------------------------------
+// 6. Expiration des verrous temporaires de 15 minutes toutes les minutes
+Schedule::command('visits:expire-pending')
+    ->everyMinute()
+    ->withoutOverlapping()
+    ->onOneServer();
+
+// 7. Règlement des demandes sans réponse après 18h toutes les heures
+Schedule::command('visits:settle-overdue')
+    ->hourly()
+    ->withoutOverlapping()
+    ->onOneServer();
