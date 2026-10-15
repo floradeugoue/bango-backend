@@ -22,6 +22,10 @@ use App\Models\Square\PostCommentReaction;
 use App\Models\Square\PostLike;
 use App\Models\Square\PostShare;
 use App\Models\Square\PostTag;
+use App\Models\Story\Story;
+use App\Models\Story\StoryHighlight;
+use App\Models\Story\StoryReply;
+use App\Models\Story\StoryView;
 use App\Models\Subscription\BadgeHistory;
 use App\Models\Subscription\Subscription;
 use Database\Factories\UserFactory;
@@ -413,5 +417,72 @@ class User extends Authenticatable
     {
         return $this->belongsToMany(Reel::class, 'user_not_interested_reels', 'user_id', 'reel_id')
             ->withTimestamps();
+    }
+
+    /**
+     * Stories publiées par cet utilisateur.
+     */
+    public function stories(): HasMany
+    {
+        return $this->hasMany(Story::class)->orderByDesc('created_at');
+    }
+
+    /**
+     * Stories actives (non expirées) de cet utilisateur.
+     */
+    public function activeStories(): HasMany
+    {
+        return $this->stories()->active();
+    }
+
+    /**
+     * Stories archivées de cet utilisateur.
+     */
+    public function archivedStories(): HasMany
+    {
+        return $this->stories()->archived();
+    }
+
+    /**
+     * Utilisateurs faisant partie de la liste choisie (close friends) de cet utilisateur.
+     */
+    public function closeFriends(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'user_close_friends', 'user_id', 'friend_id')
+            ->withTimestamps();
+    }
+
+    /**
+     * Vérifie si un utilisateur est dans la liste choisie de cet utilisateur.
+     */
+    public function isInCloseFriends(int|string|User $user): bool
+    {
+        $id = $user instanceof User ? $user->id : (int) $user;
+
+        return $this->closeFriends()->where('friend_id', $id)->exists();
+    }
+
+    /**
+     * Collections « À la une » de cet utilisateur.
+     */
+    public function storyHighlights(): HasMany
+    {
+        return $this->hasMany(StoryHighlight::class)->orderBy('order', 'asc');
+    }
+
+    /**
+     * Vues enregistrées par cet utilisateur sur des Stories.
+     */
+    public function storyViews(): HasMany
+    {
+        return $this->hasMany(StoryView::class, 'viewer_id');
+    }
+
+    /**
+     * Réponses et réactions envoyées par cet utilisateur sur des Stories.
+     */
+    public function storyReplies(): HasMany
+    {
+        return $this->hasMany(StoryReply::class);
     }
 }

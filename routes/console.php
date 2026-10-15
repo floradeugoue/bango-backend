@@ -151,3 +151,12 @@ Schedule::command('payment:reconcile')
     ->withoutOverlapping()
     ->runInBackground()
     ->onOneServer();
+
+// --------------------------------------------------------------------------
+// PLANIFICATEUR DES STORIES (CR3 — Expiration 24h & Archivage)
+// --------------------------------------------------------------------------
+// 5. Traitement de l'expiration des Stories toutes les 15 minutes
+Schedule::command('stories:expire')
+    ->everyFifteenMinutes()
+    ->withoutOverlapping()
+    ->onOneServer();
