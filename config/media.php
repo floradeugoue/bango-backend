@@ -60,6 +60,12 @@ return [
         // Profil & Avatars
         'avatars' => 'avatars',
 
+        // Listings & Immo (CR4, IM)
+        'listings_images' => 'listings/images/{user_id}',
+        'listings_videos' => 'listings/videos/{user_id}',
+        'listings_thumbnails' => 'listings/thumbnails/{user_id}',
+        'listings_temp' => 'listings/temp',
+
         // Compatibilité arrière (anciens alias)
         'reels_clips' => 'reels/videos/{user_id}',
         'sounds' => 'sounds/catalogue',
