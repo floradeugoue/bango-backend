@@ -177,17 +177,21 @@ Route::prefix('reels')->group(function () {
     // Fil vertical des Reels (RL-01, RL-08 Découvrir)
     Route::get('/feed', [ReelFeedController::class, 'feed'])->name('api.reels.feed');
 
-    // Catalogue des sons et détails (RL-05)
+    // Lister les sons musicaux disponibles au catalogue public
     Route::get('/sounds', [SoundController::class, 'index'])->name('api.reels.sounds.index');
+    // Consulter les détails d'un son spécifique (catalogue ou son original)
     Route::get('/sounds/{id}', [SoundController::class, 'show'])->name('api.reels.sounds.show');
+    // Lister tous les Reels utilisant un son audio spécifique
     Route::get('/sounds/{id}/reels', [SoundController::class, 'reels'])->name('api.reels.sounds.reels');
 
-    // Consultation d'un Reel et commentaires (restreint aux UUIDs pour éviter toute collision)
+    // Consulter un Reel individuel par son UUID
     Route::get('/{id}', [ReelFeedController::class, 'show'])->whereUuid('id')->name('api.reels.show');
+    // Lister les commentaires de premier niveau d'un Reel
     Route::get('/{reel}/comments', [ReelCommentController::class, 'index'])->whereUuid('reel')->name('api.reels.comments.index');
+    // Lister les réponses associées à un commentaire spécifique
     Route::get('/comments/{comment}/replies', [ReelCommentController::class, 'replies'])->name('api.reels.comments.replies');
 
-    // Enregistrement d'une vue (avec déduplication anti-abus 30 minutes)
+    // Enregistrement d'une vue (avec déduplication anti-abus 30 minutes et anonymisation IP)
     Route::post('/{reel}/view', [ReelInteractionController::class, 'view'])->whereUuid('reel')->name('api.reels.view');
 });
 
@@ -240,7 +244,9 @@ Route::middleware('auth:api')->group(function () {
         Route::put('/avatar', AvatarController::class);
 
         // Confidentialité du profil (ST-14)
+        // Consulter les paramètres de confidentialité du profil
         Route::get('/privacy', [PrivacyController::class, 'show']);
+        // Mettre à jour les paramètres de confidentialité du profil
         Route::put('/privacy', [PrivacyController::class, 'update']);
 
         // Abonnés & Abonnements (PR-11, PR-12)
@@ -329,7 +335,9 @@ Route::middleware('auth:api')->group(function () {
         Route::put('/password', [PasswordController::class, 'update']);
 
         // Confidentialité du compte (ST-14)
+        // Consulter les options de confidentialité du compte
         Route::get('/privacy', [PrivacyController::class, 'show']);
+        // Mettre à jour les options de confidentialité du compte
         Route::put('/privacy', [PrivacyController::class, 'update']);
 
         // Bouton d'urgence : Sécuriser le compte (déconnecter autres appareils)
@@ -369,8 +377,11 @@ Route::middleware('auth:api')->group(function () {
         // --------------------------------------------------------------------------
         // PHASE 6 : RENOUVELLEMENT MANUEL ASSISTÉ (Info, Devis Certifié & Confirmation)
         // --------------------------------------------------------------------------
+        // Obtenir les informations d'éligibilité au renouvellement d'un abonnement
         Route::get('/{id}/renewal', [SubscriptionRenewalController::class, 'renewalInfo']);
+        // Émettre un devis certifié serveur pour le renouvellement d'un abonnement
         Route::post('/{id}/renewal/quote', [SubscriptionRenewalController::class, 'quote']);
+        // Confirmer le renouvellement manuel assisté d'un abonnement
         Route::post('/{id}/renewal/confirm', [SubscriptionRenewalController::class, 'confirm']);
     });
 
@@ -431,23 +442,33 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/posts/{post}/unarchive', [PostArchiveController::class, 'unarchive'])->name('api.posts.unarchive');
 
         // Likes des publications (SQ - Interactions)
+        // Ajouter un like sur une publication
         Route::post('/posts/{post}/like', [PostLikeController::class, 'store'])->name('api.posts.like');
+        // Retirer un like sur une publication
         Route::delete('/posts/{post}/like', [PostLikeController::class, 'destroy'])->name('api.posts.unlike');
 
         // Partages des publications (SQ - Interactions)
+        // Enregistrer un partage de publication (incrément atomique et idempotence)
         Route::post('/posts/{post}/share', [PostShareController::class, 'store'])->name('api.posts.share');
 
         // Commentaires des publications (SQ - Interactions)
+        // Lister les commentaires paginés d'une publication
         Route::get('/posts/{post}/comments', [PostCommentController::class, 'index'])->name('api.posts.comments.index');
+        // Ajouter un commentaire sur une publication
         Route::post('/posts/{post}/comments', [PostCommentController::class, 'store'])->name('api.posts.comments.store');
 
         // Réponses et gestion des commentaires (SQ - Interactions)
+        // Lister les réponses à un commentaire
         Route::get('/comments/{comment}/replies', [PostCommentController::class, 'replies'])->name('api.comments.replies');
+        // Modifier le texte d'un commentaire (réservé à son auteur)
         Route::patch('/comments/{comment}', [PostCommentController::class, 'update'])->name('api.comments.update');
+        // Supprimer un commentaire (réservé à l'auteur du commentaire ou du post)
         Route::delete('/comments/{comment}', [PostCommentController::class, 'destroy'])->name('api.comments.destroy');
 
         // Réactions sur les commentaires (SQ - Likes / Dislikes)
+        // Définir ou modifier une réaction (like/dislike) sur un commentaire
         Route::put('/comments/{comment}/reaction', [PostCommentReactionController::class, 'react'])->name('api.comments.reaction.set');
+        // Supprimer sa réaction sur un commentaire
         Route::delete('/comments/{comment}/reaction', [PostCommentReactionController::class, 'destroy'])->name('api.comments.reaction.destroy');
 
         // Téléverser un média photo ou vidéo sécurisé pour le carrousel Square (CR-02, CR-04, CR-12)
@@ -468,48 +489,73 @@ Route::middleware('auth:api')->group(function () {
     // --------------------------------------------------------------------------
     Route::prefix('reels')->group(function () {
         // Studio Reel : Brouillons & Reprise (CR-14, CR-17 à CR-29)
+        // Créer ou mettre à jour un brouillon de Reel avec sa composition
         Route::post('/drafts', [StudioReelController::class, 'saveDraft'])->name('api.reels.drafts.save');
+        // Lister tous les brouillons de l'utilisateur connecté
         Route::get('/drafts', [StudioReelController::class, 'listDrafts'])->name('api.reels.drafts.index');
+        // Obtenir les détails d'un brouillon spécifique pour reprise de montage
         Route::get('/drafts/{id}', [StudioReelController::class, 'getDraft'])->name('api.reels.drafts.show');
+        // Supprimer un brouillon et nettoyer ses fichiers physiques associés
         Route::delete('/drafts/{id}', [StudioReelController::class, 'deleteDraft'])->name('api.reels.drafts.destroy');
 
         // Studio Reel : Téléversement médias (vidéos / couverture)
+        // Téléverser un clip vidéo (caméra/galerie), un audio ou une couverture
         Route::post('/media/upload', [StudioReelController::class, 'uploadMedia'])->name('api.reels.media.upload');
 
         // Studio Reel : Lancement de la publication asynchrone (Queue Job)
+        // Lancer la publication asynchrone d'un Reel (job de transcodage et publication)
         Route::post('/publish', [StudioReelController::class, 'publish'])->name('api.reels.publish');
 
         // Gestion du Reel (suppression par l'auteur RL-06)
+        // Supprimer définitivement un Reel publié (réservé à l'auteur)
         Route::delete('/{reel}', [ReelFeedController::class, 'destroy'])->name('api.reels.destroy');
 
         // Interactions sociales : Likes & Dislikes (Exclusivité stricte)
+        // Appliquer ou basculer une réaction (like ou dislike) sur un Reel
         Route::post('/{reel}/reaction', [ReelInteractionController::class, 'react'])->name('api.reels.reaction.set');
+        // Retirer toute réaction active sur le Reel
         Route::delete('/{reel}/reaction', [ReelInteractionController::class, 'removeReaction'])->name('api.reels.reaction.destroy');
+        // Ajouter ou basculer vers un Like sur le Reel
         Route::post('/{reel}/like', [ReelInteractionController::class, 'like'])->name('api.reels.like');
+        // Retirer un Like sur le Reel
         Route::delete('/{reel}/like', [ReelInteractionController::class, 'unlike'])->name('api.reels.unlike');
+        // Ajouter ou basculer vers un Dislike sur le Reel
         Route::post('/{reel}/dislike', [ReelInteractionController::class, 'dislike'])->name('api.reels.dislike');
+        // Retirer un Dislike sur le Reel
         Route::delete('/{reel}/dislike', [ReelInteractionController::class, 'undislike'])->name('api.reels.undislike');
 
         // Partage (incrément atomique et idempotence)
+        // Enregistrer un partage de Reel de manière atomique et idempotente
         Route::post('/{reel}/share', [ReelInteractionController::class, 'share'])->name('api.reels.share');
 
         // Favoris / Sauvegardes
+        // Ajouter ou retirer un Reel de ses favoris (sauvegardes)
         Route::post('/{reel}/save', [ReelInteractionController::class, 'toggleSave'])->name('api.reels.save');
+        // Lister tous les Reels sauvegardés dans les favoris de l'utilisateur
         Route::get('/user/saved', [ReelInteractionController::class, 'listSaved'])->name('api.reels.saved.list');
 
         // Pas intéressé (RL-06)
+        // Masquer un Reel et le marquer comme « Ça ne m'intéresse pas »
         Route::post('/{reel}/not-interested', [ReelInteractionController::class, 'markNotInterested'])->name('api.reels.not_interested');
 
         // Commentaires & Réponses (RL-03)
+        // Ajouter un commentaire ou une réponse sur un Reel
         Route::post('/{reel}/comments', [ReelCommentController::class, 'store'])->name('api.reels.comments.store');
+        // Modifier le texte d'un commentaire de Reel (réservé à son auteur)
         Route::patch('/comments/{comment}', [ReelCommentController::class, 'update'])->name('api.reels.comments.update');
+        // Supprimer un commentaire de Reel et ses réponses en cascade
         Route::delete('/comments/{comment}', [ReelCommentController::class, 'destroy'])->name('api.reels.comments.destroy');
+        // Appliquer une réaction (like ou dislike) sur un commentaire de Reel
         Route::put('/comments/{comment}/reaction', [ReelCommentController::class, 'react'])->name('api.reels.comments.reaction.set');
+        // Retirer sa réaction sur un commentaire de Reel
         Route::delete('/comments/{comment}/reaction', [ReelCommentController::class, 'removeReaction'])->name('api.reels.comments.reaction.destroy');
 
         // Sons : Favoris et verrouillage de son original
+        // Ajouter ou retirer un son musical de ses favoris
         Route::post('/sounds/{id}/favourite', [SoundController::class, 'toggleFavourite'])->name('api.reels.sounds.favourite');
+        // Lister les sons musicaux sauvegardés dans les favoris de l'utilisateur
         Route::get('/sounds/user/favourites', [SoundController::class, 'favourites'])->name('api.reels.sounds.favourites');
+        // Verrouiller ou déverrouiller la réutilisation d'un son original (réservé au créateur)
         Route::put('/{id}/original-sound/lock', [SoundController::class, 'lockOriginal'])->name('api.reels.sounds.lock');
     });
 });
@@ -624,20 +670,31 @@ Route::middleware(['auth:api', 'admin'])->group(function () {
     // --------------------------------------------------------------------------
     Route::prefix('admin/payments')->group(function () {
         // Transactions : Supervision, recherche et détail
+        // Lister et filtrer toutes les transactions de paiement de la plateforme
         Route::get('/transactions', [AdminPaymentController::class, 'index']);
+        // Afficher les détails complets d'une transaction de paiement
         Route::get('/transactions/{id}', [AdminPaymentController::class, 'show']);
+        // Consulter le journal d'événements et d'audits d'une transaction
         Route::get('/transactions/{id}/events', [AdminPaymentController::class, 'events']);
+        // Rembourser manuellement une transaction payée
         Route::post('/transactions/{id}/refund', [AdminPaymentController::class, 'refund']);
 
         // Litiges & Contestations
+        // Lister l'ensemble des litiges et contestations de paiement
         Route::get('/disputes', [AdminPaymentController::class, 'disputes']);
+        // Déclarer un nouveau litige de paiement pour investigation
         Route::post('/disputes', [AdminPaymentController::class, 'createDispute']);
+        // Consulter les détails d'un litige spécifique
         Route::get('/disputes/{id}', [AdminPaymentController::class, 'showDispute']);
+        // Mettre à jour le statut d'un litige (en cours, résolu, rejeté)
         Route::post('/disputes/{id}/status', [AdminPaymentController::class, 'updateDisputeStatus']);
+        // Ajouter une note interne d'investigation sur un litige
         Route::post('/disputes/{id}/notes', [AdminPaymentController::class, 'addDisputeNote']);
 
         // Réclamations Doubles Débits
+        // Lister toutes les réclamations de double débit soumises
         Route::get('/double-charge-claims', [AdminPaymentController::class, 'doubleChargeClaims']);
+        // Enregistrer une nouvelle réclamation de double débit
         Route::post('/double-charge-claims', [AdminPaymentController::class, 'createDoubleChargeClaim']);
     });
 
@@ -645,14 +702,23 @@ Route::middleware(['auth:api', 'admin'])->group(function () {
     // REELS SOUND CATALOG (Administration & alimentation réelle du catalogue audio)
     // --------------------------------------------------------------------------
     Route::prefix('admin/sounds')->group(function () {
+        // Lister tous les sons du catalogue audio (actifs, inactifs, supprimés)
         Route::get('/', [AdminSoundCatalogController::class, 'index'])->name('api.admin.sounds.index');
+        // Importer et ajouter un nouveau son au catalogue avec son fichier audio
         Route::post('/', [AdminSoundCatalogController::class, 'store'])->name('api.admin.sounds.store');
+        // Consulter les métadonnées et droits d'un son du catalogue
         Route::get('/{id}', [AdminSoundCatalogController::class, 'show'])->name('api.admin.sounds.show');
+        // Mettre à jour les métadonnées ou remplacer le fichier audio d'un son
         Route::post('/{id}', [AdminSoundCatalogController::class, 'update'])->name('api.admin.sounds.update');
+        // Activer ou désactiver la visibilité d'un son dans le catalogue
         Route::patch('/{id}/publication', [AdminSoundCatalogController::class, 'togglePublication'])->name('api.admin.sounds.publication');
+        // Mettre à jour les licences, la provenance et les droits de diffusion d'un son
         Route::patch('/{id}/rights', [AdminSoundCatalogController::class, 'updateRights'])->name('api.admin.sounds.rights');
+        // Désactiver et masquer un son du catalogue (soft delete)
         Route::delete('/{id}', [AdminSoundCatalogController::class, 'removeFromCatalog'])->name('api.admin.sounds.remove');
+        // Restaurer un son précédemment retiré du catalogue
         Route::post('/{id}/restore', [AdminSoundCatalogController::class, 'restore'])->name('api.admin.sounds.restore');
+        // Supprimer définitivement un son et purger son fichier audio
         Route::delete('/{id}/force', [AdminSoundCatalogController::class, 'destroy'])->name('api.admin.sounds.destroy');
     });
 });
