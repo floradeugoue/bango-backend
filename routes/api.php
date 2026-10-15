@@ -19,6 +19,11 @@ use App\Http\Controllers\Geo\CurrencyController;
 use App\Http\Controllers\Geo\NeighbourhoodController;
 use App\Http\Controllers\Geo\OperatorController;
 use App\Http\Controllers\Housing\HousingSearchController;
+use App\Http\Controllers\Listing\ListingController;
+use App\Http\Controllers\Listing\ListingDraftController;
+use App\Http\Controllers\Listing\ListingMapController;
+use App\Http\Controllers\Listing\ListingMediaController;
+use App\Http\Controllers\Listing\ListingSaveController;
 use App\Http\Controllers\Media\MediaUploadController;
 use App\Http\Controllers\Onboarding\OnboardingController;
 use App\Http\Controllers\Otp\OtpController;
@@ -174,6 +179,27 @@ Route::prefix('webhooks/payments')->group(function () {
 Route::post('/webhooks/cloudflare-stream', [CloudflareStreamWebhookController::class, 'handle'])->name('api.webhooks.cloudflare_stream');
 
 // --------------------------------------------------------------------------
+// IMMO & LISTINGS (Consultation Publique & Recherche — Module IM)
+// --------------------------------------------------------------------------
+Route::prefix('listings')->group(function () {
+    // Feed immobilier vertical paginé avec filtres (IM-00a)
+    // Ressource : Listing | Accès : Public (avec enrichissement pour utilisateur connecté)
+    Route::get('/', [ListingController::class, 'index'])->name('api.listings.index');
+
+    // Compteur dynamique d'annonces correspondant aux filtres actifs (IM-03 / SY-08)
+    // Ressource : Listing | Accès : Public | Garantit la stricte concordance avec le feed
+    Route::get('/count', [ListingController::class, 'count'])->name('api.listings.count');
+
+    // Recherche géographique sur carte avec clustering adaptatif selon le zoom (IM-02)
+    // Ressource : Listing & Clusters | Accès : Public | Exclut les annonces non publiées
+    Route::get('/map', [ListingMapController::class, 'index'])->name('api.listings.map');
+
+    // Fiche détaillée d'une annonce immobilière et ventilation des frais d'entrée (IM-05)
+    // Ressource : Listing | Accès : Public (les données privées d'adresse restent masquées aux tiers)
+    Route::get('/{id}', [ListingController::class, 'show'])->whereUuid('id')->name('api.listings.show');
+});
+
+// --------------------------------------------------------------------------
 // SESSION (Requiert un Token Passport valide)
 // --------------------------------------------------------------------------
 Route::middleware('auth:api')->group(function () {
@@ -294,6 +320,67 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/', [HousingSearchController::class, 'show']);
         // Mettre à jour les critères de recherche du logement
         Route::put('/', [HousingSearchController::class, 'update']);
+    });
+
+    // --------------------------------------------------------------------------
+    // CŒUR IMMOBILIER — CR4 (Création, Brouillons, Médias, Favoris & Gestion)
+    // --------------------------------------------------------------------------
+    Route::prefix('listings')->group(function () {
+        // Enregistrer ou mettre à jour un brouillon d'annonce (CR-40 à CR-48)
+        // Ressource : Listing (draft) | Accès : Authentifié (propriétaire uniquement)
+        Route::post('/form/draft', [ListingDraftController::class, 'store'])->name('api.listings.draft.store');
+
+        // Consulter ou reprendre le brouillon actif de l'utilisateur connecté
+        // Ressource : Listing (draft) | Accès : Authentifié | Retourne null si aucun brouillon
+        Route::get('/form/draft', [ListingDraftController::class, 'show'])->name('api.listings.draft.show');
+
+        // Abandonner et purger le brouillon actif (fermeture de l'assistant)
+        // Ressource : Listing (draft) | Accès : Authentifié (propriétaire)
+        Route::delete('/form/draft', [ListingDraftController::class, 'destroy'])->name('api.listings.draft.destroy');
+
+        // Liste paginée des annonces sauvegardées en favoris par l'utilisateur (IM-16)
+        // Ressource : ListingSave | Accès : Authentifié | Isole strictement les favoris par utilisateur
+        Route::get('/saved', [ListingSaveController::class, 'index'])->name('api.listings.saved.index');
+
+        // Téléversement d'un média temporaire autonome pour l'assistant de publication (CR-42)
+        // Ressource : Fichier temporaire | Accès : Authentifié | Validation stricte MIME/taille/ratio
+        Route::post('/media', [ListingMediaController::class, 'uploadTemp'])->name('api.listings.media.uploadTemp');
+
+        // Créer et soumettre une annonce en modération (CR-39 à CR-48)
+        // Ressource : Listing | Accès : Authentifié + Badge vérifié (bailleur, agent, double) ou Admin
+        Route::post('/', [ListingController::class, 'store'])->name('api.listings.store');
+
+        // Sauvegarder ou basculer l'état favori d'une annonce (idempotent, IM-16)
+        // Ressource : ListingSave | Accès : Authentifié | Empêche les doublons concurrents
+        Route::post('/{id}/save', [ListingSaveController::class, 'store'])->whereUuid('id')->name('api.listings.save.store');
+
+        // Retirer explicitement une annonce des favoris
+        // Ressource : ListingSave | Accès : Authentifié | Idempotent
+        Route::delete('/{id}/save', [ListingSaveController::class, 'destroy'])->whereUuid('id')->name('api.listings.save.destroy');
+
+        // Mettre à jour les informations (titre, prix, charges) sans relancer l'examen vidéo (CR-48)
+        // Ressource : Listing | Accès : Authentifié (propriétaire, agent délégué ou admin)
+        Route::patch('/{id}', [ListingController::class, 'update'])->whereUuid('id')->name('api.listings.update');
+
+        // Retirer / supprimer une annonce de la plateforme (EDGE-03)
+        // Ressource : Listing | Accès : Authentifié (propriétaire ou admin)
+        Route::delete('/{id}', [ListingController::class, 'destroy'])->whereUuid('id')->name('api.listings.destroy');
+
+        // Modifier le statut d'une annonce (BL-18 : published, reserved, taken)
+        // Ressource : Listing | Accès : Authentifié (propriétaire, agent délégué ou admin)
+        Route::patch('/{id}/status', [ListingController::class, 'updateStatus'])->whereUuid('id')->name('api.listings.status');
+
+        // Téléverser et rattacher une photo ou visite vidéo à une annonce
+        // Ressource : ListingMedia | Accès : Authentifié (propriétaire ou agent délégué)
+        Route::post('/{id}/media', [ListingMediaController::class, 'store'])->whereUuid('id')->name('api.listings.media.store');
+
+        // Réordonner la liste des médias d'une annonce (CR-43)
+        // Ressource : ListingMedia | Accès : Authentifié (propriétaire ou agent délégué)
+        Route::patch('/{id}/media/order', [ListingMediaController::class, 'reorder'])->whereUuid('id')->name('api.listings.media.order');
+
+        // Supprimer un média associé à une annonce et purger le fichier physique
+        // Ressource : ListingMedia | Accès : Authentifié (propriétaire ou agent délégué)
+        Route::delete('/{id}/media/{mediaId}', [ListingMediaController::class, 'destroy'])->whereUuid('id')->whereUuid('mediaId')->name('api.listings.media.destroy');
     });
 
     // --------------------------------------------------------------------------

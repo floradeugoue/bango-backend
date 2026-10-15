@@ -9,6 +9,7 @@ use App\Models\Geo\City;
 use App\Models\Geo\Country;
 use App\Models\Geo\Neighbourhood;
 use App\Models\Housing\HousingSearch;
+use App\Models\Listing\Listing;
 use App\Models\Payment\PaymentTransaction;
 use App\Models\Profile\FollowRequest;
 use App\Models\Profile\Interest;
@@ -484,5 +485,30 @@ class User extends Authenticatable
     public function storyReplies(): HasMany
     {
         return $this->hasMany(StoryReply::class);
+    }
+
+    /**
+     * Annonces immobilières dont cet utilisateur est propriétaire.
+     */
+    public function listings(): HasMany
+    {
+        return $this->hasMany(Listing::class, 'owner_id')->orderByDesc('created_at');
+    }
+
+    /**
+     * Annonces immobilières gérées par cet utilisateur en tant qu'agent professionnel.
+     */
+    public function managedListings(): HasMany
+    {
+        return $this->hasMany(Listing::class, 'agent_id')->orderByDesc('created_at');
+    }
+
+    /**
+     * Annonces immobilières sauvegardées par cet utilisateur.
+     */
+    public function savedListings(): BelongsToMany
+    {
+        return $this->belongsToMany(Listing::class, 'listing_saves', 'user_id', 'listing_id')
+            ->withTimestamps();
     }
 }

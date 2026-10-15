@@ -952,6 +952,152 @@ class MediaStorageService
     }
 
     /**
+     * Stocke une photo pour une annonce immobilière dans listings/images/{user_id}.
+     *
+     * @return array{
+     *     id: string,
+     *     path: string,
+     *     url: string,
+     *     type: string,
+     *     mime_type: string,
+     *     file_size: int,
+     *     disk: string,
+     *     width: ?int,
+     *     height: ?int,
+     *     duration: null
+     * }
+     */
+    public function storeListingPhoto(UploadedFile $file, User $user, ?string $disk = null): array
+    {
+        $disk = $disk ?? $this->getDisk();
+        $mime = $this->resolveMimeType($file);
+        $size = $file->getSize();
+        $maxSize = (int) config('media.max_image_size', 15 * 1024 * 1024);
+
+        if (! in_array($mime, self::ALLOWED_IMAGE_MIMES, true)) {
+            throw ValidationException::withMessages([
+                'file' => ["Format d'image non autorisé ({$mime}). Formats supportés : JPEG, PNG, WEBP."],
+            ]);
+        }
+
+        if ($size > $maxSize) {
+            $maxMb = round($maxSize / (1024 * 1024));
+            throw ValidationException::withMessages([
+                'file' => ["La photo dépasse la taille maximale autorisée ({$maxMb} Mo)."],
+            ]);
+        }
+
+        $extension = $file->guessExtension() ?: $file->getClientOriginalExtension() ?: 'jpg';
+        $uniqueId = (string) Str::uuid();
+        $fileName = "listing_photo_{$uniqueId}.{$extension}";
+        $directory = $this->pathFor('listings_images', ['user_id' => $user->id]);
+
+        $path = $file->storeAs($directory, $fileName, $disk);
+
+        $width = null;
+        $height = null;
+        if (function_exists('getimagesize')) {
+            $imageInfo = @getimagesize($file->getRealPath());
+            if ($imageInfo) {
+                $width = $imageInfo[0];
+                $height = $imageInfo[1];
+            }
+        }
+
+        $url = $this->getUrl($path, $disk);
+
+        return [
+            'id' => $uniqueId,
+            'path' => $path,
+            'url' => $url,
+            'type' => 'image',
+            'mime_type' => $mime,
+            'file_size' => $size,
+            'disk' => $disk,
+            'width' => $width,
+            'height' => $height,
+            'duration' => null,
+        ];
+    }
+
+    /**
+     * Stocke une visite vidéo guidée pour une annonce dans listings/videos/{user_id}.
+     *
+     * @return array{
+     *     id: string,
+     *     path: string,
+     *     url: string,
+     *     type: string,
+     *     mime_type: string,
+     *     file_size: int,
+     *     disk: string,
+     *     width: ?int,
+     *     height: ?int,
+     *     duration: ?int
+     * }
+     */
+    public function storeListingVideo(UploadedFile $file, User $user, ?string $disk = null, ?int $duration = null, ?int $width = null, ?int $height = null): array
+    {
+        $disk = $disk ?? $this->getDisk();
+        $mime = $this->resolveMimeType($file);
+        $size = $file->getSize();
+        $maxSize = (int) config('media.max_video_size', 100 * 1024 * 1024);
+
+        if (! in_array($mime, self::ALLOWED_VIDEO_MIMES, true)) {
+            throw ValidationException::withMessages([
+                'file' => ["Format vidéo non autorisé ({$mime}). Formats supportés : MP4, MOV, WEBM, 3GP, M4V."],
+            ]);
+        }
+
+        if ($size > $maxSize) {
+            $maxMb = round($maxSize / (1024 * 1024));
+            throw ValidationException::withMessages([
+                'file' => ["La vidéo dépasse la taille maximale autorisée ({$maxMb} Mo)."],
+            ]);
+        }
+
+        if ($duration !== null) {
+            if ($duration < 30) {
+                throw ValidationException::withMessages([
+                    'file' => ['La visite vidéo guidée doit durer au minimum 30 secondes.'],
+                ]);
+            }
+            if ($duration > 180) {
+                throw ValidationException::withMessages([
+                    'file' => ['La visite vidéo guidée ne peut excéder 3 minutes (180 secondes).'],
+                ]);
+            }
+        }
+
+        if ($width !== null && $height !== null && $height <= $width) {
+            throw ValidationException::withMessages([
+                'file' => ['La vidéo doit être au format vertical (portrait, ratio 9:16).'],
+            ]);
+        }
+
+        $extension = $file->guessExtension() ?: $file->getClientOriginalExtension() ?: 'mp4';
+        $uniqueId = (string) Str::uuid();
+        $fileName = "listing_video_{$uniqueId}.{$extension}";
+        $directory = $this->pathFor('listings_videos', ['user_id' => $user->id]);
+
+        $path = $file->storeAs($directory, $fileName, $disk);
+        $url = $this->getUrl($path, $disk);
+
+        return [
+            'id' => $uniqueId,
+            'path' => $path,
+            'url' => $url,
+            'type' => 'video',
+            'mime_type' => $mime,
+            'file_size' => $size,
+            'disk' => $disk,
+            'width' => $width,
+            'height' => $height,
+            'duration' => $duration,
+        ];
+    }
+
+    /**
      * Détermine le type MIME réel d'un fichier téléversé.
      */
     protected function resolveMimeType(UploadedFile $file): string

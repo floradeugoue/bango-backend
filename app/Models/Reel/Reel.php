@@ -4,6 +4,7 @@ namespace App\Models\Reel;
 
 use App\Enums\Reel\ReelReactionType;
 use App\Enums\Reel\ReelStatus;
+use App\Models\Listing\Listing;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -82,6 +83,14 @@ class Reel extends Model
     public function sound(): BelongsTo
     {
         return $this->belongsTo(Sound::class, 'sound_id');
+    }
+
+    /**
+     * Annonce immobilière associée à ce Reel de présentation.
+     */
+    public function listing(): BelongsTo
+    {
+        return $this->belongsTo(Listing::class, 'listing_id');
     }
 
     /**
