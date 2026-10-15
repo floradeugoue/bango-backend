@@ -171,31 +171,6 @@ Route::prefix('webhooks/payments')->group(function () {
 Route::post('/webhooks/cloudflare-stream', [CloudflareStreamWebhookController::class, 'handle'])->name('api.webhooks.cloudflare_stream');
 
 // --------------------------------------------------------------------------
-// REELS & SONS — CATALOGUE & CONSULTATION (Public / Mobile)
-// --------------------------------------------------------------------------
-Route::prefix('reels')->group(function () {
-    // Fil vertical des Reels (RL-01, RL-08 Découvrir)
-    Route::get('/feed', [ReelFeedController::class, 'feed'])->name('api.reels.feed');
-
-    // Lister les sons musicaux disponibles au catalogue public
-    Route::get('/sounds', [SoundController::class, 'index'])->name('api.reels.sounds.index');
-    // Consulter les détails d'un son spécifique (catalogue ou son original)
-    Route::get('/sounds/{id}', [SoundController::class, 'show'])->name('api.reels.sounds.show');
-    // Lister tous les Reels utilisant un son audio spécifique
-    Route::get('/sounds/{id}/reels', [SoundController::class, 'reels'])->name('api.reels.sounds.reels');
-
-    // Consulter un Reel individuel par son UUID
-    Route::get('/{id}', [ReelFeedController::class, 'show'])->whereUuid('id')->name('api.reels.show');
-    // Lister les commentaires de premier niveau d'un Reel
-    Route::get('/{reel}/comments', [ReelCommentController::class, 'index'])->whereUuid('reel')->name('api.reels.comments.index');
-    // Lister les réponses associées à un commentaire spécifique
-    Route::get('/comments/{comment}/replies', [ReelCommentController::class, 'replies'])->name('api.reels.comments.replies');
-
-    // Enregistrement d'une vue (avec déduplication anti-abus 30 minutes et anonymisation IP)
-    Route::post('/{reel}/view', [ReelInteractionController::class, 'view'])->whereUuid('reel')->name('api.reels.view');
-});
-
-// --------------------------------------------------------------------------
 // SESSION (Requiert un Token Passport valide)
 // --------------------------------------------------------------------------
 Route::middleware('auth:api')->group(function () {
@@ -485,9 +460,12 @@ Route::middleware('auth:api')->group(function () {
     });
 
     // --------------------------------------------------------------------------
-    // CR2 & RL — STUDIO REEL, REELS ET SONS (Actions authentifiées)
+    // CR2 & RL — STUDIO REEL, REELS ET SONS (Actions et consultation authentifiées)
     // --------------------------------------------------------------------------
     Route::prefix('reels')->group(function () {
+        // Fil vertical des Reels (RL-01, RL-08 Découvrir)
+        Route::get('/feed', [ReelFeedController::class, 'feed'])->name('api.reels.feed');
+
         // Studio Reel : Brouillons & Reprise (CR-14, CR-17 à CR-29)
         // Créer ou mettre à jour un brouillon de Reel avec sa composition
         Route::post('/drafts', [StudioReelController::class, 'saveDraft'])->name('api.reels.drafts.save');
@@ -506,7 +484,25 @@ Route::middleware('auth:api')->group(function () {
         // Lancer la publication asynchrone d'un Reel (job de transcodage et publication)
         Route::post('/publish', [StudioReelController::class, 'publish'])->name('api.reels.publish');
 
-        // Gestion du Reel (suppression par l'auteur RL-06)
+        // Sons musicaux : Catalogue, favoris et détails
+        // Lister les sons musicaux disponibles au catalogue
+        Route::get('/sounds', [SoundController::class, 'index'])->name('api.reels.sounds.index');
+        // Lister les sons musicaux sauvegardés dans les favoris de l'utilisateur
+        Route::get('/sounds/user/favourites', [SoundController::class, 'favourites'])->name('api.reels.sounds.favourites');
+        // Consulter les détails d'un son spécifique (catalogue ou son original)
+        Route::get('/sounds/{id}', [SoundController::class, 'show'])->name('api.reels.sounds.show');
+        // Lister tous les Reels utilisant un son audio spécifique
+        Route::get('/sounds/{id}/reels', [SoundController::class, 'reels'])->name('api.reels.sounds.reels');
+        // Ajouter ou retirer un son musical de ses favoris
+        Route::post('/sounds/{id}/favourite', [SoundController::class, 'toggleFavourite'])->name('api.reels.sounds.favourite');
+        // Verrouiller ou déverrouiller la réutilisation d'un son original (réservé au créateur)
+        Route::put('/{id}/original-sound/lock', [SoundController::class, 'lockOriginal'])->name('api.reels.sounds.lock');
+
+        // Vues et consultation individuelle
+        // Enregistrement d'une vue (avec déduplication anti-abus 30 minutes et anonymisation IP)
+        Route::post('/{reel}/view', [ReelInteractionController::class, 'view'])->whereUuid('reel')->name('api.reels.view');
+        // Consulter un Reel individuel par son UUID
+        Route::get('/{id}', [ReelFeedController::class, 'show'])->whereUuid('id')->name('api.reels.show');
         // Supprimer définitivement un Reel publié (réservé à l'auteur)
         Route::delete('/{reel}', [ReelFeedController::class, 'destroy'])->name('api.reels.destroy');
 
@@ -539,6 +535,10 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/{reel}/not-interested', [ReelInteractionController::class, 'markNotInterested'])->name('api.reels.not_interested');
 
         // Commentaires & Réponses (RL-03)
+        // Lister les commentaires de premier niveau d'un Reel
+        Route::get('/{reel}/comments', [ReelCommentController::class, 'index'])->whereUuid('reel')->name('api.reels.comments.index');
+        // Lister les réponses associées à un commentaire spécifique
+        Route::get('/comments/{comment}/replies', [ReelCommentController::class, 'replies'])->name('api.reels.comments.replies');
         // Ajouter un commentaire ou une réponse sur un Reel
         Route::post('/{reel}/comments', [ReelCommentController::class, 'store'])->name('api.reels.comments.store');
         // Modifier le texte d'un commentaire de Reel (réservé à son auteur)
@@ -549,15 +549,8 @@ Route::middleware('auth:api')->group(function () {
         Route::put('/comments/{comment}/reaction', [ReelCommentController::class, 'react'])->name('api.reels.comments.reaction.set');
         // Retirer sa réaction sur un commentaire de Reel
         Route::delete('/comments/{comment}/reaction', [ReelCommentController::class, 'removeReaction'])->name('api.reels.comments.reaction.destroy');
-
-        // Sons : Favoris et verrouillage de son original
-        // Ajouter ou retirer un son musical de ses favoris
-        Route::post('/sounds/{id}/favourite', [SoundController::class, 'toggleFavourite'])->name('api.reels.sounds.favourite');
-        // Lister les sons musicaux sauvegardés dans les favoris de l'utilisateur
-        Route::get('/sounds/user/favourites', [SoundController::class, 'favourites'])->name('api.reels.sounds.favourites');
-        // Verrouiller ou déverrouiller la réutilisation d'un son original (réservé au créateur)
-        Route::put('/{id}/original-sound/lock', [SoundController::class, 'lockOriginal'])->name('api.reels.sounds.lock');
     });
+
 });
 
 /*
