@@ -242,6 +242,9 @@ test('la suppression d un commentaire parent supprime en cascade ses reponses et
 });
 
 test('l anonymisation de l IP et la deduplication des vues fonctionnent fidelement', function () {
+    $user = User::factory()->create();
+    Passport::actingAs($user);
+
     $reel = Reel::factory()->create(['views_count' => 0]);
 
     // Première vue anonyme avec IP

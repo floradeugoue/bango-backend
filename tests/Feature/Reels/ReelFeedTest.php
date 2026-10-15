@@ -10,6 +10,7 @@ uses(RefreshDatabase::class);
 
 beforeEach(function () {
     $this->user = User::factory()->create();
+    Passport::actingAs($this->user);
 });
 
 test('le feed vertical ne retourne que les reels dont le statut est ready', function () {
