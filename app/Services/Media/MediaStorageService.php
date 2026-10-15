@@ -88,6 +88,10 @@ class MediaStorageService
                 'square_images' => 'square/images/{user_id}',
                 'square_videos' => 'square/videos/{user_id}',
                 'square_temp' => 'square/temp',
+                'stories_images' => 'stories/images/{user_id}',
+                'stories_videos' => 'stories/videos/{user_id}',
+                'stories_thumbnails' => 'stories/thumbnails/{user_id}',
+                'stories_temp' => 'stories/temp',
                 'avatars' => 'avatars',
                 default => $type,
             };
@@ -822,7 +826,7 @@ class MediaStorageService
     {
         $disk = $disk ?? $this->getDisk();
         $storage = Storage::disk($disk);
-        $tempDirs = ['reels/temp', 'sounds/temp', 'square/temp'];
+        $tempDirs = ['reels/temp', 'sounds/temp', 'square/temp', 'stories/temp'];
         $cutoff = now()->subHours($olderThanHours)->getTimestamp();
 
         $deletedCount = 0;
@@ -856,6 +860,94 @@ class MediaStorageService
             'deleted_count' => $deletedCount,
             'deleted_files' => $deletedFiles,
             'freed_bytes' => $freedBytes,
+        ];
+    }
+
+    /**
+     * Stocke un média Story (Photo ou Vidéo, CR3).
+     *
+     * @return array{
+     *     id: string,
+     *     path: string,
+     *     url: string,
+     *     type: string,
+     *     mime_type: string,
+     *     file_size: int,
+     *     disk: string,
+     *     width: ?int,
+     *     height: ?int,
+     *     duration: ?int
+     * }
+     */
+    public function storeStoryMedia(UploadedFile $file, User $user, ?string $disk = null): array
+    {
+        $disk = $disk ?? $this->getDisk();
+        $mime = $this->resolveMimeType($file);
+        $size = $file->getSize();
+
+        $isImage = in_array($mime, self::ALLOWED_IMAGE_MIMES, true);
+        $isVideo = in_array($mime, self::ALLOWED_VIDEO_MIMES, true);
+
+        if ($size === 0 || $size === false) {
+            throw ValidationException::withMessages([
+                'file' => ['Le fichier média fourni est vide (0 octet).'],
+            ]);
+        }
+
+        if (! $isImage && ! $isVideo) {
+            throw ValidationException::withMessages([
+                'file' => ["Format de fichier non autorisé ({$mime}). Formats supportés : JPEG, PNG, WEBP, MP4, MOV, WEBM, 3GP, M4V."],
+            ]);
+        }
+
+        // Limites CR3 : Photo max 10 Mo, Vidéo max 50 Mo
+        if ($isImage && $size > 10 * 1024 * 1024) {
+            throw ValidationException::withMessages([
+                'file' => ['La photo dépasse la limite maximale autorisée pour une Story (10 Mo).'],
+            ]);
+        }
+
+        if ($isVideo && $size > 50 * 1024 * 1024) {
+            throw ValidationException::withMessages([
+                'file' => ['La vidéo dépasse la limite maximale autorisée pour une Story (50 Mo).'],
+            ]);
+        }
+
+        $type = $isImage ? 'image' : 'video';
+        $extension = $file->getClientOriginalExtension() ?: ($isImage ? 'jpg' : 'mp4');
+        $uniqueId = (string) Str::uuid();
+        $fileName = "story_{$uniqueId}.{$extension}";
+
+        $directory = $isImage
+            ? $this->pathFor('stories_images', ['user_id' => $user->id])
+            : $this->pathFor('stories_videos', ['user_id' => $user->id]);
+
+        $path = $file->storeAs($directory, $fileName, $disk);
+
+        $width = null;
+        $height = null;
+
+        if ($isImage && function_exists('getimagesize')) {
+            $imageInfo = @getimagesize($file->getRealPath());
+            if ($imageInfo) {
+                $width = $imageInfo[0];
+                $height = $imageInfo[1];
+            }
+        }
+
+        $url = $this->getUrl($path, $disk);
+
+        return [
+            'id' => $uniqueId,
+            'path' => $path,
+            'url' => $url,
+            'type' => $type,
+            'mime_type' => $mime,
+            'file_size' => $size,
+            'disk' => $disk,
+            'width' => $width,
+            'height' => $height,
+            'duration' => $isImage ? 5 : null,
         ];
     }
 

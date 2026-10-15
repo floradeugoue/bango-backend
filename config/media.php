@@ -51,6 +51,12 @@ return [
         'square_videos' => 'square/videos/{user_id}',
         'square_temp' => 'square/temp',
 
+        // Stories (CR3)
+        'stories_images' => 'stories/images/{user_id}',
+        'stories_videos' => 'stories/videos/{user_id}',
+        'stories_thumbnails' => 'stories/thumbnails/{user_id}',
+        'stories_temp' => 'stories/temp',
+
         // Profil & Avatars
         'avatars' => 'avatars',
 

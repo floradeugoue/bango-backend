@@ -55,6 +55,9 @@ use App\Http\Controllers\Square\PostController;
 use App\Http\Controllers\Square\PostFeedController;
 use App\Http\Controllers\Square\PostLikeController;
 use App\Http\Controllers\Square\PostShareController;
+use App\Http\Controllers\Story\CloseListController;
+use App\Http\Controllers\Story\HighlightController;
+use App\Http\Controllers\Story\StoryController;
 use App\Http\Controllers\Subscription\CatalogController;
 use App\Http\Controllers\Subscription\SubscriptionController;
 use App\Http\Controllers\Subscription\SubscriptionRenewalController;
@@ -549,6 +552,75 @@ Route::middleware('auth:api')->group(function () {
         Route::put('/comments/{comment}/reaction', [ReelCommentController::class, 'react'])->name('api.reels.comments.reaction.set');
         // Retirer sa réaction sur un commentaire de Reel
         Route::delete('/comments/{comment}/reaction', [ReelCommentController::class, 'removeReaction'])->name('api.reels.comments.reaction.destroy');
+    });
+
+    // --------------------------------------------------------------------------
+    // CR3 — STORY (Mobile / Authentifié)
+    // --------------------------------------------------------------------------
+    Route::prefix('stories')->group(function () {
+        // Rail horizontal des Stories actives accessibles (RL / CR3)
+        Route::get('/rail', [StoryController::class, 'rail'])->name('api.stories.rail');
+
+        // Récupérer les Stories actives de l'utilisateur connecté
+        Route::get('/mine', [StoryController::class, 'mine'])->name('api.stories.mine');
+
+        // Récupérer les Stories archivées de l'utilisateur connecté (historique)
+        Route::get('/archived', [StoryController::class, 'archived'])->name('api.stories.archived');
+
+        // Consulter la liste choisie (close friends) de l'utilisateur
+        Route::get('/close-list', [CloseListController::class, 'index'])->name('api.stories.close_list.index');
+        // Remplacer de manière atomique la liste choisie de l'utilisateur
+        Route::put('/close-list', [CloseListController::class, 'update'])->name('api.stories.close_list.update');
+
+        // Créer et publier une nouvelle Story avec médias, stickers et audio
+        Route::post('/', [StoryController::class, 'store'])->name('api.stories.store');
+
+        // Consulter le détail d'une Story personnelle avec statistiques (vues, votes, réponses)
+        Route::get('/mine/{id}', [StoryController::class, 'myStory'])->whereUuid('id')->name('api.stories.mine.show');
+
+        // Consulter la liste nominative des spectateurs d'une Story (réservé au propriétaire)
+        Route::get('/{id}/viewers', [StoryController::class, 'viewers'])->whereUuid('id')->name('api.stories.viewers');
+
+        // Récupérer les diapositives créatives associées à une Story
+        Route::get('/{id}/slides', [StoryController::class, 'slides'])->whereUuid('id')->name('api.stories.slides');
+
+        // Consulter une Story individuelle accessible par son UUID
+        Route::get('/{id}', [StoryController::class, 'show'])->whereUuid('id')->name('api.stories.show');
+
+        // Supprimer définitivement une Story de l'utilisateur connecté
+        Route::delete('/{id}', [StoryController::class, 'destroy'])->whereUuid('id')->name('api.stories.destroy');
+
+        // Enregistrer la consultation d'une Story (déduplication 1 vue par utilisateur)
+        Route::post('/{id}/view', [StoryController::class, 'view'])->whereUuid('id')->name('api.stories.view');
+
+        // Enregistrer un vote unique sur un sondage d'une diapositive
+        Route::post('/{slideId}/poll/{stickerId}/vote', [StoryController::class, 'pollVote'])
+            ->whereUuid('slideId')
+            ->whereUuid('stickerId')
+            ->name('api.stories.poll.vote');
+
+        // Enregistrer une intention de réponse privée (préparée pour la future messagerie)
+        Route::post('/{id}/reply', [StoryController::class, 'reply'])->whereUuid('id')->name('api.stories.reply');
+
+        // Signaler une Story pour modération
+        Route::post('/{id}/report', [StoryController::class, 'report'])->whereUuid('id')->name('api.stories.report');
+    });
+
+    // --------------------------------------------------------------------------
+    // CR3 — COLLECTIONS « À LA UNE » (Highlights)
+    // --------------------------------------------------------------------------
+    Route::prefix('highlights')->group(function () {
+        // Lister les collections À la une visibles d'un utilisateur
+        Route::get('/', [HighlightController::class, 'index'])->name('api.highlights.index');
+
+        // Créer une nouvelle collection À la une (titre limité à 20 caractères)
+        Route::post('/', [HighlightController::class, 'store'])->name('api.highlights.store');
+
+        // Consulter les détails d'une collection À la une avec ses Stories accessibles
+        Route::get('/{id}', [HighlightController::class, 'show'])->whereUuid('id')->name('api.highlights.show');
+
+        // Supprimer une collection À la une sans supprimer les Stories sous-jacentes
+        Route::delete('/{id}', [HighlightController::class, 'destroy'])->whereUuid('id')->name('api.highlights.destroy');
     });
 
 });
