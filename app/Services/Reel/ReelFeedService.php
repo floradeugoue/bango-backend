@@ -5,6 +5,7 @@ namespace App\Services\Reel;
 use App\Enums\Reel\ReelStatus;
 use App\Models\Reel\Reel;
 use App\Models\User;
+use App\Services\Boost\AdDeliveryService;
 use App\Services\Media\MediaStorageService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
@@ -88,7 +89,14 @@ class ReelFeedService
                 break;
         }
 
-        return $query->paginate($perPage);
+        $paginator = $query->paginate($perPage);
+
+        // Injection publicitaire BO (feed vertical Pour toi ou ville, exclusion du scope following)
+        if ($scope !== 'following') {
+            $paginator = app(AdDeliveryService::class)->injectIntoReelFeed($paginator, $user, ['scope' => $scope, 'topic' => $topic]);
+        }
+
+        return $paginator;
     }
 
     /**

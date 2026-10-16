@@ -20,6 +20,7 @@ use App\Notifications\Visit\VisitCancelledNotification;
 use App\Notifications\Visit\VisitConfirmedNotification;
 use App\Notifications\Visit\VisitDeclinedNotification;
 use App\Notifications\Visit\VisitProposedNotification;
+use App\Services\Boost\CreditWalletService;
 use App\Services\Listing\ListingService;
 use App\Services\Payment\Gateways\MonetbilGateway;
 use App\Services\Payment\PaymentEngineService;
@@ -196,7 +197,42 @@ class VisitReservationService
                 ];
             }
 
-            // 4. Initialisation de la transaction PAY Mobile Money
+            // 4. Paiement immédiat par portefeuille Crédit BANGO si demandé
+            $isCreditPayment = ($payload['channel'] ?? null) === 'credit_wallet' || ($payload['payment_method'] ?? null) === 'credit';
+            if ($isCreditPayment) {
+                $creditsNeeded = (int) round($feeAmount);
+                app(CreditWalletService::class)->debit(
+                    account: $prospect,
+                    amount: $creditsNeeded,
+                    source: 'visit',
+                    reference: 'VISIT-'.$reservation->id,
+                    description: sprintf('Paiement visite annonce #%s', $listing->id),
+                    idempotencyKey: 'visit_credit_debit_'.$reservation->id,
+                    referenceModel: $reservation,
+                    metadata: [
+                        'listing_id' => $listing->id,
+                        'slot_id' => $lockedSlot->id,
+                        'reservation_id' => $reservation->id,
+                    ]
+                );
+
+                $reservation->status = VisitReservationStatus::Confirmed;
+                $reservation->paid_at = now();
+                $reservation->payment_reference = 'VISIT-CREDIT-'.$reservation->id;
+                $reservation->lock_expires_at = null;
+                $reservation->save();
+
+                $lockedSlot->increment('booked_count');
+                $this->notifyVisitConfirmed($reservation);
+
+                return [
+                    'reservation' => $reservation,
+                    'transaction' => null,
+                    'quote' => $quote,
+                ];
+            }
+
+            // 5. Initialisation de la transaction PAY Mobile Money
             $idempotencyKey = $payload['idempotency_key'] ?? ('VISIT-'.$reservation->id.'-'.Str::random(6));
 
             $transaction = PaymentTransaction::create([
@@ -234,6 +270,66 @@ class VisitReservationService
                 'transaction' => $transaction,
                 'quote' => $quote,
             ];
+        });
+    }
+
+    /**
+     * Règle une réservation de visite en attente via le portefeuille Crédit BANGO.
+     */
+    public function payReservationWithCredits(VisitReservation $reservation, User $user): VisitReservation
+    {
+        if ((int) $reservation->prospect_id !== (int) $user->id) {
+            throw new AuthorizationException('Vous ne pouvez pas régler la réservation d\'un tiers.');
+        }
+
+        if ($reservation->status !== VisitReservationStatus::PendingPayment) {
+            throw ValidationException::withMessages([
+                'reservation' => ['Cette réservation n\'est pas en attente de paiement (statut actuel : '.$reservation->status->value.').'],
+            ]);
+        }
+
+        $feeAmount = (float) $reservation->fee_amount;
+        if ($feeAmount <= 0) {
+            $reservation->status = VisitReservationStatus::Confirmed;
+            $reservation->paid_at = now();
+            $reservation->save();
+
+            return $reservation;
+        }
+
+        return DB::transaction(function () use ($reservation, $user, $feeAmount) {
+            /** @var VisitReservation $lockedReservation */
+            $lockedReservation = VisitReservation::where('id', $reservation->id)->lockForUpdate()->firstOrFail();
+            /** @var VisitSlot $lockedSlot */
+            $lockedSlot = VisitSlot::where('id', $lockedReservation->slot_id)->lockForUpdate()->firstOrFail();
+
+            $creditsNeeded = (int) round($feeAmount);
+
+            app(CreditWalletService::class)->debit(
+                account: $user,
+                amount: $creditsNeeded,
+                source: 'visit',
+                reference: 'VISIT-'.$lockedReservation->id,
+                description: sprintf('Paiement visite réservation #%s', $lockedReservation->id),
+                idempotencyKey: 'visit_credit_debit_'.$lockedReservation->id,
+                referenceModel: $lockedReservation,
+                metadata: [
+                    'reservation_id' => $lockedReservation->id,
+                    'listing_id' => $lockedReservation->listing_id,
+                    'slot_id' => $lockedReservation->slot_id,
+                ]
+            );
+
+            $lockedReservation->status = VisitReservationStatus::Confirmed;
+            $lockedReservation->paid_at = now();
+            $lockedReservation->payment_reference = 'VISIT-CREDIT-'.$lockedReservation->id;
+            $lockedReservation->lock_expires_at = null;
+            $lockedReservation->save();
+
+            $lockedSlot->increment('booked_count');
+            $this->notifyVisitConfirmed($lockedReservation);
+
+            return $lockedReservation;
         });
     }
 
@@ -369,8 +465,8 @@ class VisitReservationService
         ?string $proposalSlotId = null,
         ?string $reason = null
     ): VisitReservation {
-        if (! $this->listingService->canManage($actor, $reservation->listing)) {
-            throw new AuthorizationException('Vous n\'êtes pas autorisé à gérer les visites pour ce bien.');
+        if (! $this->listingService->canManageVisits($actor, $reservation->listing)) {
+            throw new AuthorizationException('Vous n\'êtes pas autorisé à gérer les visites pour ce bien (capacité \'visits\' requise).');
         }
 
         return DB::transaction(function () use ($reservation, $action, $proposalSlotId, $reason) {
@@ -513,7 +609,7 @@ class VisitReservationService
     public function cancelVisit(VisitReservation $reservation, User $actor, ?string $reason = null): VisitReservation
     {
         $isProspect = $reservation->prospect_id === $actor->id;
-        $isManager = $this->listingService->canManage($actor, $reservation->listing);
+        $isManager = $this->listingService->canManageVisits($actor, $reservation->listing);
         $isAdmin = $actor->isAdmin();
 
         if (! $isProspect && ! $isManager && ! $isAdmin) {

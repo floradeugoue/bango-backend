@@ -22,8 +22,8 @@ class InitiatePaymentRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'service_type' => ['sometimes', 'string', 'in:subscription,certification,boost,visit,plan'],
-            'kind' => ['sometimes', 'string', 'in:subscription,certification,boost,visit,plan'],
+            'service_type' => ['sometimes', 'string', 'in:subscription,certification,boost,visit,plan,credit'],
+            'kind' => ['sometimes', 'string', 'in:subscription,certification,boost,visit,plan,credit'],
             'price_id' => ['nullable', 'integer', 'exists:subscription_prices,id'],
             'custom_amount' => ['nullable', 'numeric', 'min:100'],
             'amount' => ['nullable', 'numeric'], // Ne sera pas utilisé comme source de vérité, le serveur recalcule
@@ -48,6 +48,10 @@ class InitiatePaymentRequest extends FormRequest
                 $validator->errors()->add('custom_amount', 'Le montant est obligatoire pour une visite.');
             }
 
+            if ($serviceType === PaymentServiceType::Credit && empty($this->input('custom_amount')) && empty($this->input('amount'))) {
+                $validator->errors()->add('amount', 'Le montant est obligatoire pour un achat de crédits.');
+            }
+
             if (empty($this->getIdempotencyKey())) {
                 $validator->errors()->add('idempotency_key', 'Une clé d\'idempotence (idempotency_key ou key) est obligatoire.');
             }
@@ -63,6 +67,7 @@ class InitiatePaymentRequest extends FormRequest
             'certification' => PaymentServiceType::Certification,
             'boost' => PaymentServiceType::Boost,
             'visit' => PaymentServiceType::Visit,
+            'credit' => PaymentServiceType::Credit,
             default => PaymentServiceType::Subscription,
         };
     }

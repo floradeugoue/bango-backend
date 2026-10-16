@@ -4,6 +4,8 @@ namespace App\Models\Square;
 
 use App\Enums\Square\PostAudience;
 use App\Enums\Square\PostCommentsBy;
+use App\Models\Boost\Campaign;
+use App\Models\Page\Page;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -12,6 +14,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Post extends Model
@@ -66,6 +69,14 @@ class Post extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    /**
+     * Page Professionnelle au nom de laquelle la publication est effectuée.
+     */
+    public function page(): BelongsTo
+    {
+        return $this->belongsTo(Page::class);
     }
 
     /**
@@ -181,5 +192,13 @@ class Post extends Model
     public function scopeActive(Builder $query): Builder
     {
         return $query->where('is_archived', false);
+    }
+
+    /**
+     * Campagnes publicitaires associées à cette publication.
+     */
+    public function campaigns(): MorphMany
+    {
+        return $this->morphMany(Campaign::class, 'boostable');
     }
 }

@@ -5,11 +5,13 @@ namespace App\Services\Square;
 use App\Enums\Square\PostAudience;
 use App\Enums\Square\PostCommentsBy;
 use App\Enums\Square\PostMediaKind;
+use App\Models\Page\Page;
 use App\Models\Square\Post;
 use App\Models\Square\PostMedia;
 use App\Models\Square\PostTag;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 
 class PostCreationService
@@ -77,10 +79,21 @@ class PostCreationService
                 $commentsBy = $commentsBy->value;
             }
 
+            $asPageId = $data['as_page_id'] ?? null;
+            if ($asPageId) {
+                /** @var Page|null $page */
+                $page = Page::find($asPageId);
+                if (! $page || ! $page->canUserPublish($user)) {
+                    throw ValidationException::withMessages([
+                        'as_page_id' => ['Vous n\'êtes pas autorisé à publier au nom de cette page.'],
+                    ]);
+                }
+            }
+
             // Création du post principal
             $post = Post::create([
                 'user_id' => $user->id,
-                'page_id' => $data['as_page_id'] ?? null,
+                'page_id' => $asPageId,
                 'body' => $body,
                 'audience' => $audience,
                 'comments_by' => $commentsBy,

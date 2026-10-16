@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Auth;
 use App\Enums\OtpChannel;
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\Auth\BackupCodeService;
+use App\Services\Auth\TotpService;
 use App\Services\Otp\OtpService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -47,23 +49,44 @@ class SecondFactorController extends Controller
 
         $code = trim($request->input('code'));
         $isValid = false;
+        $usedBackupCode = false;
 
-        // 1. Check backup codes if available
-        if (! empty($user->backup_codes) && is_array($user->backup_codes)) {
-            $backupCodes = $user->backup_codes;
-            $index = array_search($code, $backupCodes, true);
-            if ($index !== false) {
-                unset($backupCodes[$index]);
-                $user->backup_codes = array_values($backupCodes);
-                $user->save();
+        $backupCodeService = app(BackupCodeService::class);
+        $totpService = app(TotpService::class);
+
+        // 1. Check backup codes atomically with row lock
+        if ($backupCodeService->verifyAndConsume($user, $code)) {
+            $isValid = true;
+            $usedBackupCode = true;
+        }
+
+        // 2. Check TOTP authenticator app code
+        $channel = $data['channel'] ?? $user->two_factor_method ?? 'sms';
+
+        if (! $isValid && $channel === 'app') {
+            if ($totpService->verifyUser($user, $code)) {
                 $isValid = true;
+            } else {
+                return response()->json([
+                    'kind' => 'invalid-code',
+                    'message' => 'Code d\'authentification TOTP ou code de secours invalide.',
+                ], 422);
             }
         }
 
-        // 2. Check OTP code
+        // 3. Check SMS / Email OTP code
         if (! $isValid) {
-            $channel = OtpChannel::from($data['channel']);
-            $otpResult = $otpService->verifyOtp($data['destination'], $code, $channel, 'second_factor');
+            $otpChannel = OtpChannel::tryFrom($channel) ?? OtpChannel::Sms;
+            $destination = $data['destination'] ?? ($otpChannel === OtpChannel::Email ? $user->email : $user->phone);
+
+            if (! $destination) {
+                return response()->json([
+                    'kind' => 'invalid-code',
+                    'message' => 'Destination de second facteur introuvable.',
+                ], 422);
+            }
+
+            $otpResult = $otpService->verifyOtp($destination, $code, $otpChannel, 'second_factor');
 
             if ($otpResult === true) {
                 $isValid = true;
@@ -86,7 +109,7 @@ class SecondFactorController extends Controller
         $deviceName = $data['device_name'] ?? 'Application mobile';
         $token = $user->createToken($deviceName)->accessToken;
 
-        return response()->json([
+        $responsePayload = [
             'token' => $token,
             'user' => [
                 'id' => $user->id,
@@ -96,6 +119,13 @@ class SecondFactorController extends Controller
                 'avatar_url' => $user->avatar_url,
                 'is_verified' => $user->is_verified,
             ],
-        ], 200);
+        ];
+
+        if ($usedBackupCode) {
+            $responsePayload['backup_code_used'] = true;
+            $responsePayload['remaining_backup_codes'] = $backupCodeService->getRemainingCount($user);
+        }
+
+        return response()->json($responsePayload, 200);
     }
 }

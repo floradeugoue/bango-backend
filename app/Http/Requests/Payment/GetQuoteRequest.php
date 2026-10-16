@@ -21,8 +21,8 @@ class GetQuoteRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'service_type' => ['nullable', 'string', 'in:subscription,certification,boost,visit,plan'],
-            'kind' => ['nullable', 'string', 'in:subscription,certification,boost,visit,plan'],
+            'service_type' => ['nullable', 'string', 'in:subscription,certification,boost,visit,plan,credit'],
+            'kind' => ['nullable', 'string', 'in:subscription,certification,boost,visit,plan,credit'],
             'price_id' => ['nullable', 'integer', 'exists:subscription_prices,id'],
             'custom_amount' => ['nullable', 'numeric', 'min:100'],
             'amount' => ['nullable', 'numeric', 'min:100'],

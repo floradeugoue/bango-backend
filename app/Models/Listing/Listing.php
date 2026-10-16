@@ -2,10 +2,15 @@
 
 namespace App\Models\Listing;
 
+use App\Enums\Delegation\DelegationStatus;
 use App\Enums\Listing\ListingKind;
 use App\Enums\Listing\ListingMode;
 use App\Enums\Listing\ListingStatus;
 use App\Enums\Visit\VisitReservationStatus;
+use App\Models\Boost\Campaign;
+use App\Models\Delegation\Delegation;
+use App\Models\Message\Conversation;
+use App\Models\Page\Page;
 use App\Models\Reel\Reel;
 use App\Models\User;
 use App\Models\Visit\VisitReservation;
@@ -18,6 +23,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Listing extends Model
@@ -32,6 +39,7 @@ class Listing extends Model
         'owner_id',
         'created_by_id',
         'agent_id',
+        'page_id',
         'submission_key',
         'title',
         'description',
@@ -134,6 +142,14 @@ class Listing extends Model
     }
 
     /**
+     * Page Professionnelle (Agence Immobilière) associée à l'annonce.
+     */
+    public function page(): BelongsTo
+    {
+        return $this->belongsTo(Page::class, 'page_id');
+    }
+
+    /**
      * Tous les médias ordonnés de l'annonce.
      */
     public function media(): HasMany
@@ -200,6 +216,35 @@ class Listing extends Model
     public function visitReservations(): HasMany
     {
         return $this->hasMany(VisitReservation::class, 'listing_id');
+    }
+
+    /**
+     * Mandats et délégations attachés à cette annonce.
+     */
+    public function delegations(): HasMany
+    {
+        return $this->hasMany(Delegation::class, 'listing_id');
+    }
+
+    /**
+     * Conversations contextuelles liées à cette annonce.
+     */
+    public function conversations(): HasMany
+    {
+        return $this->hasMany(Conversation::class, 'listing_id');
+    }
+
+    /**
+     * Mandat actif actuel de l'annonce.
+     */
+    public function activeDelegation(): HasOne
+    {
+        return $this->hasOne(Delegation::class, 'listing_id')
+            ->where('status', DelegationStatus::Active->value)
+            ->whereNull('revoked_at')
+            ->where(function ($q) {
+                $q->whereNull('expires_at')->orWhere('expires_at', '>', now());
+            });
     }
 
     /**
@@ -405,5 +450,13 @@ class Listing extends Model
         }
 
         return $this->videos()->first();
+    }
+
+    /**
+     * Campagnes publicitaires associées à cette annonce.
+     */
+    public function campaigns(): MorphMany
+    {
+        return $this->morphMany(Campaign::class, 'boostable');
     }
 }

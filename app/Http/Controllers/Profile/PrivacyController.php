@@ -18,6 +18,7 @@ class PrivacyController extends Controller
         'tagMe' => 'followers',
         'onlineStatus' => true,
         'readReceipts' => true,
+        'ads_personalization' => true,
     ];
 
     /**
@@ -49,6 +50,7 @@ class PrivacyController extends Controller
             'tagMe' => ['sometimes', 'in:everyone,followers,nobody'],
             'onlineStatus' => ['sometimes', 'boolean'],
             'readReceipts' => ['sometimes', 'boolean'],
+            'ads_personalization' => ['sometimes', 'boolean'],
         ]);
 
         /** @var User $user */

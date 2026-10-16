@@ -8,6 +8,7 @@ enum PaymentServiceType: string
     case Certification = 'certification';
     case Boost = 'boost';
     case Visit = 'visit';
+    case Credit = 'credit';
 
     public function label(): string
     {
@@ -16,6 +17,7 @@ enum PaymentServiceType: string
             self::Certification => 'Certification Page Pro',
             self::Boost => 'Boost Annonce',
             self::Visit => 'Frais de Visite Immobilière',
+            self::Credit => 'Achat de Crédits BANGO',
         };
     }
 }

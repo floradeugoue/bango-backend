@@ -2,17 +2,24 @@
 
 namespace App\Services\Listing;
 
+use App\Enums\Delegation\DelegationStatus;
 use App\Enums\Listing\ListingKind;
 use App\Enums\Listing\ListingMode;
 use App\Enums\Listing\ListingPhotoRoom;
 use App\Enums\Listing\ListingStatus;
+use App\Enums\Visit\VisitReservationStatus;
+use App\Enums\Visit\VisitSlotStatus;
+use App\Events\Listing\ListingPublished;
+use App\Models\Delegation\Delegation;
 use App\Models\Listing\Listing;
 use App\Models\Listing\ListingMedia;
 use App\Models\Listing\ListingSave;
 use App\Models\User;
+use App\Models\Visit\VisitSlot;
 use App\Services\Media\MediaStorageService;
 use App\Services\Subscription\BadgeResolutionService;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -78,12 +85,113 @@ class ListingService
             return true;
         }
 
-        // L'agent mandaté et affecté à l'annonce
-        if ($listing->agent_id && $actor->id === $listing->agent_id) {
+        // L'agent mandaté via une délégation active
+        $activeDelegation = Delegation::where('listing_id', $listing->id)
+            ->where('agent_id', $actor->id)
+            ->where('status', DelegationStatus::Active->value)
+            ->whereNull('revoked_at')
+            ->where(function ($q) {
+                $q->whereNull('expires_at')->orWhere('expires_at', '>', now());
+            })
+            ->first();
+
+        if ($activeDelegation && $this->badgeResolution->resolveUserBadges($actor)['hasAgent']) {
             return true;
         }
 
+        // Rétrocompatibilité : agent directement assigné sur l'annonce sans enregistrement de délégation
+        if ($listing->agent_id && $actor->id === $listing->agent_id) {
+            // S'il existe une délégation révoquée ou déclinée pour cet agent, refuser
+            $hasRevokedDelegation = Delegation::where('listing_id', $listing->id)
+                ->where('agent_id', $actor->id)
+                ->where(function ($q) {
+                    $q->where('status', DelegationStatus::Revoked->value)
+                        ->orWhereNotNull('revoked_at')
+                        ->orWhere('status', DelegationStatus::Declined->value);
+                })
+                ->exists();
+
+            if (! $hasRevokedDelegation) {
+                return true;
+            }
+        }
+
         return false;
+    }
+
+    /**
+     * Vérifie si l'acteur est autorisé à éditer les informations d'une annonce (propriétaire ou agent avec edit).
+     */
+    public function canEditListing(User $actor, Listing $listing): bool
+    {
+        if ($actor->isAdmin() || $actor->id === $listing->owner_id) {
+            return true;
+        }
+
+        if (! $this->canManage($actor, $listing)) {
+            return false;
+        }
+
+        $delegation = Delegation::where('listing_id', $listing->id)
+            ->where('agent_id', $actor->id)
+            ->where('status', DelegationStatus::Active->value)
+            ->first();
+
+        if ($delegation) {
+            return $delegation->hasCapability('edit');
+        }
+
+        return (bool) ($listing->agent_id && $actor->id === $listing->agent_id);
+    }
+
+    /**
+     * Vérifie si l'acteur est autorisé à gérer les visites d'une annonce (propriétaire ou agent avec visits).
+     */
+    public function canManageVisits(User $actor, Listing $listing): bool
+    {
+        if ($actor->isAdmin() || $actor->id === $listing->owner_id) {
+            return true;
+        }
+
+        if (! $this->canManage($actor, $listing)) {
+            return false;
+        }
+
+        $delegation = Delegation::where('listing_id', $listing->id)
+            ->where('agent_id', $actor->id)
+            ->where('status', DelegationStatus::Active->value)
+            ->first();
+
+        if ($delegation) {
+            return $delegation->hasCapability('visits');
+        }
+
+        return (bool) ($listing->agent_id && $actor->id === $listing->agent_id);
+    }
+
+    /**
+     * Vérifie si l'acteur est autorisé à répondre aux messages d'une annonce (propriétaire ou agent avec reply).
+     */
+    public function canReplyMessages(User $actor, Listing $listing): bool
+    {
+        if ($actor->isAdmin() || $actor->id === $listing->owner_id) {
+            return true;
+        }
+
+        if (! $this->canManage($actor, $listing)) {
+            return false;
+        }
+
+        $delegation = Delegation::where('listing_id', $listing->id)
+            ->where('agent_id', $actor->id)
+            ->where('status', DelegationStatus::Active->value)
+            ->first();
+
+        if ($delegation) {
+            return $delegation->hasCapability('reply');
+        }
+
+        return (bool) ($listing->agent_id && $actor->id === $listing->agent_id);
     }
 
     /**
@@ -300,7 +408,13 @@ class ListingService
 
             $listing->save();
 
-            return $listing->fresh(['photos', 'videos', 'owner']);
+            $freshListing = $listing->fresh(['photos', 'videos', 'owner']);
+
+            if ($freshListing->status === ListingStatus::Published) {
+                ListingPublished::dispatch($freshListing);
+            }
+
+            return $freshListing;
         });
     }
 
@@ -311,8 +425,8 @@ class ListingService
      */
     public function updateListingDetails(Listing $listing, User $actor, array $patch): Listing
     {
-        if (! $this->canManage($actor, $listing)) {
-            throw new AuthorizationException("Vous n'êtes pas autorisé à modifier cette annonce.");
+        if (! $this->canEditListing($actor, $listing)) {
+            throw new AuthorizationException("Vous n'êtes pas autorisé à modifier cette annonce (capacité 'edit' requise).");
         }
 
         return DB::transaction(function () use ($listing, $patch) {
@@ -359,7 +473,7 @@ class ListingService
      */
     public function updateListingStatus(Listing $listing, User $actor, ListingStatus $newStatus, ?string $reason = null): Listing
     {
-        if (! $this->canManage($actor, $listing)) {
+        if (! $this->canEditListing($actor, $listing)) {
             throw new AuthorizationException("Vous n'êtes pas autorisé à modifier le statut de cette annonce.");
         }
 
@@ -376,23 +490,90 @@ class ListingService
             ]);
         }
 
-        $listing->status = $newStatus;
+        $publishedNow = false;
 
-        if ($newStatus === ListingStatus::Published && ! $listing->published_at) {
-            $listing->published_at = now();
+        $updatedListing = DB::transaction(function () use ($listing, $newStatus, $reason, &$publishedNow) {
+            $oldStatus = $listing->status;
+            $listing->status = $newStatus;
+
+            if ($newStatus === ListingStatus::Published && ! $listing->published_at) {
+                $listing->published_at = now();
+            }
+
+            if ($newStatus === ListingStatus::Published && $oldStatus !== ListingStatus::Published) {
+                $publishedNow = true;
+            }
+
+            if ($newStatus === ListingStatus::Taken) {
+                $listing->taken_at = now();
+
+                // Fermer les créneaux futurs pour empêcher toute nouvelle réservation
+                VisitSlot::where('listing_id', $listing->id)
+                    ->where('status', VisitSlotStatus::Open->value)
+                    ->where('start_at', '>', now())
+                    ->update(['status' => VisitSlotStatus::Closed->value]);
+            }
+
+            if ($newStatus === ListingStatus::Rejected && $reason) {
+                $listing->rejection_reason = $reason;
+            }
+
+            $listing->save();
+
+            return $listing;
+        });
+
+        if ($publishedNow) {
+            ListingPublished::dispatch($updatedListing);
         }
 
-        if ($newStatus === ListingStatus::Taken) {
-            $listing->taken_at = now();
+        return $updatedListing;
+    }
+
+    /**
+     * Tableau de bord des annonces du bailleur avec filtres et pagination (BL-01, BL-18).
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    public function getLandlordProperties(User $landlord, array $filters = [], int $perPage = 15): LengthAwarePaginator
+    {
+        $query = Listing::where('owner_id', $landlord->id)
+            ->with(['photos', 'videos', 'activeDelegation.agent'])
+            ->withCount([
+                'visitReservations as pending_visits_count' => function ($q) {
+                    $q->whereIn('status', [
+                        VisitReservationStatus::Requested->value,
+                        VisitReservationStatus::PendingPayment->value,
+                    ]);
+                },
+                'visitReservations as confirmed_visits_count' => function ($q) {
+                    $q->where('status', VisitReservationStatus::Confirmed->value);
+                },
+            ]);
+
+        if (! empty($filters['status'])) {
+            $query->where('status', $filters['status']);
         }
 
-        if ($newStatus === ListingStatus::Rejected && $reason) {
-            $listing->rejection_reason = $reason;
+        if (! empty($filters['city'])) {
+            $query->whereRaw('LOWER(city) = ?', [strtolower(trim((string) $filters['city']))]);
         }
 
-        $listing->save();
+        if (! empty($filters['mode'])) {
+            $query->where('mode', $filters['mode']);
+        }
 
-        return $listing;
+        $sort = $filters['sort'] ?? 'created_at';
+        $direction = strtolower($filters['direction'] ?? 'desc') === 'asc' ? 'asc' : 'desc';
+
+        $allowedSorts = ['created_at', 'price', 'views_count', 'saves_count', 'published_at'];
+        if (in_array($sort, $allowedSorts, true)) {
+            $query->orderBy($sort, $direction);
+        } else {
+            $query->orderByDesc('created_at');
+        }
+
+        return $query->paginate(max(1, min(50, $perPage)));
     }
 
     /**
