@@ -34,8 +34,8 @@ class LandlordVisitController extends Controller
     {
         $listing = Listing::findOrFail($id);
 
-        if (! $this->listingService->canManage($request->user(), $listing)) {
-            throw new AuthorizationException('Vous n\'êtes pas autorisé à gérer les créneaux de cette annonce.');
+        if (! $this->listingService->canManageVisits($request->user(), $listing)) {
+            throw new AuthorizationException('Vous n\'êtes pas autorisé à gérer les créneaux de cette annonce (capacité \'visits\' requise).');
         }
 
         $slots = VisitSlot::where('listing_id', $listing->id)
@@ -113,8 +113,8 @@ class LandlordVisitController extends Controller
     {
         $listing = Listing::findOrFail($id);
 
-        if (! $this->listingService->canManage($request->user(), $listing)) {
-            throw new AuthorizationException('Vous n\'êtes pas autorisé à consulter les visites de cette annonce.');
+        if (! $this->listingService->canManageVisits($request->user(), $listing)) {
+            throw new AuthorizationException('Vous n\'êtes pas autorisé à consulter les visites de cette annonce (capacité \'visits\' requise).');
         }
 
         $query = VisitReservation::where('listing_id', $listing->id)

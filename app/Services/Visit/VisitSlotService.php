@@ -11,6 +11,7 @@ use App\Models\Visit\VisitSlot;
 use App\Services\Listing\ListingService;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class VisitSlotService
@@ -185,8 +186,8 @@ class VisitSlotService
         Carbon $endAt,
         int $capacity = 1
     ): VisitSlot {
-        if (! $this->listingService->canManage($actor, $listing)) {
-            throw new AuthorizationException("Vous n'êtes pas autorisé à gérer les créneaux de cette annonce.");
+        if (! $this->listingService->canManageVisits($actor, $listing)) {
+            throw new AuthorizationException("Vous n'êtes pas autorisé à gérer les créneaux de cette annonce (capacité 'visits' requise).");
         }
 
         if ($startAt->isPast()) {
@@ -218,8 +219,8 @@ class VisitSlotService
      */
     public function closeSlot(VisitSlot $slot, User $actor): VisitSlot
     {
-        if (! $this->listingService->canManage($actor, $slot->listing)) {
-            throw new AuthorizationException("Vous n'êtes pas autorisé à modifier ce créneau.");
+        if (! $this->listingService->canManageVisits($actor, $slot->listing)) {
+            throw new AuthorizationException("Vous n'êtes pas autorisé à modifier ce créneau (capacité 'visits' requise).");
         }
 
         // Vérifier si des réservations confirmées existent sur ce créneau
@@ -237,5 +238,160 @@ class VisitSlotService
         $slot->save();
 
         return $slot;
+    }
+
+    /**
+     * Configuration globale ou synchronisation par lot des créneaux (BL-04 / BL-08).
+     *
+     * @param  array{
+     *     slots?: array<int, array{
+     *         start_at: string,
+     *         end_at: string,
+     *         capacity?: int
+     *     }>,
+     *     days?: array<int, array{
+     *         day: int,
+     *         from: string,
+     *         to: string,
+     *         closed?: bool
+     *     }>,
+     *     slot_duration_minutes?: int,
+     *     horizon_days?: int
+     * }  $payload
+     * @return array<string, mixed>
+     */
+    public function updateSlots(Listing $listing, User $actor, array $payload): array
+    {
+        if (! $this->listingService->canManageVisits($actor, $listing)) {
+            throw new AuthorizationException("Vous n'êtes pas autorisé à gérer les créneaux de cette annonce (capacité 'visits' requise).");
+        }
+
+        return DB::transaction(function () use ($listing, $payload) {
+            $createdSlots = [];
+
+            // 1. Mise à jour explicite par liste de créneaux
+            if (! empty($payload['slots']) && is_array($payload['slots'])) {
+                $slotsInput = collect($payload['slots'])->sortBy('start_at')->values();
+
+                for ($i = 0; $i < $slotsInput->count(); $i++) {
+                    $start = Carbon::parse($slotsInput[$i]['start_at']);
+                    $end = Carbon::parse($slotsInput[$i]['end_at']);
+
+                    if ($start->isPast()) {
+                        throw ValidationException::withMessages([
+                            "slots.{$i}.start_at" => ['Un créneau ne peut pas être programmé dans le passé.'],
+                        ]);
+                    }
+
+                    if ($end->lte($start)) {
+                        throw ValidationException::withMessages([
+                            "slots.{$i}.end_at" => ['L\'heure de fin doit être postérieure à l\'heure de début.'],
+                        ]);
+                    }
+
+                    if ($i > 0) {
+                        $prevEnd = Carbon::parse($slotsInput[$i - 1]['end_at']);
+                        if ($start->lt($prevEnd)) {
+                            throw ValidationException::withMessages([
+                                "slots.{$i}" => ['Deux créneaux soumis se chevauchent dans le planning.'],
+                            ]);
+                        }
+                    }
+
+                    $capacity = (int) ($slotsInput[$i]['capacity'] ?? 1);
+
+                    $slot = VisitSlot::firstOrCreate(
+                        [
+                            'listing_id' => $listing->id,
+                            'start_at' => $start,
+                            'end_at' => $end,
+                        ],
+                        [
+                            'owner_id' => $listing->owner_id,
+                            'agent_id' => $listing->agent_id,
+                            'capacity' => max(1, $capacity),
+                            'booked_count' => 0,
+                            'status' => VisitSlotStatus::Open,
+                        ]
+                    );
+
+                    if ($slot->status !== VisitSlotStatus::Open) {
+                        $slot->status = VisitSlotStatus::Open;
+                        $slot->capacity = max(1, $capacity);
+                        $slot->save();
+                    }
+
+                    $createdSlots[] = $slot;
+                }
+            }
+
+            // 2. Mise à jour selon une grille récurrente (jours et horaires)
+            if (! empty($payload['days']) && is_array($payload['days'])) {
+                $horizonDays = max(1, min(30, (int) ($payload['horizon_days'] ?? 7)));
+                $slotDuration = max(15, min(120, (int) ($payload['slot_duration_minutes'] ?? self::VISIT_DURATION_MINUTES)));
+                $scheduleByDay = collect($payload['days'])->keyBy('day');
+
+                for ($d = 0; $d < $horizonDays; $d++) {
+                    $date = now()->addDays($d);
+                    $dayOfWeek = $date->dayOfWeek;
+
+                    if (! $scheduleByDay->has($dayOfWeek)) {
+                        continue;
+                    }
+
+                    $dayRule = $scheduleByDay->get($dayOfWeek);
+                    if (! empty($dayRule['closed'])) {
+                        continue;
+                    }
+
+                    $from = $dayRule['from'] ?? '09:00';
+                    $to = $dayRule['to'] ?? '18:00';
+
+                    [$fromH, $fromM] = explode(':', $from);
+                    [$toH, $toM] = explode(':', $to);
+
+                    $cursor = $date->copy()->setTime((int) $fromH, (int) $fromM, 0);
+                    $limit = $date->copy()->setTime((int) $toH, (int) $toM, 0);
+
+                    while ($cursor->copy()->addMinutes($slotDuration)->lte($limit)) {
+                        $start = $cursor->copy();
+                        $end = $start->copy()->addMinutes($slotDuration);
+
+                        if ($start->isFuture()) {
+                            $slot = VisitSlot::firstOrCreate(
+                                [
+                                    'listing_id' => $listing->id,
+                                    'start_at' => $start,
+                                    'end_at' => $end,
+                                ],
+                                [
+                                    'owner_id' => $listing->owner_id,
+                                    'agent_id' => $listing->agent_id,
+                                    'capacity' => 1,
+                                    'booked_count' => 0,
+                                    'status' => VisitSlotStatus::Open,
+                                ]
+                            );
+
+                            $createdSlots[] = $slot;
+                        }
+
+                        $cursor->addMinutes($slotDuration + 15);
+                    }
+                }
+            }
+
+            return [
+                'listing_id' => $listing->id,
+                'total_slots' => count($createdSlots),
+                'slots' => collect($createdSlots)->map(fn (VisitSlot $s) => [
+                    'id' => $s->id,
+                    'start_at' => $s->start_at->toIso8601String(),
+                    'end_at' => $s->end_at->toIso8601String(),
+                    'capacity' => $s->capacity,
+                    'status' => $s->status->value,
+                ])->values()->all(),
+            ];
+        });
     }
 }

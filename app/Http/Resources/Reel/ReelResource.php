@@ -3,6 +3,7 @@
 namespace App\Http\Resources\Reel;
 
 use App\Enums\Reel\ReelReactionType;
+use App\Models\Page\Page;
 use App\Models\Reel\Reel;
 use App\Models\User;
 use App\Services\Media\MediaStorageService;
@@ -103,20 +104,40 @@ class ReelResource extends JsonResource
             }
         }
 
+        $page = $this->page_id ? ($this->relationLoaded('page') ? $this->page : Page::find($this->page_id)) : null;
+
+        $reelAuthorName = $page ? $page->name : ($author?->name ?? 'Anonyme');
+        $reelAuthorVerified = $page ? $page->isCertified() : (bool) ($author?->is_verified ?? false);
+        $reelAuthorBadge = $page ? ($page->isCertified() ? 'page_certified' : 'none') : $author?->badge;
+        $reelHandle = '@'.($page ? $page->handle : ($author?->handle ?? 'user'));
+
         return [
             'id' => (string) $this->id,
             'authorId' => (string) $this->user_id,
             'author_id' => $this->user_id,
-            'authorName' => $author?->name ?? 'Anonyme',
-            'author_name' => $author?->name ?? 'Anonyme',
-            'authorVerified' => (bool) ($author?->is_verified ?? false),
-            'author_verified' => (bool) ($author?->is_verified ?? false),
-            'authorBadge' => $author?->badge,
-            'author_badge' => $author?->badge,
+            'page_id' => $this->page_id ? (int) $this->page_id : null,
+            'is_page_reel' => $page !== null,
+            'page' => $page ? [
+                'id' => (int) $page->id,
+                'name' => $page->name,
+                'handle' => $page->handle,
+                'logo_url' => $page->logo_url,
+                'is_certified' => $page->isCertified(),
+            ] : null,
+            'authorName' => $reelAuthorName,
+            'author_name' => $reelAuthorName,
+            'authorVerified' => $reelAuthorVerified,
+            'author_verified' => $reelAuthorVerified,
+            'authorBadge' => $reelAuthorBadge,
+            'author_badge' => $reelAuthorBadge,
             'authorMeta' => $authorMeta,
             'author_meta' => $authorMeta,
+            'is_sponsored' => (bool) ($this->is_sponsored ?? false),
+            'campaign_id' => $this->campaign_id ?? null,
+            'sponsored_by' => $this->sponsored_by ?? null,
+            'sponsor_branding' => $this->sponsor_branding ?? null,
             'caption' => $this->caption ?? '',
-            'handle' => '@'.($author?->handle ?? 'user'),
+            'handle' => $reelHandle,
             'sound' => $soundLabel,
             'soundId' => $this->sound_id ?? "orig:{$this->id}",
             'sound_id' => $this->sound_id ?? "orig:{$this->id}",

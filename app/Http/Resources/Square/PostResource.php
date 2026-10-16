@@ -3,6 +3,7 @@
 namespace App\Http\Resources\Square;
 
 use App\Enums\Square\PostMediaKind;
+use App\Models\Page\Page;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -53,19 +54,42 @@ class PostResource extends JsonResource
         $audienceVal = is_object($this->audience) ? $this->audience->value : $this->audience;
         $commentsByVal = is_object($this->comments_by) ? $this->comments_by->value : $this->comments_by;
 
+        $page = $this->page_id ? ($this->relationLoaded('page') ? $this->page : Page::find($this->page_id)) : null;
+
+        $authorName = $page ? $page->name : ($this->user?->display_name ?? $this->user?->name ?? 'Utilisateur');
+        $authorAvatar = $page ? $page->logo_url : $this->user?->avatar_url;
+        $authorVerified = $page ? $page->isCertified() : (bool) ($this->user?->is_verified ?? false);
+        $authorBadge = $page ? ($page->isCertified() ? 'page_certified' : 'none') : ($this->user?->badge ?? 'none');
+        $authorMeta = $page ? ($page->handle ? '@'.$page->handle : null) : ($this->user?->handle ? '@'.$this->user->handle : null);
+
         return [
             'id' => (string) $this->id,
             'authorId' => (string) $this->user_id,
             'author_id' => (string) $this->user_id,
-            'authorName' => $this->user?->display_name ?? $this->user?->name ?? 'Utilisateur',
-            'author_name' => $this->user?->display_name ?? $this->user?->name ?? 'Utilisateur',
-            'authorAvatar' => $this->user?->avatar_url,
-            'author_avatar' => $this->user?->avatar_url,
-            'authorVerified' => (bool) ($this->user?->is_verified ?? false),
-            'author_verified' => (bool) ($this->user?->is_verified ?? false),
-            'authorBadge' => $this->user?->badge ?? 'none',
-            'author_badge' => $this->user?->badge ?? 'none',
-            'authorMeta' => $this->user?->handle ? '@'.$this->user->handle : null,
+            'page_id' => $this->page_id ? (int) $this->page_id : null,
+            'is_page_post' => $page !== null,
+            'page' => $page ? [
+                'id' => (int) $page->id,
+                'name' => $page->name,
+                'handle' => $page->handle,
+                'logo_url' => $page->logo_url,
+                'is_certified' => $page->isCertified(),
+            ] : null,
+            'authorName' => $authorName,
+            'author_name' => $authorName,
+            'authorAvatar' => $authorAvatar,
+            'author_avatar' => $authorAvatar,
+            'authorVerified' => $authorVerified,
+            'author_verified' => $authorVerified,
+            'authorBadge' => $authorBadge,
+            'author_badge' => $authorBadge,
+            'authorMeta' => $authorMeta,
+
+            // Sponsoring / Publicité BO
+            'is_sponsored' => (bool) ($this->is_sponsored ?? false),
+            'campaign_id' => $this->campaign_id ?? null,
+            'sponsored_by' => $this->sponsored_by ?? null,
+            'sponsor_branding' => $this->sponsor_branding ?? null,
 
             // Contenu
             'body' => (string) ($this->body ?? ''),

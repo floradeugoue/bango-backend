@@ -4,7 +4,9 @@ namespace App\Models\Reel;
 
 use App\Enums\Reel\ReelReactionType;
 use App\Enums\Reel\ReelStatus;
+use App\Models\Boost\Campaign;
 use App\Models\Listing\Listing;
+use App\Models\Page\Page;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -12,6 +14,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Reel extends Model
@@ -21,6 +24,7 @@ class Reel extends Model
     protected $fillable = [
         'id',
         'user_id',
+        'page_id',
         'sound_id',
         'caption',
         'topic',
@@ -75,6 +79,14 @@ class Reel extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    /**
+     * Page Professionnelle au nom de laquelle le Reel est diffusé.
+     */
+    public function page(): BelongsTo
+    {
+        return $this->belongsTo(Page::class);
     }
 
     /**
@@ -195,5 +207,13 @@ class Reel extends Model
     public function isSavedBy(User $user): bool
     {
         return $this->savedByUsers()->where('users.id', $user->id)->exists();
+    }
+
+    /**
+     * Campagnes publicitaires associées à ce Reel.
+     */
+    public function campaigns(): MorphMany
+    {
+        return $this->morphMany(Campaign::class, 'boostable');
     }
 }

@@ -6,6 +6,7 @@ use App\Models\Square\Post;
 use App\Models\Square\PostLike;
 use App\Models\User;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 
@@ -73,5 +74,46 @@ class PostLikeService
                 'likes_count' => $currentCount,
             ];
         });
+    }
+
+    /**
+     * Récupère la liste paginée et déterministe des utilisateurs ayant aimé une publication.
+     * Respecte la visibilité du post, la confidentialité et les blocages mutuels.
+     *
+     * @throws AuthorizationException
+     */
+    public function getPostLikers(Post $post, ?User $currentUser = null, int $perPage = 20): LengthAwarePaginator
+    {
+        if (Gate::forUser($currentUser)->denies('view', $post)) {
+            throw new AuthorizationException('Vous n\'êtes pas autorisé à consulter cette publication.');
+        }
+
+        $perPage = min(max($perPage, 1), 100);
+
+        $query = User::query()
+            ->join('post_likes', 'users.id', '=', 'post_likes.user_id')
+            ->where('post_likes.post_id', $post->id)
+            ->where('users.status', 'active')
+            ->whereNull('users.deleted_at');
+
+        if ($currentUser) {
+            $query->whereNotExists(function ($q) use ($currentUser) {
+                $q->select(DB::raw(1))
+                    ->from('user_blocks')
+                    ->where(function ($sub) use ($currentUser) {
+                        $sub->where('user_blocks.blocker_id', $currentUser->id)
+                            ->whereColumn('user_blocks.blocked_id', 'users.id');
+                    })
+                    ->orWhere(function ($sub) use ($currentUser) {
+                        $sub->whereColumn('user_blocks.blocker_id', 'users.id')
+                            ->where('user_blocks.blocked_id', $currentUser->id);
+                    });
+            });
+        }
+
+        return $query->select('users.*', 'post_likes.created_at as liked_at')
+            ->orderByDesc('post_likes.created_at')
+            ->orderByDesc('users.id')
+            ->paginate($perPage);
     }
 }

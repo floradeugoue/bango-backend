@@ -48,4 +48,30 @@ return [
         'webhook_secret' => env('CLOUDFLARE_STREAM_WEBHOOK_SECRET'),
     ],
 
+    'google' => [
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'client_ids' => array_values(array_filter([
+            env('GOOGLE_CLIENT_ID'),
+            env('GOOGLE_CLIENT_ID_WEB'),
+            env('GOOGLE_CLIENT_ID_ANDROID'),
+            env('GOOGLE_CLIENT_ID_IOS'),
+        ])),
+    ],
+
+    'apple' => [
+        'client_id' => env('APPLE_CLIENT_ID', 'com.bango.app'),
+        'team_id' => env('APPLE_TEAM_ID'),
+        'key_id' => env('APPLE_KEY_ID'),
+        'private_key' => env('APPLE_PRIVATE_KEY'),
+        'client_ids' => array_values(array_filter([
+            env('APPLE_CLIENT_ID', 'com.bango.app'),
+            env('APPLE_BUNDLE_ID'),
+            env('APPLE_SERVICE_ID'),
+        ])),
+    ],
+
+    'contact_matching' => [
+        'salt' => env('CONTACT_MATCHING_SALT', 'bango_contact_salt_secret_2026'),
+    ],
+
 ];

@@ -232,3 +232,59 @@ it('is strictly idempotent on replayed webhooks and prevents duplicate subscript
     expect($tx->refresh()->subscription_id)->toBe($initialSubId)
         ->and(Subscription::where('user_id', $user->id)->count())->toBe($initialSubCount);
 });
+
+it('credits user CreditWallet after Monetbil confirms a credit purchase webhook', function () {
+    $user = User::factory()->create();
+
+    $tx = PaymentTransaction::create([
+        'user_id' => $user->id,
+        'service_type' => PaymentServiceType::Credit,
+        'provider' => PaymentProvider::Monetbil,
+        'channel' => PaymentChannel::MobileMoney,
+        'currency' => 'XAF',
+        'amount' => '2500.00',
+        'total_amount' => '2500.00',
+        'credit_used' => '0.00',
+        'amount_charged' => '2500.00',
+        'status' => PaymentStatus::Processing,
+        'idempotency_key' => 'idemp_credit_wb_'.Str::uuid(),
+    ]);
+
+    Http::fake([
+        'https://api.monetbil.com/payment/v1/checkPayment' => Http::response([
+            'transaction' => [
+                'status' => 1,
+                'operator_transaction_id' => 'MP_CRED_9988',
+                'operator' => 'CM_ORANGEMONEY',
+            ],
+        ], 200),
+    ]);
+
+    $params = [
+        'service' => 'mock_service_key_123',
+        'paymentId' => 'mb_pay_cred_valid',
+        'item_ref' => $tx->reference,
+        'status' => 'success',
+        'amount' => '2500.00',
+        'currency' => 'XAF',
+        'operator' => 'CM_ORANGEMONEY',
+        'operator_transaction_id' => 'MP_CRED_9988',
+    ];
+    $params['sign'] = calculateMonetbilSignature($params);
+
+    $res = postJson('/api/webhooks/payments/monetbil', $params);
+
+    $res->assertStatus(200)
+        ->assertJson(['status' => 'success']);
+
+    $tx->refresh();
+    expect($tx->status)->toBe(PaymentStatus::Confirmed);
+
+    $wallet = $user->fresh()->creditWallet;
+    expect($wallet)->not->toBeNull()
+        ->and((int) $wallet->balance)->toBe(2500);
+
+    // Rejeu du webhook : ne crédite pas une deuxième fois
+    postJson('/api/webhooks/payments/monetbil', $params)->assertStatus(200);
+    expect((int) $wallet->fresh()->balance)->toBe(2500);
+});

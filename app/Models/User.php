@@ -3,13 +3,27 @@
 namespace App\Models;
 
 use App\Enums\AccountType;
+use App\Enums\Delegation\DelegationStatus;
 use App\Enums\Gender;
+use App\Models\Auth\OAuthAccount;
 use App\Models\Auth\Role;
+use App\Models\Boost\Campaign;
+use App\Models\Boost\CreditTransaction;
+use App\Models\Boost\CreditWallet;
+use App\Models\Delegation\Delegation;
 use App\Models\Geo\City;
 use App\Models\Geo\Country;
 use App\Models\Geo\Neighbourhood;
 use App\Models\Housing\HousingSearch;
+use App\Models\Kyc\KycSubmission;
+use App\Models\Legal\TermsAcceptance;
 use App\Models\Listing\Listing;
+use App\Models\Message\Conversation;
+use App\Models\Message\ConversationMember;
+use App\Models\Message\Message;
+use App\Models\Notification\DeviceToken;
+use App\Models\Page\Page;
+use App\Models\Page\PageMember;
 use App\Models\Payment\PaymentTransaction;
 use App\Models\Profile\FollowRequest;
 use App\Models\Profile\Interest;
@@ -29,6 +43,7 @@ use App\Models\Story\StoryReply;
 use App\Models\Story\StoryView;
 use App\Models\Subscription\BadgeHistory;
 use App\Models\Subscription\Subscription;
+use App\Models\Support\SupportTicket;
 use App\Models\Visit\VisitReservation;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -86,6 +101,8 @@ class User extends Authenticatable
         'badge',
         'verification_lapsed',
         'restricted_until',
+        'terms_accepted_at',
+        'accepted_terms_version',
     ];
 
     protected $hidden = [
@@ -118,12 +135,18 @@ class User extends Authenticatable
             'privacy_settings' => 'array',
             'verification_lapsed' => 'boolean',
             'restricted_until' => 'datetime',
+            'terms_accepted_at' => 'datetime',
         ];
     }
 
     public function interests(): BelongsToMany
     {
         return $this->belongsToMany(Interest::class);
+    }
+
+    public function oauthAccounts(): HasMany
+    {
+        return $this->hasMany(OAuthAccount::class);
     }
 
     public function role()
@@ -136,14 +159,40 @@ class User extends Authenticatable
         return $this->role?->slug === 'admin';
     }
 
+    public function isSupportAgent(): bool
+    {
+        return $this->isAdmin() || in_array($this->role?->slug, ['support', 'moderator', 'agent_support'], true);
+    }
+
+    public function isSuspended(): bool
+    {
+        return ($this->status ?? null) === 'suspended'
+            || ($this->suspended_until !== null && $this->suspended_until->isFuture());
+    }
+
     public function hasRole(string $roleSlug): bool
     {
         return $this->role?->slug === $roleSlug;
     }
 
+    public function supportTickets(): HasMany
+    {
+        return $this->hasMany(SupportTicket::class);
+    }
+
+    public function assignedSupportTickets(): HasMany
+    {
+        return $this->hasMany(SupportTicket::class, 'assigned_to');
+    }
+
     public function housingSearch(): HasOne
     {
         return $this->hasOne(HousingSearch::class);
+    }
+
+    public function termsAcceptances(): HasMany
+    {
+        return $this->hasMany(TermsAcceptance::class);
     }
 
     public function country()
@@ -159,6 +208,11 @@ class User extends Authenticatable
     public function neighbourhood()
     {
         return $this->belongsTo(Neighbourhood::class);
+    }
+
+    public function creditTransactions(): HasMany
+    {
+        return $this->hasMany(CreditTransaction::class);
     }
 
     /**
@@ -535,5 +589,126 @@ class User extends Authenticatable
     public function agentVisits(): HasMany
     {
         return $this->hasMany(VisitReservation::class, 'agent_id')->orderByDesc('created_at');
+    }
+
+    /**
+     * Délégations de mandat émises par cet utilisateur en tant que bailleur.
+     */
+    public function delegationsAsLandlord(): HasMany
+    {
+        return $this->hasMany(Delegation::class, 'bailleur_id')->orderByDesc('created_at');
+    }
+
+    /**
+     * Délégations et mandats reçus par cet utilisateur en tant qu'agent.
+     */
+    public function delegationsAsAgent(): HasMany
+    {
+        return $this->hasMany(Delegation::class, 'agent_id')->orderByDesc('created_at');
+    }
+
+    /**
+     * Mandats actuellement actifs de l'agent.
+     */
+    public function activeDelegationsAsAgent(): HasMany
+    {
+        return $this->hasMany(Delegation::class, 'agent_id')
+            ->where('status', DelegationStatus::Active->value)
+            ->whereNull('revoked_at')
+            ->where(function ($q) {
+                $q->whereNull('expires_at')->orWhere('expires_at', '>', now());
+            });
+    }
+
+    /**
+     * Dossiers et soumissions KYC de l'utilisateur.
+     */
+    public function kycSubmissions(): HasMany
+    {
+        return $this->hasMany(KycSubmission::class, 'user_id')->orderByDesc('created_at');
+    }
+
+    /**
+     * Dernière soumission KYC de l'utilisateur.
+     */
+    public function latestKycSubmission(): HasOne
+    {
+        return $this->hasOne(KycSubmission::class, 'user_id')->latestOfMany();
+    }
+
+    /**
+     * Conversations auxquelles participe cet utilisateur.
+     */
+    public function conversations(): BelongsToMany
+    {
+        return $this->belongsToMany(Conversation::class, 'conversation_members', 'user_id', 'conversation_id')
+            ->withPivot(['role', 'is_muted', 'last_read_message_id', 'last_read_at', 'joined_at', 'left_at'])
+            ->withTimestamps();
+    }
+
+    /**
+     * Adhésions de l'utilisateur aux conversations.
+     */
+    public function conversationMembers(): HasMany
+    {
+        return $this->hasMany(ConversationMember::class, 'user_id');
+    }
+
+    /**
+     * Messages envoyés par cet utilisateur.
+     */
+    public function sentMessages(): HasMany
+    {
+        return $this->hasMany(Message::class, 'sender_id');
+    }
+
+    /**
+     * Portefeuille de crédits BANGO de cet utilisateur.
+     */
+    public function creditWallet(): HasOne
+    {
+        return $this->hasOne(CreditWallet::class, 'user_id');
+    }
+
+    /**
+     * Campagnes publicitaires initiées par cet utilisateur.
+     */
+    public function campaigns(): HasMany
+    {
+        return $this->hasMany(Campaign::class, 'user_id')->orderByDesc('created_at');
+    }
+
+    /**
+     * Pages Professionnelles dont l'utilisateur est le propriétaire principal.
+     */
+    public function ownedPages(): HasMany
+    {
+        return $this->hasMany(Page::class, 'owner_id');
+    }
+
+    /**
+     * Adhésions de l'utilisateur aux équipes de Pages Professionnelles.
+     */
+    public function pageMemberships(): HasMany
+    {
+        return $this->hasMany(PageMember::class, 'user_id');
+    }
+
+    /**
+     * Pages Professionnelles auxquelles appartient cet utilisateur.
+     */
+    public function pages(): BelongsToMany
+    {
+        return $this->belongsToMany(Page::class, 'page_members')
+            ->withPivot(['id', 'role', 'status', 'invited_by_id', 'invited_at', 'accepted_at', 'revoked_at'])
+            ->withTimestamps();
+    }
+
+    /**
+     * Tokens d'appareils pour les notifications push (FCM / APNs).
+     */
+    public function deviceTokens(): HasMany
+    {
+        return $this->hasMany(DeviceToken::class);
     }
 }

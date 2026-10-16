@@ -154,6 +154,6 @@ L'objectif est d'implémenter un socle immobilier robuste, transactionnel, sécu
 * `tests/Feature/Listing/ListingSearchAndMapTest.php`
 * `tests/Feature/Listing/ListingSaveTest.php`
 * `tests/Feature/Listing/ListingAuthorizationAndSecurityTest.php`
-* `docs/cr4_listing_api_documentation.md`
-* `docs/cr4_listing_messaging_contract.md`
-* `docs/cr4_listing_landlord_agent_contract.md`
+* `docs/listing/cr4_listing_api_documentation.md`
+* `docs/listing/cr4_listing_messaging_contract.md`
+* `docs/listing/cr4_listing_landlord_agent_contract.md`

@@ -102,6 +102,7 @@ class PricingService
             PaymentServiceType::Certification => $this->resolveCertificationPrice($priceId),
             PaymentServiceType::Boost => $this->resolveBoostPrice($priceId),
             PaymentServiceType::Visit => $this->resolveVisitPrice($customAmount),
+            PaymentServiceType::Credit => $this->resolveCreditPrice($customAmount),
         };
     }
 
@@ -203,6 +204,23 @@ class PricingService
     {
         if ($customAmount === null || $customAmount <= 0) {
             throw new InvalidPriceException('Le montant des frais de visite doit être spécifié et strictement supérieur à zéro.');
+        }
+
+        return [
+            null,
+            null,
+            number_format($customAmount, 2, '.', ''),
+            config('payment.currency', 'XAF'),
+        ];
+    }
+
+    /**
+     * @return array{0: null, 1: null, 2: string, 3: string}
+     */
+    protected function resolveCreditPrice(?float $customAmount): array
+    {
+        if ($customAmount === null || $customAmount < 100) {
+            throw new InvalidPriceException('Le montant d\'achat de crédits doit être spécifié et d\'au moins 100 FCFA.');
         }
 
         return [

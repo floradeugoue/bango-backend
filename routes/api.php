@@ -6,6 +6,9 @@ use App\Http\Controllers\Admin\RoleController;
 use App\Http\Controllers\Admin\SubscriptionCatalogController;
 use App\Http\Controllers\Admin\SubscriptionManagementController;
 use App\Http\Controllers\Admin\UserController;
+use App\Http\Controllers\Agent\AgentDirectoryController;
+use App\Http\Controllers\Agent\AgentInvitationController;
+use App\Http\Controllers\Agent\AgentPortfolioController;
 use App\Http\Controllers\Auth\AccountStateController;
 use App\Http\Controllers\Auth\ForgotPasswordController;
 use App\Http\Controllers\Auth\LogoutController;
@@ -13,29 +16,61 @@ use App\Http\Controllers\Auth\ResetPasswordController;
 use App\Http\Controllers\Auth\SecondFactorController;
 use App\Http\Controllers\Auth\SigninController;
 use App\Http\Controllers\Auth\SignupController;
+use App\Http\Controllers\Auth\SocialAuthController;
+use App\Http\Controllers\Boost\BoostableContentController;
+use App\Http\Controllers\Boost\BoostEstimateController;
+use App\Http\Controllers\Boost\CampaignController;
+use App\Http\Controllers\Boost\CreditWalletController;
+use App\Http\Controllers\Content\LinkResolverController;
+use App\Http\Controllers\Credits\CreditPurchaseController;
+use App\Http\Controllers\Credits\CreditTransactionController;
 use App\Http\Controllers\Geo\CityController;
 use App\Http\Controllers\Geo\CountryController;
 use App\Http\Controllers\Geo\CurrencyController;
 use App\Http\Controllers\Geo\NeighbourhoodController;
 use App\Http\Controllers\Geo\OperatorController;
 use App\Http\Controllers\Housing\HousingSearchController;
+use App\Http\Controllers\Landlord\LandlordDelegationController;
+use App\Http\Controllers\Landlord\LandlordKycController;
+use App\Http\Controllers\Landlord\LandlordPropertyAnalyticsController;
+use App\Http\Controllers\Landlord\LandlordPropertyController;
+use App\Http\Controllers\Legal\DataExportController;
+use App\Http\Controllers\Legal\LegalDocumentController;
+use App\Http\Controllers\Legal\TermsAcceptanceController;
 use App\Http\Controllers\Listing\ListingController;
 use App\Http\Controllers\Listing\ListingDraftController;
 use App\Http\Controllers\Listing\ListingMapController;
 use App\Http\Controllers\Listing\ListingMediaController;
 use App\Http\Controllers\Listing\ListingSaveController;
 use App\Http\Controllers\Media\MediaUploadController;
+use App\Http\Controllers\Message\MessageController;
+use App\Http\Controllers\Message\MessageGroupController;
+use App\Http\Controllers\Message\MessageRequestController;
+use App\Http\Controllers\Message\MessageThreadController;
+use App\Http\Controllers\Message\VoiceMessageController;
+use App\Http\Controllers\Notification\DeviceTokenController;
+use App\Http\Controllers\Notification\NotificationController;
 use App\Http\Controllers\Onboarding\OnboardingController;
 use App\Http\Controllers\Otp\OtpController;
+use App\Http\Controllers\Page\Admin\PageCertificationAdminController;
+use App\Http\Controllers\Page\PageCertificationController;
+use App\Http\Controllers\Page\PageController;
+use App\Http\Controllers\Page\PageMemberController;
+use App\Http\Controllers\Page\PageSearchController;
+use App\Http\Controllers\Payment\DoubleChargeClaimController;
 use App\Http\Controllers\Payment\MonetbilWebhookController;
 use App\Http\Controllers\Payment\PaymentController;
+use App\Http\Controllers\Payment\PaymentReceiptController;
+use App\Http\Controllers\Payment\SavedPaymentMethodController;
 use App\Http\Controllers\Profile\AccountController;
 use App\Http\Controllers\Profile\AvatarController;
 use App\Http\Controllers\Profile\BlockController;
+use App\Http\Controllers\Profile\ContactMatchingController;
 use App\Http\Controllers\Profile\EmailController;
 use App\Http\Controllers\Profile\FollowController;
 use App\Http\Controllers\Profile\FollowRequestController;
 use App\Http\Controllers\Profile\HandleCheckController;
+use App\Http\Controllers\Profile\HandleSuggestionController;
 use App\Http\Controllers\Profile\PasswordController;
 use App\Http\Controllers\Profile\PrivacyController;
 use App\Http\Controllers\Profile\ProfileController;
@@ -50,6 +85,10 @@ use App\Http\Controllers\Reel\StudioReelController;
 use App\Http\Controllers\Search\HashtagSearchController;
 use App\Http\Controllers\Search\PeopleSearchController;
 use App\Http\Controllers\Search\PlaceSearchController;
+use App\Http\Controllers\Search\PostSearchController;
+use App\Http\Controllers\Search\TrendsController;
+use App\Http\Controllers\Settings\BackupCodeController;
+use App\Http\Controllers\Settings\TwoFactorTotpController;
 use App\Http\Controllers\Square\PostArchiveController;
 use App\Http\Controllers\Square\PostAudienceController;
 use App\Http\Controllers\Square\PostCaptionController;
@@ -66,6 +105,15 @@ use App\Http\Controllers\Story\StoryController;
 use App\Http\Controllers\Subscription\CatalogController;
 use App\Http\Controllers\Subscription\SubscriptionController;
 use App\Http\Controllers\Subscription\SubscriptionRenewalController;
+use App\Http\Controllers\Support\AdminSupportTicketController;
+use App\Http\Controllers\Support\HelpArticleController;
+use App\Http\Controllers\Support\HelpArticleFeedbackController;
+use App\Http\Controllers\Support\ModerationAppealController;
+use App\Http\Controllers\Support\ReportController;
+use App\Http\Controllers\Support\SupportTicketController;
+use App\Http\Controllers\Sync\OfflineSyncController;
+use App\Http\Controllers\System\AppVersionController;
+use App\Http\Controllers\Upload\TusUploadController;
 use App\Http\Controllers\Visit\LandlordVisitController;
 use App\Http\Controllers\Visit\ProspectVisitController;
 use App\Http\Resources\UserResource;
@@ -113,6 +161,8 @@ Route::prefix('auth')->group(function () {
     Route::post('/signin', SigninController::class);
     // Validation du second facteur (2FA)
     Route::post('/signin/second-factor', SecondFactorController::class);
+    // Authentification sociale (Google OAuth & Apple Sign In)
+    Route::post('/provider', SocialAuthController::class);
 
     // Demande d'envoi d'un code OTP (par SMS/Email) pour récupérer l'accès au compte
     Route::post('/forgot-password', [ForgotPasswordController::class, 'forgotPassword']);
@@ -132,6 +182,9 @@ Route::prefix('auth')->group(function () {
     // Restaurer un compte supprimé (soft delete)
     Route::post('/restore-account', [AccountController::class, 'restore']);
 });
+
+// Suggestions automatiques de pseudonymes disponibles (AU-15 / AU-16)
+Route::post('/profile/handle-suggestions', HandleSuggestionController::class)->name('api.profile.handle-suggestions');
 
 // Centres d'intérêt (public)
 // Lister tous les centres d'intérêt disponibles
@@ -170,6 +223,11 @@ Route::prefix('geo')->group(function () {
 });
 
 // --------------------------------------------------------------------------
+// AGENTS — ANNUAIRE PUBLIC & RECHERCHE (AG-06)
+// --------------------------------------------------------------------------
+Route::get('/agents/search', [AgentDirectoryController::class, 'search'])->name('api.agents.search');
+
+// --------------------------------------------------------------------------
 // WEBHOOKS (Publics avec contrôle d'intégrité et signature cryptographique)
 // --------------------------------------------------------------------------
 Route::prefix('webhooks/payments')->group(function () {
@@ -206,6 +264,43 @@ Route::prefix('listings')->group(function () {
 });
 
 // --------------------------------------------------------------------------
+// MODULE 12 : PG — PAGES PROFESSIONNELLES (Consultation & Recherche Publiques)
+// --------------------------------------------------------------------------
+Route::get('/search/pages', [PageSearchController::class, 'index'])->name('api.search.pages');
+Route::get('/pages/{page}/listings', [PageController::class, 'listings'])->name('api.pages.listings');
+Route::get('/pages/{identifier}', [PageController::class, 'show'])->where('identifier', '^(?!my-pages$)[a-zA-Z0-9_\-]+$')->name('api.pages.show');
+
+// --------------------------------------------------------------------------
+// MODULE 3 : LG — CMS DOCUMENTS LÉGAUX VERSIONNÉS
+// --------------------------------------------------------------------------
+Route::get('/legal/documents/{slug}', [LegalDocumentController::class, 'show'])->name('api.legal.documents.show');
+
+// --------------------------------------------------------------------------
+// MODULE EDGE : RÉSOLUTION DES LIENS UNIVERSELS & COURTS
+// --------------------------------------------------------------------------
+Route::get('/content/resolve-link', [LinkResolverController::class, 'resolve'])->name('api.content.resolve-link');
+
+// --------------------------------------------------------------------------
+// MODULE 18 : SUP — CENTRE D’AIDE FAQ & RETOUR D'UTILITÉ
+// --------------------------------------------------------------------------
+Route::prefix('help/articles')->group(function () {
+    Route::get('/', [HelpArticleController::class, 'index'])->name('api.help.articles.index');
+    Route::get('/{slug}', [HelpArticleController::class, 'show'])->name('api.help.articles.show');
+    Route::post('/{id}/feedback', [HelpArticleFeedbackController::class, 'feedback'])->name('api.help.articles.feedback');
+});
+
+// --------------------------------------------------------------------------
+// MODULE 19 : SY — PROTOCOLE TUS v1.0.0 (DÉCOUVERTE PUBLIQUE)
+// --------------------------------------------------------------------------
+Route::options('/uploads/tus', [TusUploadController::class, 'options'])->name('api.uploads.tus.options');
+Route::options('/uploads/tus/{id}', [TusUploadController::class, 'options'])->name('api.uploads.tus.options.id');
+
+// --------------------------------------------------------------------------
+// MODULE SP / SY-21 : CONTRÔLE DE VERSION & MISE À JOUR REQUISE
+// --------------------------------------------------------------------------
+Route::get('/system/version', AppVersionController::class)->name('api.system.version');
+
+// --------------------------------------------------------------------------
 // SESSION (Requiert un Token Passport valide)
 // --------------------------------------------------------------------------
 Route::middleware('auth:api')->group(function () {
@@ -238,6 +333,7 @@ Route::middleware('auth:api')->group(function () {
 
         // Vérifier la disponibilité d'un identifiant (handle/pseudo)
         Route::post('/handle-check', HandleCheckController::class);
+
         // Mettre à jour le nom et l'identifiant (et bio)
         Route::put('/identity', [ProfileController::class, 'updateIdentity']);
         // Mettre à jour la date de naissance
@@ -317,6 +413,11 @@ Route::middleware('auth:api')->group(function () {
     // --------------------------------------------------------------------------
     // Enregistrer la complétion d'une étape du processus d'inscription initial
     Route::post('/onboarding/complete', [OnboardingController::class, 'completeStep']);
+
+    // --------------------------------------------------------------------------
+    // FRIENDS & CARNET D'ADRESSES (AU-19)
+    // --------------------------------------------------------------------------
+    Route::post('/friends/match-fingerprints', [ContactMatchingController::class, 'match'])->name('api.friends.match-fingerprints');
 
     // --------------------------------------------------------------------------
     // HOUSING (Recherche de logement)
@@ -417,9 +518,29 @@ Route::middleware('auth:api')->group(function () {
     });
 
     // --------------------------------------------------------------------------
-    // BL & AG — ESPACES BAILLEUR ET AGENT : GESTION DES VISITES (BL-04, BL-07, AG-02, AG-03)
+    // BL — ESPACE BAILLEUR (BL-01, BL-02, BL-04, BL-07, BL-18, AG-02, AG-03)
     // --------------------------------------------------------------------------
     Route::prefix('landlord')->group(function () {
+        // KYC Bailleur (accessible à tout utilisateur authentifié pour soumission de dossier)
+        Route::post('/kyc/submit', [LandlordKycController::class, 'submit'])->name('api.landlord.kyc.submit');
+        Route::get('/kyc', [LandlordKycController::class, 'show'])->name('api.landlord.kyc.show');
+        Route::get('/kyc/documents/{id}', [LandlordKycController::class, 'downloadDocument'])->whereUuid('id')->name('api.landlord.kyc.download');
+
+        // Actions réservées au bailleur certifié avec badge actif
+        Route::middleware('subscribed:landlord')->group(function () {
+            // Tableau de bord des biens possédés par le bailleur (BL-01)
+            Route::get('/properties', [LandlordPropertyController::class, 'index'])->name('api.landlord.properties.index');
+
+            // Inviter un agent pour un bien déterminé (AG-02)
+            Route::post('/delegations', [LandlordDelegationController::class, 'store'])->name('api.landlord.delegations.store');
+        });
+
+        // Changement de statut d'un bien (BL-18 : published, reserved, taken)
+        Route::patch('/properties/{id}/status', [LandlordPropertyController::class, 'updateStatus'])->whereUuid('id')->name('api.landlord.properties.status');
+
+        // Gestion globale ou par lot des créneaux de visite (BL-04 / BL-08)
+        Route::put('/properties/{id}/slots', [LandlordPropertyController::class, 'updateSlots'])->whereUuid('id')->name('api.landlord.properties.slots.update');
+
         // Consulter la liste des créneaux configurés pour un bien (BL-04)
         Route::get('/properties/{id}/slots', [LandlordVisitController::class, 'slots'])->whereUuid('id')->name('api.landlord.properties.slots');
 
@@ -429,11 +550,40 @@ Route::middleware('auth:api')->group(function () {
         // Fermer un créneau de disponibilité (BL-04)
         Route::delete('/properties/{id}/slots/{slotId}', [LandlordVisitController::class, 'closeSlot'])->whereUuid('id')->whereUuid('slotId')->name('api.landlord.properties.slots.close');
 
-        // Consulter les demandes et réservations de visite d'un bien (BL-07)
+        // Consulter toutes les demandes de visite entrantes du bailleur (BL-07)
+        Route::get('/visit-requests', [LandlordPropertyController::class, 'visitRequests'])->name('api.landlord.visit_requests');
+
+        // Consulter les demandes et réservations de visite d'un bien spécifique (BL-07)
         Route::get('/properties/{id}/visit-requests', [LandlordVisitController::class, 'visitRequests'])->whereUuid('id')->name('api.landlord.properties.visit_requests');
 
         // Accepter, proposer une alternative ou décliner une visite (BL-07 / AG-03)
         Route::post('/visits/{id}/answer', [LandlordVisitController::class, 'answer'])->whereUuid('id')->name('api.landlord.visits.answer');
+
+        // Délégations émises par le bailleur
+        Route::get('/delegations', [LandlordDelegationController::class, 'index'])->name('api.landlord.delegations.index');
+        Route::delete('/delegations/{id}', [LandlordDelegationController::class, 'destroy'])->whereUuid('id')->name('api.landlord.delegations.destroy');
+
+        // Analytique immobilière chronologique sur 30 jours (BL-19 / Étape 10)
+        Route::get('/properties/{id}/analytics', [LandlordPropertyAnalyticsController::class, 'show'])->whereUuid('id')->name('api.landlord.properties.analytics');
+    });
+
+    // --------------------------------------------------------------------------
+    // AG — ESPACE AGENT IMMOBILIER (AG-01, AG-04, AG-05)
+    // --------------------------------------------------------------------------
+    Route::prefix('agent')->group(function () {
+        // Invitations reçues par l'agent
+        Route::get('/invitations', [AgentInvitationController::class, 'index'])->name('api.agent.invitations.index');
+        Route::post('/invitations/{id}/accept', [AgentInvitationController::class, 'accept'])->whereUuid('id')->name('api.agent.invitations.accept');
+        Route::post('/invitations/{id}/reject', [AgentInvitationController::class, 'reject'])->whereUuid('id')->name('api.agent.invitations.reject');
+
+        // Actions réservées à l'agent avec badge actif
+        Route::middleware('subscribed:agent')->group(function () {
+            // Portefeuille des biens délégués à l'agent (AG-01)
+            Route::get('/properties', [AgentPortfolioController::class, 'properties'])->name('api.agent.properties');
+
+            // Contacts et prospects liés aux missions actives (AG-05)
+            Route::get('/prospects', [AgentPortfolioController::class, 'prospects'])->name('api.agent.prospects');
+        });
     });
 
     // --------------------------------------------------------------------------
@@ -466,6 +616,18 @@ Route::middleware('auth:api')->group(function () {
         Route::delete('/sessions/{id}', [SecurityController::class, 'revokeSession']);
         // Valider/Reconnaître manuellement un appareil ou une session
         Route::post('/sessions/{id}/acknowledge', [SecurityController::class, 'acknowledgeSession']);
+
+        // Double Authentification TOTP (ST-09 / ST-10)
+        Route::prefix('2fa')->group(function () {
+            Route::post('/totp/setup', [TwoFactorTotpController::class, 'setup'])->name('api.settings.2fa.totp.setup');
+            Route::post('/totp/verify', [TwoFactorTotpController::class, 'verify'])->name('api.settings.2fa.totp.verify');
+            Route::post('/disable', [TwoFactorTotpController::class, 'disable'])->name('api.settings.2fa.disable');
+
+            // Codes de secours à usage unique (ST-10)
+            Route::get('/backup-codes', [BackupCodeController::class, 'index'])->name('api.settings.2fa.backup-codes.index');
+            Route::post('/backup-codes', [BackupCodeController::class, 'regenerate'])->name('api.settings.2fa.backup-codes.generate');
+            Route::post('/backup-codes/regenerate', [BackupCodeController::class, 'regenerate'])->name('api.settings.2fa.backup-codes.regenerate');
+        });
 
         // Suspendre temporairement le compte (Pause)
         Route::post('/account/pause', [AccountController::class, 'pause']);
@@ -520,8 +682,25 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/quote', [PaymentController::class, 'quote']);
         // Initier un paiement Mobile Money (Push USSD)
         Route::post('/initiate', [PaymentController::class, 'initiate']);
+
+        // ----------------------------------------------------------------------
+        // Moyens de paiement enregistrés (Étape 10)
+        // ----------------------------------------------------------------------
+        Route::get('/methods', [SavedPaymentMethodController::class, 'index'])->name('api.payments.methods.index');
+        Route::post('/methods', [SavedPaymentMethodController::class, 'store'])->name('api.payments.methods.store');
+        Route::patch('/methods/{id}/default', [SavedPaymentMethodController::class, 'setDefault'])->name('api.payments.methods.default');
+        Route::delete('/methods/{id}', [SavedPaymentMethodController::class, 'destroy'])->name('api.payments.methods.destroy');
+
+        // ----------------------------------------------------------------------
+        // Déclaration d'incidents de double débit (Étape 10)
+        // ----------------------------------------------------------------------
+        Route::post('/double-charge-claims', [DoubleChargeClaimController::class, 'store'])->name('api.payments.double-charge-claims.store');
+        Route::get('/double-charge-claims/mine', [DoubleChargeClaimController::class, 'mine'])->name('api.payments.double-charge-claims.mine');
+
         // Obtenir le statut en temps réel d'un paiement (polling 120s / reprise réseau)
         Route::get('/{id}/status', [PaymentController::class, 'status']);
+        // Télécharger le reçu PDF officiel d'une transaction (Étape 10)
+        Route::get('/{id}/receipt', [PaymentReceiptController::class, 'downloadReceipt'])->name('api.payments.receipt.download');
         // Annuler un paiement en attente
         Route::post('/{id}/cancel', [PaymentController::class, 'cancel']);
         // Consulter l'historique paginé des transactions du client
@@ -531,9 +710,12 @@ Route::middleware('auth:api')->group(function () {
     // --------------------------------------------------------------------------
     // SQUARE — CR1 (Création, Médias, Carrousel, Recherche, Feed & Actions SQ-15)
     // --------------------------------------------------------------------------
+    Route::get('/square/feed', [PostFeedController::class, 'index'])->name('api.square.feed.alias');
+
     Route::prefix('square-cr1')->group(function () {
         // Fil Square paginé (CR-11 et flux découverte, abonnés, voisinage)
         Route::get('/square/feed', [PostFeedController::class, 'index'])->name('api.square.feed');
+        Route::get('/feed', [PostFeedController::class, 'index']);
 
         // Créer une nouvelle publication avec texte, médias, tags, lieu et options (CR-01 à CR-12)
         Route::post('/posts', [PostController::class, 'store'])->name('api.posts.store');
@@ -564,6 +746,8 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/posts/{post}/like', [PostLikeController::class, 'store'])->name('api.posts.like');
         // Retirer un like sur une publication
         Route::delete('/posts/{post}/like', [PostLikeController::class, 'destroy'])->name('api.posts.unlike');
+        // Lister les personnes ayant aimé une publication (SQ-14)
+        Route::get('/posts/{post}/likers', [PostLikeController::class, 'likers'])->name('api.posts.likers');
 
         // Partages des publications (SQ - Interactions)
         // Enregistrer un partage de publication (incrément atomique et idempotence)
@@ -592,15 +776,30 @@ Route::middleware('auth:api')->group(function () {
         // Téléverser un média photo ou vidéo sécurisé pour le carrousel Square (CR-02, CR-04, CR-12)
         Route::post('/media/upload', [MediaUploadController::class, 'upload'])->name('api.media.upload');
 
+        // Rechercher des publications Square par recherche plein texte (RC-06)
+        Route::get('/search/posts', [PostSearchController::class, 'index']);
+
         // Rechercher des personnes pour les identifier sur une photo ou les mentionner (CR-08)
         Route::get('/search/people', [PeopleSearchController::class, 'index'])->name('api.search.people');
 
-        // Rechercher et lister les hashtags tendances ordonnés par volume de publications (CR-07)
+        // Rechercher des hashtags par correspondance textuelle et volume (CR-07)
+        Route::get('/search/hashtags', [HashtagSearchController::class, 'trending']);
         Route::get('/search/hashtags/trending', [HashtagSearchController::class, 'trending'])->name('api.search.hashtags.trending');
 
         // Rechercher des lieux contextuels réels issus de la base géographique BANGO (CR-09)
         Route::get('/search/places', [PlaceSearchController::class, 'index'])->name('api.search.places');
     });
+
+    // --------------------------------------------------------------------------
+    // MODULE RC — RECHERCHE GLOBALE ET DÉCOUVERTE (Posts, Hashtags, Tendances)
+    // --------------------------------------------------------------------------
+    Route::prefix('search')->group(function () {
+        Route::get('/posts', [PostSearchController::class, 'index'])->name('api.search.posts');
+        Route::get('/hashtags', [HashtagSearchController::class, 'index'])->name('api.search.hashtags');
+    });
+
+    // Tendances unifiées BANGO (RC-11 : Top hashtags, musiques du moment, créateurs émergents)
+    Route::get('/trends', [TrendsController::class, 'index'])->name('api.trends');
 
     // --------------------------------------------------------------------------
     // CR2 & RL — STUDIO REEL, REELS ET SONS (Actions et consultation authentifiées)
@@ -762,6 +961,181 @@ Route::middleware('auth:api')->group(function () {
         // Supprimer une collection À la une sans supprimer les Stories sous-jacentes
         Route::delete('/{id}', [HighlightController::class, 'destroy'])->whereUuid('id')->name('api.highlights.destroy');
     });
+
+    // --------------------------------------------------------------------------
+    // MS - MESSAGERIE PRIVÉE & GROUPES (Direct, Immo, Vocaux, Stories, Groupes)
+    // --------------------------------------------------------------------------
+    Route::prefix('messages')->group(function () {
+        // Conversations & Fils de discussion
+        Route::get('/threads', [MessageThreadController::class, 'index'])->name('api.messages.threads.index');
+        Route::post('/threads', [MessageThreadController::class, 'store'])->name('api.messages.threads.store');
+        Route::get('/threads/{id}', [MessageThreadController::class, 'show'])->name('api.messages.threads.show');
+        Route::match(['post', 'put'], '/threads/{id}/read', [MessageThreadController::class, 'markAsRead'])->name('api.messages.threads.read');
+
+        // Boîte des demandes de messages provenant d'inconnus (MS-05)
+        Route::get('/requests', [MessageRequestController::class, 'index'])->name('api.messages.requests.index');
+        Route::post('/requests/{id}/accept', [MessageRequestController::class, 'accept'])->name('api.messages.requests.accept');
+        Route::post('/requests/{id}/reject', [MessageRequestController::class, 'reject'])->name('api.messages.requests.reject');
+
+        // Messages d'un fil
+        Route::get('/threads/{id}/messages', [MessageController::class, 'index'])->name('api.messages.messages.index');
+        Route::post('/threads/{id}/messages', [MessageController::class, 'store'])->name('api.messages.messages.store');
+        Route::post('/threads/{id}/messages/{messageId}/retract', [MessageController::class, 'retract'])->name('api.messages.messages.retract');
+        Route::delete('/threads/{id}/messages/{messageId}', [MessageController::class, 'retract'])->name('api.messages.messages.destroy');
+
+        // Notes vocales
+        Route::post('/threads/{id}/voice', [VoiceMessageController::class, 'store'])->name('api.messages.voice.store');
+
+        // Conversations de groupe
+        Route::post('/groups', [MessageGroupController::class, 'store'])->name('api.messages.groups.store');
+        Route::post('/groups/{id}/members', [MessageGroupController::class, 'addMembers'])->name('api.messages.groups.members.add');
+        Route::delete('/groups/{id}/members/{userId}', [MessageGroupController::class, 'removeMember'])->name('api.messages.groups.members.remove');
+    });
+
+    // --------------------------------------------------------------------------
+    // BO - BOOST & PUBLICITÉ (Campagnes, Estimation de portée, Crédit BANGO)
+    // --------------------------------------------------------------------------
+    Route::prefix('boost')->group(function () {
+        // Contenus éligibles au boost et score de surperformance relative (BO)
+        Route::get('/boostable', [BoostableContentController::class, 'index'])->name('api.boost.boostable');
+
+        // Estimation de portée
+        Route::post('/estimate', [BoostEstimateController::class, 'estimate'])->name('api.boost.estimate');
+
+        // Portefeuille de Crédits BANGO
+        Route::get('/wallet', [CreditWalletController::class, 'show'])->name('api.boost.wallet.show');
+        Route::get('/wallet/transactions', [CreditWalletController::class, 'transactions'])->name('api.boost.wallet.transactions');
+        Route::post('/wallet/deposit', [CreditWalletController::class, 'deposit'])->name('api.boost.wallet.deposit');
+
+        // Campagnes
+        Route::get('/campaigns', [CampaignController::class, 'index'])->name('api.boost.campaigns.index');
+        Route::post('/campaigns', [CampaignController::class, 'store'])->name('api.boost.campaigns.store');
+        Route::get('/campaigns/{id}', [CampaignController::class, 'show'])->whereUuid('id')->name('api.boost.campaigns.show');
+        Route::post('/campaigns/{id}/fund', [CampaignController::class, 'fund'])->whereUuid('id')->name('api.boost.campaigns.fund');
+        Route::post('/campaigns/{id}/pause', [CampaignController::class, 'pause'])->whereUuid('id')->name('api.boost.campaigns.pause');
+        Route::post('/campaigns/{id}/resume', [CampaignController::class, 'resume'])->whereUuid('id')->name('api.boost.campaigns.resume');
+        Route::post('/campaigns/{id}/cancel', [CampaignController::class, 'cancel'])->whereUuid('id')->name('api.boost.campaigns.cancel');
+        Route::post('/campaigns/{id}/impression', [CampaignController::class, 'trackImpression'])->whereUuid('id')->name('api.boost.campaigns.impression');
+        Route::post('/campaigns/{id}/click', [CampaignController::class, 'trackClick'])->whereUuid('id')->name('api.boost.campaigns.click');
+    });
+
+    // --------------------------------------------------------------------------
+    // CB - CRÉDIT BANGO (Portefeuille, Achat via PAY, Historique & Traçabilité)
+    // --------------------------------------------------------------------------
+    Route::prefix('credits')->group(function () {
+        Route::get('/wallet', [App\Http\Controllers\Credits\CreditWalletController::class, 'show'])->name('api.credits.wallet.show');
+        Route::post('/purchases', [CreditPurchaseController::class, 'store'])->name('api.credits.purchases.store');
+        Route::get('/transactions', [CreditTransactionController::class, 'index'])->name('api.credits.transactions.index');
+    });
+
+    // --------------------------------------------------------------------------
+    // MODULE 12 : PG — PAGES PROFESSIONNELLES (Espace Gestion, Membres, Certification)
+    // --------------------------------------------------------------------------
+    Route::prefix('pages')->group(function () {
+        // Liste « Mes Pages » de l'utilisateur connecté
+        Route::get('/my-pages', [PageController::class, 'myPages'])->name('api.pages.my_pages');
+        // Création d'une nouvelle Page Professionnelle
+        Route::post('/', [PageController::class, 'store'])->name('api.pages.store');
+        // Mise à jour des informations, logo et couverture de la Page
+        Route::put('/{page}', [PageController::class, 'update'])->name('api.pages.update');
+        // Suppression (soft delete) d'une Page
+        Route::delete('/{page}', [PageController::class, 'destroy'])->name('api.pages.destroy');
+        // Transfert de propriété (EDGE-01)
+        Route::post('/{page}/transfer', [PageController::class, 'transferOwnership'])->name('api.pages.transfer');
+        // Bascule de contexte de session (PG-04)
+        Route::post('/{page}/switch-context', [PageController::class, 'switchContext'])->name('api.pages.switch_context');
+        // Boîte de réception dédiée de la Page (MS-19)
+        Route::get('/{page}/inbox', [PageController::class, 'inbox'])->name('api.pages.inbox');
+
+        // Membres & RBAC (PG-03)
+        Route::get('/{page}/members', [PageMemberController::class, 'index'])->name('api.pages.members.index');
+        Route::post('/{page}/members/invite', [PageMemberController::class, 'invite'])->name('api.pages.members.invite');
+        Route::put('/{page}/members/{member}/role', [PageMemberController::class, 'updateRole'])->name('api.pages.members.update_role');
+        Route::delete('/{page}/members/{member}', [PageMemberController::class, 'revoke'])->name('api.pages.members.revoke');
+        Route::post('/{page}/leave', [PageMemberController::class, 'leave'])->name('api.pages.leave');
+
+        // Dossiers de certification entreprise (PG-05 & PG-07)
+        Route::get('/{page}/certification', [PageCertificationController::class, 'show'])->name('api.pages.certification.show');
+        Route::get('/{page}/certification/history', [PageCertificationController::class, 'history'])->name('api.pages.certification.history');
+        Route::post('/{page}/certification', [PageCertificationController::class, 'store'])->name('api.pages.certification.store');
+        Route::post('/{page}/certification/payment', [PageCertificationController::class, 'initiatePayment'])->name('api.pages.certification.payment');
+    });
+
+    // Alias profil utilisateur pour retrouver ses pages
+    Route::get('/me/pages', [PageController::class, 'myPages'])->name('api.me.pages');
+
+    // Réponse aux invitations de membres
+    Route::post('/page-members/{member}/accept', [PageMemberController::class, 'accept'])->name('api.page_members.accept');
+    Route::post('/page-members/{member}/decline', [PageMemberController::class, 'decline'])->name('api.page_members.decline');
+
+    // Corrections et téléchargement de documents de certification
+    Route::post('/pages/certifications/{certification}/resubmit', [PageCertificationController::class, 'resubmit'])->name('api.pages.certifications.resubmit');
+    Route::get('/pages/certifications/{certification}/documents/{key}', [PageCertificationController::class, 'downloadDocument'])->name('api.pages.certifications.documents.download');
+
+    // --------------------------------------------------------------------------
+    // MODULE 21 : NOTIF — NOTIFICATIONS IN-APP & DEVICE TOKENS PUSH
+    // --------------------------------------------------------------------------
+    Route::prefix('notifications')->group(function () {
+        Route::get('/', [NotificationController::class, 'index'])->name('api.notifications.index');
+        Route::post('/read', [NotificationController::class, 'markAllAsRead'])->name('api.notifications.mark_all_read');
+        Route::post('/mark-all-read', [NotificationController::class, 'markAllAsRead'])->name('api.notifications.mark_all_read_alias');
+        Route::post('/{id}/read', [NotificationController::class, 'markAsRead'])->name('api.notifications.mark_read');
+        Route::post('/device-token', [DeviceTokenController::class, 'store'])->name('api.notifications.device_token.store');
+        Route::delete('/device-token', [DeviceTokenController::class, 'destroy'])->name('api.notifications.device_token.destroy');
+    });
+
+    // --------------------------------------------------------------------------
+    // MODULE 18 : SUP — SIGNALEMENTS UNIVERSELS & RECOURS DE MODÉRATION
+    // --------------------------------------------------------------------------
+    Route::prefix('reports')->group(function () {
+        Route::post('/', [ReportController::class, 'store'])->name('api.reports.store');
+        Route::get('/mine', [ReportController::class, 'mine'])->name('api.reports.mine');
+    });
+
+    Route::prefix('moderation/appeals')->group(function () {
+        Route::post('/', [ModerationAppealController::class, 'store'])->name('api.moderation.appeals.store');
+        Route::get('/', [ModerationAppealController::class, 'mine'])->name('api.moderation.appeals.mine');
+    });
+
+    // --------------------------------------------------------------------------
+    // MODULE 18 : SUP — BILLETTERIE DE SUPPORT CLIENT
+    // --------------------------------------------------------------------------
+    Route::prefix('support/tickets')->group(function () {
+        Route::post('/', [SupportTicketController::class, 'store'])->name('api.support.tickets.store');
+        Route::get('/mine', [SupportTicketController::class, 'mine'])->name('api.support.tickets.mine');
+        Route::get('/{id}', [SupportTicketController::class, 'show'])->name('api.support.tickets.show');
+        Route::post('/{id}/messages', [SupportTicketController::class, 'reply'])->name('api.support.tickets.reply');
+        Route::get('/{ticketId}/attachments/{attachmentId}', [SupportTicketController::class, 'downloadAttachment'])
+            ->name('api.support.tickets.attachments.download');
+    });
+
+    // --------------------------------------------------------------------------
+    // MODULE 19 : SY — SYNCHRONISATION HORS LIGNE ET RÉSILIENCE
+    // --------------------------------------------------------------------------
+    Route::post('/sync/flush', [OfflineSyncController::class, 'flush'])->name('api.sync.flush');
+
+    // --------------------------------------------------------------------------
+    // MODULE 19 : SY — TÉLÉVERSEMENT REPRENABLE PAR MORCEAUX (PROTOCOLE TUS v1.0.0)
+    // --------------------------------------------------------------------------
+    Route::prefix('uploads/tus')->group(function () {
+        Route::post('/', [TusUploadController::class, 'create'])->name('api.uploads.tus.create');
+        Route::match(['head', 'get'], '/{id}', [TusUploadController::class, 'head'])->name('api.uploads.tus.head');
+        Route::patch('/{id}', [TusUploadController::class, 'patch'])->name('api.uploads.tus.patch');
+        Route::delete('/{id}', [TusUploadController::class, 'delete'])->name('api.uploads.tus.delete');
+        Route::post('/{id}/finalize', [TusUploadController::class, 'finalize'])->name('api.uploads.tus.finalize');
+    });
+
+    // --------------------------------------------------------------------------
+    // MODULE 3 : LG — LÉGAL, RGPD & EXPORT DES DONNÉES PERSONNELLES
+    // --------------------------------------------------------------------------
+    Route::prefix('user/data-export')->group(function () {
+        Route::post('/', [DataExportController::class, 'requestExport'])->name('api.user.data_export.request');
+        Route::get('/status', [DataExportController::class, 'status'])->name('api.user.data_export.status');
+        Route::get('/download/{id}', [DataExportController::class, 'download'])->name('api.user.data_export.download');
+    });
+
+    // Acceptation des conditions générales d'utilisation (LG-07)
+    Route::post('/legal/accept-terms', [TermsAcceptanceController::class, 'store'])->name('api.legal.accept-terms');
 
 });
 
@@ -925,5 +1299,26 @@ Route::middleware(['auth:api', 'admin'])->group(function () {
         Route::post('/{id}/restore', [AdminSoundCatalogController::class, 'restore'])->name('api.admin.sounds.restore');
         // Supprimer définitivement un son et purger son fichier audio
         Route::delete('/{id}/force', [AdminSoundCatalogController::class, 'destroy'])->name('api.admin.sounds.destroy');
+    });
+
+    // --------------------------------------------------------------------------
+    // MODULE 12 : PG — PAGES PROFESSIONNELLES (Administration des Pages & Instruction des Certifications)
+    // --------------------------------------------------------------------------
+    Route::prefix('admin/pages')->group(function () {
+        Route::get('/certifications', [PageCertificationAdminController::class, 'index'])->name('api.admin.pages.certifications.index');
+        Route::post('/certifications/{certification}/decide', [PageCertificationAdminController::class, 'decide'])->name('api.admin.pages.certifications.decide');
+        Route::post('/{page}/suspend-certification', [PageCertificationAdminController::class, 'suspendCertification'])->name('api.admin.pages.suspend_certification');
+        Route::post('/{page}/suspend', [PageCertificationAdminController::class, 'suspendPage'])->name('api.admin.pages.suspend');
+        Route::post('/{page}/unsuspend', [PageCertificationAdminController::class, 'unsuspendPage'])->name('api.admin.pages.unsuspend');
+    });
+
+    // --------------------------------------------------------------------------
+    // MODULE 18 : SUP — ADMINISTRATION DE LA BILLETTERIE SUPPORT
+    // --------------------------------------------------------------------------
+    Route::prefix('admin/support/tickets')->group(function () {
+        Route::get('/', [AdminSupportTicketController::class, 'index'])->name('api.admin.support.tickets.index');
+        Route::patch('/{id}/status', [AdminSupportTicketController::class, 'updateStatus'])->name('api.admin.support.tickets.status');
+        Route::patch('/{id}/assign', [AdminSupportTicketController::class, 'assign'])->name('api.admin.support.tickets.assign');
+        Route::post('/{id}/messages', [AdminSupportTicketController::class, 'reply'])->name('api.admin.support.tickets.reply');
     });
 });

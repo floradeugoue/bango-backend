@@ -8,9 +8,14 @@ use App\Enums\Payment\PaymentProvider;
 use App\Enums\Payment\PaymentServiceType;
 use App\Enums\Payment\PaymentStatus;
 use App\Exceptions\Payment\IdempotencyConflictException;
+use App\Models\Boost\Campaign;
+use App\Models\Page\PageCertification;
 use App\Models\Payment\PaymentTransaction;
 use App\Models\User;
 use App\Models\Visit\VisitReservation;
+use App\Services\Boost\CampaignService;
+use App\Services\Boost\CreditWalletService;
+use App\Services\Page\PageCertificationService;
 use App\Services\Payment\DTO\PriceQuote;
 use App\Services\Subscription\SubscriptionService;
 use App\Services\Visit\VisitReservationService;
@@ -211,6 +216,21 @@ class PaymentEngineService
                     // Fulfiller métier pour les visites immobilières
                     if ($lockedTx->service_type === PaymentServiceType::Visit && $lockedTx->payable_type === VisitReservation::class && $lockedTx->payable_id) {
                         app(VisitReservationService::class)->confirmPaymentFromWebhook($lockedTx);
+                    }
+
+                    // Fulfiller métier pour les campagnes de boost
+                    if ($lockedTx->service_type === PaymentServiceType::Boost && $lockedTx->payable_type === Campaign::class && $lockedTx->payable_id) {
+                        app(CampaignService::class)->confirmPaymentFromTransaction($lockedTx);
+                    }
+
+                    // Fulfiller métier pour l'achat de Crédits BANGO (1 FCFA = 1 Crédit)
+                    if ($lockedTx->service_type === PaymentServiceType::Credit) {
+                        app(CreditWalletService::class)->creditFromPaymentTransaction($lockedTx);
+                    }
+
+                    // Fulfiller métier pour la certification de Page Pro
+                    if ($lockedTx->service_type === PaymentServiceType::Certification && $lockedTx->payable_type === PageCertification::class && $lockedTx->payable_id) {
+                        app(PageCertificationService::class)->confirmPaymentFromTransaction($lockedTx);
                     }
                 }
             }

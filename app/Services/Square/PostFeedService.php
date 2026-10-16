@@ -6,6 +6,7 @@ use App\Enums\Square\PostAudience;
 use App\Models\Profile\Follow;
 use App\Models\Square\Post;
 use App\Models\User;
+use App\Services\Boost\AdDeliveryService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -97,8 +98,6 @@ class PostFeedService
                 });
             }
         } else {
-            // Onglet découverte / public : posts d'audience publique
-            // ou posts de l'utilisateur connecté
             $query->where(function (Builder $q) use ($user) {
                 $q->where('audience', PostAudience::Public->value);
                 if ($user) {
@@ -107,6 +106,13 @@ class PostFeedService
             });
         }
 
-        return $query->paginate($perPage);
+        $paginator = $query->paginate($perPage);
+
+        // Injection publicitaire BO (onglets découverte ou neighbourhood, exclusion des profils auteurs)
+        if (! $authorId && $tab !== 'following') {
+            $paginator = app(AdDeliveryService::class)->injectIntoPostFeed($paginator, $user, $filters);
+        }
+
+        return $paginator;
     }
 }
