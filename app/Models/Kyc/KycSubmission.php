@@ -42,8 +42,10 @@ class KycSubmission extends Model
 
     protected $fillable = [
         'id',
+        'reference',
         'user_id',
         'status',
+        'profile_category',
         'full_name',
         'id_type',
         'id_number',
@@ -53,8 +55,23 @@ class KycSubmission extends Model
         'rejection_reason',
         'decided_at',
         'decided_by_id',
+        'escalated_to_id',
+        'escalated_by_id',
+        'escalation_reason',
+        'escalated_at',
         'metadata',
     ];
+
+    protected static function booted(): void
+    {
+        static::creating(function (self $submission) {
+            if (empty($submission->reference)) {
+                $year = now()->year;
+                $random = strtoupper(bin2hex(random_bytes(3)));
+                $submission->reference = "KYC-{$year}-{$random}";
+            }
+        });
+    }
 
     protected function casts(): array
     {
@@ -62,6 +79,7 @@ class KycSubmission extends Model
             'status' => KycStatus::class,
             'expires_on' => 'date',
             'decided_at' => 'datetime',
+            'escalated_at' => 'datetime',
             'metadata' => 'array',
         ];
     }
@@ -76,9 +94,24 @@ class KycSubmission extends Model
         return $this->belongsTo(User::class, 'decided_by_id');
     }
 
+    public function escalatedTo(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'escalated_to_id');
+    }
+
+    public function escalatedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'escalated_by_id');
+    }
+
     public function documents(): HasMany
     {
         return $this->hasMany(KycDocument::class, 'kyc_submission_id');
+    }
+
+    public function accessLogs(): HasMany
+    {
+        return $this->hasMany(KycDocumentAccessLog::class, 'kyc_submission_id');
     }
 
     public function scopePending(Builder $query): Builder
@@ -89,5 +122,10 @@ class KycSubmission extends Model
     public function scopeApproved(Builder $query): Builder
     {
         return $query->where('status', KycStatus::Approved->value);
+    }
+
+    public function scopeRejected(Builder $query): Builder
+    {
+        return $query->where('status', KycStatus::Rejected->value);
     }
 }

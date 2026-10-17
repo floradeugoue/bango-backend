@@ -459,4 +459,28 @@ class Listing extends Model
     {
         return $this->morphMany(Campaign::class, 'boostable');
     }
+
+    /**
+     * Historique des fusions de doublons de l'annonce.
+     */
+    public function merges(): HasMany
+    {
+        return $this->hasMany(ListingMerge::class, 'primary_listing_id');
+    }
+
+    /**
+     * Certifications de visites physiques enregistrées sur l'annonce.
+     */
+    public function agentCertifications(): HasMany
+    {
+        return $this->hasMany(ListingAgentCertification::class, 'listing_id');
+    }
+
+    /**
+     * Journal d'audit des contrôles et revues d'annonce.
+     */
+    public function reviewLogs(): HasMany
+    {
+        return $this->hasMany(ListingReviewLog::class, 'listing_id');
+    }
 }

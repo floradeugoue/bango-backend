@@ -83,5 +83,18 @@ class RoleSeeder extends Seeder
                 ]
             );
         }
+
+        $verificationRole = Role::where('slug', 'verification')->first();
+        if ($verificationRole) {
+            User::firstOrCreate(
+                ['email' => 'solange.bikoi@bango.app'],
+                [
+                    'name' => 'Solange Bikoi',
+                    'password' => bcrypt('AdminPassword123!'),
+                    'role_id' => $verificationRole->id,
+                    'status' => 'active',
+                ]
+            );
+        }
     }
 }

@@ -7,6 +7,13 @@ use App\Http\Controllers\Admin\Auth\AdminAuthController;
 use App\Http\Controllers\Admin\Auth\AdminDeviceController;
 use App\Http\Controllers\Admin\Auth\AdminInvitationController;
 use App\Http\Controllers\Admin\Auth\AdminPasswordResetController;
+use App\Http\Controllers\Admin\Kyc\AdminKycBadgeController;
+use App\Http\Controllers\Admin\Kyc\AdminKycDocumentController;
+use App\Http\Controllers\Admin\Kyc\AdminKycQueueController;
+use App\Http\Controllers\Admin\Listing\AdminListingControlController;
+use App\Http\Controllers\Admin\Listing\AdminListingDuplicateController;
+use App\Http\Controllers\Admin\Listing\AdminListingExportController;
+use App\Http\Controllers\Admin\Listing\AdminListingVisitController;
 use App\Http\Controllers\Admin\Moderation\AdminCopyrightController;
 use App\Http\Controllers\Admin\Moderation\AdminModerationAppealController;
 use App\Http\Controllers\Admin\Moderation\AdminModerationEvidenceController;
@@ -1568,5 +1575,140 @@ Route::prefix('admin')->name('api.admin.')->group(function () {
             Route::patch('/{id}/assign', [AdminSupportTicketController::class, 'assign'])->middleware('admin.permission:support:action')->name('assign');
             Route::post('/{id}/messages', [AdminSupportTicketController::class, 'reply'])->middleware('admin.permission:support:action')->name('reply');
         });
+
+        // ------------------------------------------------------------------
+        // MODULE 10 : VÉRIFICATION D'IDENTITÉ & BADGES PROFESSIONNELS (KYC - ÉTAPE 3 MODULE A)
+        // ------------------------------------------------------------------
+        Route::prefix('kyc')->name('kyc.')->group(function () {
+            // Règles de vérification (A.8)
+            Route::get('/rules', [AdminKycQueueController::class, 'rules'])
+                ->middleware('admin.permission:kyc:view')
+                ->name('rules');
+
+            // Cibles d'escalade hiérarchique (A.6 bis)
+            Route::get('/escalation-targets', [AdminKycQueueController::class, 'escalationTargets'])
+                ->middleware('admin.permission:kyc:view')
+                ->name('escalation_targets');
+
+            // Surveillance des badges professionnels (A.2)
+            Route::get('/badges', [AdminKycBadgeController::class, 'index'])
+                ->middleware('admin.permission:kyc:view')
+                ->name('badges.index');
+
+            // Dossiers refusés et historique des recours (A.3)
+            Route::get('/refusals', [AdminKycBadgeController::class, 'refusals'])
+                ->middleware('admin.permission:kyc:view')
+                ->name('refusals.index');
+
+            // File des demandes KYC à instruire (A.1)
+            Route::get('/requests', [AdminKycQueueController::class, 'index'])
+                ->middleware('admin.permission:kyc:view')
+                ->name('requests.index');
+
+            // Fiche détaillée d'un dossier KYC (A.4)
+            Route::get('/requests/{id}', [AdminKycQueueController::class, 'show'])
+                ->middleware('admin.permission:kyc:view')
+                ->name('requests.show');
+
+            // Décision d'instruction KYC (A.5)
+            Route::post('/requests/{id}/decision', [AdminKycQueueController::class, 'decision'])
+                ->middleware('admin.permission:kyc:action')
+                ->name('requests.decision');
+
+            // Escalade hiérarchique (A.6)
+            Route::post('/requests/{id}/escalate', [AdminKycQueueController::class, 'escalate'])
+                ->middleware('admin.permission:kyc:escalate')
+                ->name('requests.escalate');
+
+            // Consultation et traçabilité des pièces d'identité (A.7)
+            Route::post('/requests/{id}/documents/{docId}/open', [AdminKycDocumentController::class, 'open'])
+                ->middleware('admin.permission:kyc:documents')
+                ->name('requests.documents.open');
+        });
+
+        // ------------------------------------------------------------------
+        // MODULE 11 : CONTRÔLE IMMOBILIER, ANNONCES, DOUBLONS, VISITES & EXPORTS (ÉTAPE 3 MODULE B)
+        // ------------------------------------------------------------------
+        Route::prefix('listings')->name('listings.')->group(function () {
+            // Vue cartographique administrative (B.8)
+            Route::get('/map', [AdminListingControlController::class, 'map'])
+                ->middleware('admin.permission:listings:view')
+                ->name('map');
+
+            // Suivi global des visites réservées et SLA 18h (B.9)
+            Route::get('/visits', [AdminListingVisitController::class, 'index'])
+                ->middleware('admin.permission:listings:view')
+                ->name('visits.index');
+
+            // Détection des doublons potentiels (B.2)
+            Route::get('/duplicates', [AdminListingDuplicateController::class, 'index'])
+                ->middleware('admin.permission:listings:duplicates')
+                ->name('duplicates.index');
+
+            // Fusion de doublons (B.3)
+            Route::post('/duplicates/merge', [AdminListingDuplicateController::class, 'merge'])
+                ->middleware('admin.permission:listings:duplicates')
+                ->name('duplicates.merge');
+
+            // Traitement groupé d'annonces (B.4 bis)
+            Route::post('/review/bulk', [AdminListingControlController::class, 'bulkReview'])
+                ->middleware('admin.permission:listings:review')
+                ->name('review.bulk');
+
+            // Aperçu de l'export CSV (B.10)
+            Route::post('/exports/preview', [AdminListingExportController::class, 'preview'])
+                ->middleware('admin.permission:listings:export')
+                ->name('exports.preview');
+
+            // Génération et téléchargement CSV sécurisé (B.10 bis)
+            Route::post('/exports', [AdminListingExportController::class, 'export'])
+                ->middleware('admin.permission:listings:export')
+                ->name('exports.download');
+
+            // Tableau paginé des annonces (B.1)
+            Route::get('/', [AdminListingControlController::class, 'index'])
+                ->middleware('admin.permission:listings:view')
+                ->name('index');
+
+            // Détail complet d'une annonce (B.1 bis)
+            Route::get('/{ref}', [AdminListingControlController::class, 'show'])
+                ->middleware('admin.permission:listings:view')
+                ->name('show');
+
+            // Instruction d'une annonce : approbation, rejet, correction (B.4)
+            Route::post('/{ref}/review', [AdminListingControlController::class, 'review'])
+                ->middleware('admin.permission:listings:review')
+                ->name('review');
+
+            // Rejeter un faux positif de doublon (B.3 bis)
+            Route::post('/{ref}/not-duplicate', [AdminListingDuplicateController::class, 'dismiss'])
+                ->middleware('admin.permission:listings:duplicates')
+                ->name('not_duplicate');
+
+            // Certification de visite sur place par agent habilité (B.5)
+            Route::post('/{ref}/agent-visit', [AdminListingControlController::class, 'certifyAgentVisit'])
+                ->middleware('admin.permission:listings:certify')
+                ->name('agent_visit');
+
+            // Dépublication d'une annonce (B.6)
+            Route::post('/{ref}/unpublish', [AdminListingControlController::class, 'unpublish'])
+                ->middleware('admin.permission:listings:status')
+                ->name('unpublish');
+
+            // Republication d'une annonce (B.6 bis)
+            Route::post('/{ref}/republish', [AdminListingControlController::class, 'republish'])
+                ->middleware('admin.permission:listings:status')
+                ->name('republish');
+
+            // Marquage d'un bien comme loué ou occupé (B.7)
+            Route::post('/{ref}/rented', [AdminListingControlController::class, 'markRented'])
+                ->middleware('admin.permission:listings:status')
+                ->name('rented');
+        });
+
+        // Republication via convention racine /republish avec paramètre ref en body (B.6 bis alias)
+        Route::post('/republish', [AdminListingControlController::class, 'republish'])
+            ->middleware('admin.permission:listings:status')
+            ->name('republish');
     });
 });

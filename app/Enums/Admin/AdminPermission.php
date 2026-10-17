@@ -25,6 +25,16 @@ enum AdminPermission: string
     case ModerationExport = 'moderation:export';
     case CopyrightManage = 'copyright:manage';
     case TrendsManage = 'trends:manage';
+    case KycView = 'kyc:view';
+    case KycAction = 'kyc:action';
+    case KycDocuments = 'kyc:documents';
+    case KycEscalate = 'kyc:escalate';
+    case ListingsView = 'listings:view';
+    case ListingsReview = 'listings:review';
+    case ListingsDuplicates = 'listings:duplicates';
+    case ListingsCertify = 'listings:certify';
+    case ListingsStatus = 'listings:status';
+    case ListingsExport = 'listings:export';
 
     /**
      * @return array<string>
@@ -76,6 +86,16 @@ enum AdminPermission: string
                 self::DashboardView->value,
                 self::VerificationView->value,
                 self::VerificationAction->value,
+                self::KycView->value,
+                self::KycAction->value,
+                self::KycDocuments->value,
+                self::KycEscalate->value,
+                self::ListingsView->value,
+                self::ListingsReview->value,
+                self::ListingsDuplicates->value,
+                self::ListingsCertify->value,
+                self::ListingsStatus->value,
+                self::ListingsExport->value,
                 self::SearchTransverse->value,
                 self::NotificationsView->value,
                 self::ApprovalsView->value,
