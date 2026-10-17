@@ -27,7 +27,7 @@ beforeEach(function () {
 test('admin can list users', function () {
     User::factory()->count(5)->create(['role_id' => $this->userRole->id]);
 
-    $response = getJson('/api/users');
+    $response = getJson('/api/admin/users');
 
     $response->assertStatus(200)
         ->assertJsonStructure([
@@ -52,7 +52,7 @@ test('admin can search and filter users', function () {
         'role_id' => $this->userRole->id,
     ]);
 
-    $response = getJson('/api/users?display_name=John&status=suspended');
+    $response = getJson('/api/admin/users?display_name=John&status=suspended');
 
     $response->assertStatus(200)
         ->assertJsonPath('data.0.id', $targetUser->id)
@@ -62,7 +62,7 @@ test('admin can search and filter users', function () {
 test('admin can view user details without secrets', function () {
     $user = User::factory()->create(['role_id' => $this->userRole->id]);
 
-    $response = getJson("/api/users/{$user->id}");
+    $response = getJson("/api/admin/users/{$user->id}");
 
     $response->assertStatus(200)
         ->assertJsonPath('id', $user->id)
@@ -72,7 +72,7 @@ test('admin can view user details without secrets', function () {
 test('admin can update user fillable fields', function () {
     $user = User::factory()->create(['role_id' => $this->userRole->id]);
 
-    $response = patchJson("/api/users/{$user->id}", [
+    $response = patchJson("/api/admin/users/{$user->id}", [
         'display_name' => 'Updated Name',
     ]);
 
@@ -86,12 +86,12 @@ test('admin can update user fillable fields', function () {
 test('admin can suspend and block user', function () {
     $user = User::factory()->create(['role_id' => $this->userRole->id, 'status' => 'active']);
 
-    postJson("/api/users/{$user->id}/suspend")
+    postJson("/api/admin/users/{$user->id}/suspend")
         ->assertStatus(200);
 
     $this->assertDatabaseHas('users', ['id' => $user->id, 'status' => 'suspended']);
 
-    postJson("/api/users/{$user->id}/block")
+    postJson("/api/admin/users/{$user->id}/block")
         ->assertStatus(200);
 
     $this->assertDatabaseHas('users', ['id' => $user->id, 'status' => 'blocked']);
@@ -100,7 +100,7 @@ test('admin can suspend and block user', function () {
 test('admin can unsuspend and unblock user', function () {
     $user = User::factory()->create(['role_id' => $this->userRole->id, 'status' => 'suspended']);
 
-    postJson("/api/users/{$user->id}/unsuspend")
+    postJson("/api/admin/users/{$user->id}/unsuspend")
         ->assertStatus(200);
 
     $this->assertDatabaseHas('users', ['id' => $user->id, 'status' => 'active']);
@@ -109,7 +109,7 @@ test('admin can unsuspend and unblock user', function () {
 test('admin can delete user', function () {
     $user = User::factory()->create(['role_id' => $this->userRole->id]);
 
-    deleteJson("/api/users/{$user->id}")
+    deleteJson("/api/admin/users/{$user->id}")
         ->assertStatus(200);
 
     $this->assertSoftDeleted('users', ['id' => $user->id]);
@@ -124,13 +124,13 @@ test('admin can view and revoke user sessions', function () {
     // Create passport token for user
     $token = $user->createToken('TestToken')->token;
 
-    $response = getJson("/api/users/{$user->id}/sessions");
+    $response = getJson("/api/admin/users/{$user->id}/sessions");
 
     $response->assertStatus(200)
         ->assertJsonCount(1, 'sessions')
         ->assertJsonPath('sessions.0.id', $token->id);
 
-    deleteJson("/api/users/{$user->id}/sessions/{$token->id}")
+    deleteJson("/api/admin/users/{$user->id}/sessions/{$token->id}")
         ->assertStatus(200);
 
     $this->assertDatabaseMissing('oauth_access_tokens', ['id' => $token->id]);
@@ -148,7 +148,7 @@ test('admin can revoke all user sessions', function () {
 
     $this->assertDatabaseCount('oauth_access_tokens', 2);
 
-    deleteJson("/api/users/{$user->id}/sessions")
+    deleteJson("/api/admin/users/{$user->id}/sessions")
         ->assertStatus(200);
 
     $this->assertDatabaseCount('oauth_access_tokens', 0); // Both tokens should be revoked
@@ -159,6 +159,6 @@ test('non admin cannot access user management', function () {
 
     Passport::actingAs($user, ['*']);
 
-    getJson('/api/users')
+    getJson('/api/admin/users')
         ->assertStatus(403);
 });

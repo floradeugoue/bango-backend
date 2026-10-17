@@ -7,19 +7,23 @@ use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Str;
 
 class ModerationAppeal extends Model
 {
     use HasFactory;
 
     protected $fillable = [
+        'reference',
         'user_id',
         'sanction_type',
         'sanction_reference',
+        'sanction_operator_id',
         'reason',
         'explanation',
         'contact_email',
         'status',
+        'resolution',
         'decision_notes',
         'reviewed_at',
         'reviewed_by',
@@ -36,6 +40,17 @@ class ModerationAppeal extends Model
         ];
     }
 
+    protected static function booted(): void
+    {
+        static::creating(function (ModerationAppeal $appeal) {
+            if (empty($appeal->reference)) {
+                $year = date('Y');
+                $random = strtoupper(Str::random(6));
+                $appeal->reference = "APP-{$year}-{$random}";
+            }
+        });
+    }
+
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
@@ -44,5 +59,10 @@ class ModerationAppeal extends Model
     public function reviewer(): BelongsTo
     {
         return $this->belongsTo(User::class, 'reviewed_by');
+    }
+
+    public function sanctionOperator(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'sanction_operator_id');
     }
 }

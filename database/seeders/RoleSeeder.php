@@ -4,6 +4,7 @@ namespace Database\Seeders;
 
 use App\Enums\Admin\AdminPermission;
 use App\Models\Auth\Role;
+use App\Models\User;
 use Illuminate\Database\Seeder;
 
 class RoleSeeder extends Seeder
@@ -66,6 +67,19 @@ class RoleSeeder extends Seeder
                     'description' => $roleData['description'],
                     'permissions' => $roleData['permissions'],
                     'is_active' => true,
+                ]
+            );
+        }
+
+        $moderationRole = Role::where('slug', 'moderation')->first();
+        if ($moderationRole) {
+            User::firstOrCreate(
+                ['email' => 'fatou.diop@bango.app'],
+                [
+                    'name' => 'Fatou Diop',
+                    'password' => bcrypt('AdminPassword123!'),
+                    'role_id' => $moderationRole->id,
+                    'status' => 'active',
                 ]
             );
         }

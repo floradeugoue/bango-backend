@@ -19,6 +19,12 @@ enum AdminPermission: string
     case ApprovalsAction = 'approvals:action';
     case OperatorsManage = 'operators:manage';
     case RolesManage = 'roles:manage';
+    case ModerationAssign = 'moderation:assign';
+    case ModerationAppeals = 'moderation:appeals';
+    case ModerationRules = 'moderation:rules';
+    case ModerationExport = 'moderation:export';
+    case CopyrightManage = 'copyright:manage';
+    case TrendsManage = 'trends:manage';
 
     /**
      * @return array<string>
@@ -41,6 +47,11 @@ enum AdminPermission: string
                 self::DashboardView->value,
                 self::ModerationView->value,
                 self::ModerationAction->value,
+                self::ModerationAssign->value,
+                self::ModerationAppeals->value,
+                self::ModerationExport->value,
+                self::CopyrightManage->value,
+                self::TrendsManage->value,
                 self::SearchTransverse->value,
                 self::NotificationsView->value,
                 self::ApprovalsView->value,

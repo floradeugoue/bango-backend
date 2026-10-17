@@ -15,19 +15,26 @@ use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
+use Illuminate\Support\Str;
 
 class Report extends Model
 {
     use HasFactory;
 
     protected $fillable = [
+        'reference',
         'reporter_id',
         'reportable_type',
         'reportable_id',
         'reason',
         'details',
         'status',
+        'assigned_to',
+        'priority',
+        'escalated_to',
+        'escalation_reason',
         'action_taken',
         'resolved_at',
         'resolved_by',
@@ -47,6 +54,17 @@ class Report extends Model
         ];
     }
 
+    protected static function booted(): void
+    {
+        static::creating(function (Report $report) {
+            if (empty($report->reference)) {
+                $year = date('Y');
+                $random = strtoupper(Str::random(6));
+                $report->reference = "MOD-{$year}-{$random}";
+            }
+        });
+    }
+
     public function reporter(): BelongsTo
     {
         return $this->belongsTo(User::class, 'reporter_id');
@@ -55,6 +73,26 @@ class Report extends Model
     public function resolver(): BelongsTo
     {
         return $this->belongsTo(User::class, 'resolved_by');
+    }
+
+    public function assignedOperator(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'assigned_to');
+    }
+
+    public function escalatedOperator(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'escalated_to');
+    }
+
+    public function decisions(): HasMany
+    {
+        return $this->hasMany(ModerationDecision::class)->orderByDesc('created_at');
+    }
+
+    public function evidences(): HasMany
+    {
+        return $this->hasMany(ModerationEvidence::class)->orderByDesc('created_at');
     }
 
     public function reportable(): MorphTo

@@ -149,3 +149,38 @@ it('recalculates permissions dynamically when user role changes', function () {
     expect($user->hasPermission(AdminPermission::FinanceAction->value))->toBeTrue();
     expect($user->hasPermission(AdminPermission::SupportAction->value))->toBeFalse();
 });
+
+it('strictly protects modernized admin modules under admin.session against unauthorized operators', function () {
+    // 1. Unauthenticated request gets 401
+    $unauth = $this->getJson('/api/admin/users');
+    $unauth->assertStatus(401);
+
+    // 2. Moderation operator trying to view users, roles, or payments gets 403
+    [, $modoSessionId] = createOperatorWithRole('moderation');
+
+    $forbiddenUsers = $this->withUnencryptedCookie('bango_admin_session', $modoSessionId)
+        ->getJson('/api/admin/users');
+    $forbiddenUsers->assertStatus(403)
+        ->assertJsonFragment(['code' => 'ADMIN_PERMISSION_DENIED']);
+
+    $forbiddenRoles = $this->withUnencryptedCookie('bango_admin_session', $modoSessionId)
+        ->getJson('/api/admin/roles');
+    $forbiddenRoles->assertStatus(403)
+        ->assertJsonFragment(['code' => 'ADMIN_PERMISSION_DENIED']);
+
+    $forbiddenPayments = $this->withUnencryptedCookie('bango_admin_session', $modoSessionId)
+        ->getJson('/api/admin/payments/transactions');
+    $forbiddenPayments->assertStatus(403)
+        ->assertJsonFragment(['code' => 'ADMIN_PERMISSION_DENIED']);
+
+    // 3. Direction operator (Super-Admin) CAN access users and roles
+    [, $directionSessionId] = createOperatorWithRole('direction');
+
+    $allowedUsers = $this->withUnencryptedCookie('bango_admin_session', $directionSessionId)
+        ->getJson('/api/admin/users');
+    $allowedUsers->assertStatus(200);
+
+    $allowedRoles = $this->withUnencryptedCookie('bango_admin_session', $directionSessionId)
+        ->getJson('/api/admin/roles');
+    $allowedRoles->assertStatus(200);
+});

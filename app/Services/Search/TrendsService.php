@@ -26,9 +26,15 @@ class TrendsService
      */
     public function getTrends(?User $viewer = null): array
     {
-        // 1. Top hashtags réels
+        // 1. Top hashtags réels (avec exclusion des hashtags modérés/exclus)
         $topHashtags = Hashtag::query()
             ->where('posts_count', '>', 0)
+            ->whereNotExists(function ($q) {
+                $q->select(DB::raw(1))
+                    ->from('hashtag_exclusions')
+                    ->where('is_active', true)
+                    ->whereColumn('hashtag_exclusions.hashtag_name', 'hashtags.normalized_name');
+            })
             ->orderByDesc('posts_count')
             ->orderBy('normalized_name', 'asc')
             ->limit(10)
