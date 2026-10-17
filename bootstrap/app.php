@@ -7,6 +7,8 @@ use App\Exceptions\Upload\TusOffsetConflictException;
 use App\Exceptions\Upload\TusUploadException;
 use App\Http\Middleware\CheckAdminRole;
 use App\Http\Middleware\EnsureActiveSubscription;
+use App\Http\Middleware\EnsureAdminPermission;
+use App\Http\Middleware\EnsureAdminSession;
 use App\Http\Middleware\EnsureTermsAccepted;
 use App\Services\System\IncidentTrackerService;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -30,8 +32,15 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->encryptCookies(except: [
+            'bango_admin_session',
+            'bango_admin_csrf',
+        ]);
+
         $middleware->alias([
             'admin' => CheckAdminRole::class,
+            'admin.session' => EnsureAdminSession::class,
+            'admin.permission' => EnsureAdminPermission::class,
             'subscribed' => EnsureActiveSubscription::class,
             'terms.accepted' => EnsureTermsAccepted::class,
         ]);

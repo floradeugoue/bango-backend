@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\AccountType;
+use App\Enums\Admin\AdminPermission;
 use App\Enums\Delegation\DelegationStatus;
 use App\Enums\Gender;
 use App\Models\Auth\OAuthAccount;
@@ -64,6 +65,7 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
+        'role_id',
         'handle',
         'display_name',
         'avatar_url',
@@ -162,6 +164,36 @@ class User extends Authenticatable
     public function isSupportAgent(): bool
     {
         return $this->isAdmin() || in_array($this->role?->slug, ['support', 'moderator', 'agent_support'], true);
+    }
+
+    public function isInternalOperator(): bool
+    {
+        return in_array($this->role?->slug, ['admin', 'direction', 'moderation', 'support', 'finance', 'verification'], true);
+    }
+
+    /**
+     * @return array<string>
+     */
+    public function getEffectivePermissions(): array
+    {
+        if ($this->isAdmin() || $this->role?->slug === 'direction') {
+            return AdminPermission::all();
+        }
+
+        if (! empty($this->role?->permissions) && is_array($this->role->permissions)) {
+            return $this->role->permissions;
+        }
+
+        if ($this->role?->slug) {
+            return AdminPermission::defaultForRole($this->role->slug);
+        }
+
+        return [];
+    }
+
+    public function hasPermission(string $permission): bool
+    {
+        return in_array($permission, $this->getEffectivePermissions(), true);
     }
 
     public function isSuspended(): bool

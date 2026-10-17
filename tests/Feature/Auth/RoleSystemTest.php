@@ -10,8 +10,13 @@ uses(RefreshDatabase::class);
 it('seeds the admin and user roles', function () {
     $this->artisan('db:seed', ['--class' => 'RoleSeeder']);
 
-    expect(Role::count())->toBe(2);
+    expect(Role::count())->toBe(7);
     expect(Role::where('slug', 'admin')->exists())->toBeTrue();
+    expect(Role::where('slug', 'direction')->exists())->toBeTrue();
+    expect(Role::where('slug', 'moderation')->exists())->toBeTrue();
+    expect(Role::where('slug', 'support')->exists())->toBeTrue();
+    expect(Role::where('slug', 'finance')->exists())->toBeTrue();
+    expect(Role::where('slug', 'verification')->exists())->toBeTrue();
     expect(Role::where('slug', 'user')->exists())->toBeTrue();
 });
 
@@ -19,7 +24,7 @@ it('is idempotent and does not create duplicates', function () {
     $this->artisan('db:seed', ['--class' => 'RoleSeeder']);
     $this->artisan('db:seed', ['--class' => 'RoleSeeder']);
 
-    expect(Role::count())->toBe(2);
+    expect(Role::count())->toBe(7);
 });
 
 it('assigns the user role by default to a new user during signup', function () {
