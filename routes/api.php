@@ -7,6 +7,14 @@ use App\Http\Controllers\Admin\Auth\AdminAuthController;
 use App\Http\Controllers\Admin\Auth\AdminDeviceController;
 use App\Http\Controllers\Admin\Auth\AdminInvitationController;
 use App\Http\Controllers\Admin\Auth\AdminPasswordResetController;
+use App\Http\Controllers\Admin\Moderation\AdminCopyrightController;
+use App\Http\Controllers\Admin\Moderation\AdminModerationAppealController;
+use App\Http\Controllers\Admin\Moderation\AdminModerationEvidenceController;
+use App\Http\Controllers\Admin\Moderation\AdminModerationFilterController;
+use App\Http\Controllers\Admin\Moderation\AdminModerationQueueController;
+use App\Http\Controllers\Admin\Moderation\AdminModerationRuleController;
+use App\Http\Controllers\Admin\Moderation\AdminModerationSoundController;
+use App\Http\Controllers\Admin\Moderation\AdminModerationTrendController;
 use App\Http\Controllers\Admin\RoleController;
 use App\Http\Controllers\Admin\Shell\AdminNotificationController;
 use App\Http\Controllers\Admin\Shell\AdminSearchController;
@@ -1284,196 +1292,281 @@ Route::prefix('admin')->name('api.admin.')->group(function () {
         // Consulter la file d'attente des demandes soumises à la validation au principe des 4 yeux
         Route::get('/me/approvals', [AdminWorkspaceController::class, 'approvals'])
             ->name('me.approvals');
-    });
-});
 
-// ==========================================================================
-// MODULES MÉTIERS DU BACK-OFFICE (Rôles, Utilisateurs, Catalogue, Paiements, etc.)
-// ==========================================================================
-Route::middleware(['auth:api', 'admin'])->group(function () {
+        // ==================================================================
+        // MODULE 0.4 : ESPACE MODÉRATION, SANCTIONS, RECOURS & DROITS D'AUTEUR (ÉTAPE 2)
+        // ==================================================================
+        Route::prefix('moderation')->name('moderation.')->group(function () {
 
-    // ----------------------------------------------------------------------
-    // MODULE 1 : RÔLES & PERMISSIONS
-    // ----------------------------------------------------------------------
-    // CRUD complet (Créer, Lire, Mettre à jour, Supprimer) sur les Rôles du système
-    Route::apiResource('roles', RoleController::class);
-    // Lister tous les utilisateurs possédant un rôle spécifique
-    Route::get('roles/{role}/users', [RoleController::class, 'users']);
+            // 4.1 File paginée des signalements avec filtres et compteurs
+            Route::get('/queue', [AdminModerationQueueController::class, 'queue'])
+                ->middleware('admin.permission:moderation:view')
+                ->name('queue');
 
-    // ----------------------------------------------------------------------
-    // MODULE 2 : GESTION DES UTILISATEURS
-    // ----------------------------------------------------------------------
-    Route::prefix('users')->group(function () {
-        // Lister tous les utilisateurs (avec filtres, tris et pagination)
-        Route::get('/', [UserController::class, 'index']);
-        // Afficher les détails complets d'un utilisateur spécifique
-        Route::get('/{user}', [UserController::class, 'show']);
-        // Mettre à jour les informations de base d'un utilisateur (sauf mot de passe)
-        Route::patch('/{user}', [UserController::class, 'update']);
-        // Supprimer un utilisateur (Soft delete : passe l'utilisateur en corbeille)
-        Route::delete('/{user}', [UserController::class, 'destroy']);
+            // 4.2 Fiche détaillée d'un dossier de modération
+            Route::get('/cases/{ref}', [AdminModerationQueueController::class, 'show'])
+                ->middleware('admin.permission:moderation:view')
+                ->name('cases.show');
 
-        // Voir le rôle actuel assigné à un utilisateur spécifique
-        Route::get('/{user}/role', [RoleController::class, 'getUserRole']);
-        // Modifier/Assigner un nouveau rôle à un utilisateur spécifique
-        Route::patch('/{user}/role', [RoleController::class, 'updateUserRole']);
+            // 4.3 Prise de décision validée sur un dossier
+            Route::post('/cases/{ref}/decision', [AdminModerationQueueController::class, 'decision'])
+                ->middleware('admin.permission:moderation:action')
+                ->name('cases.decision');
 
-        // Suspendre temporairement le compte d'un utilisateur (déconnexion immédiate)
-        Route::post('/{user}/suspend', [UserController::class, 'suspend']);
-        // Lever la suspension d'un compte utilisateur
-        Route::post('/{user}/unsuspend', [UserController::class, 'unsuspend']);
-        // Bloquer définitivement un utilisateur (accès interdit)
-        Route::post('/{user}/block', [UserController::class, 'block']);
-        // Débloquer un utilisateur précédemment bloqué
-        Route::post('/{user}/unblock', [UserController::class, 'unblock']);
+            // 4.5 Traitement groupé de dossiers de modération
+            Route::post('/cases/bulk-decision', [AdminModerationQueueController::class, 'bulkDecision'])
+                ->middleware('admin.permission:moderation:action')
+                ->name('cases.bulk-decision');
 
-        // Lister toutes les sessions (appareils) actives d'un utilisateur
-        Route::get('/{user}/sessions', [UserController::class, 'sessions']);
-        // Révoquer/Déconnecter toutes les sessions actives de l'utilisateur
-        Route::delete('/{user}/sessions', [UserController::class, 'revokeAllSessions']);
-        // Révoquer/Déconnecter une session spécifique de l'utilisateur
-        Route::delete('/{user}/sessions/{session}', [UserController::class, 'revokeSession']);
-    });
+            // 4.6 Liste des opérateurs assignables à la modération
+            Route::get('/assignees', [AdminModerationQueueController::class, 'assignees'])
+                ->middleware('admin.permission:moderation:view')
+                ->name('assignees');
 
-    // ----------------------------------------------------------------------
-    // MODULE 3 : GESTION GÉOGRAPHIQUE (CRUD — l'index/show public est dans COMMUN)
-    // ----------------------------------------------------------------------
-    Route::prefix('geo')->group(function () {
-        // Créer, modifier ou supprimer un Pays
-        Route::apiResource('countries', CountryController::class)->except(['index', 'show']);
-        // Créer, modifier ou supprimer une Devise
-        Route::apiResource('currencies', CurrencyController::class)->except(['index', 'show']);
-        // Créer, modifier ou supprimer une Ville
-        Route::apiResource('cities', CityController::class)->except(['index', 'show']);
-        // Créer, modifier ou supprimer un Quartier
-        Route::apiResource('neighbourhoods', NeighbourhoodController::class)->except(['index', 'show']);
-        // Créer, modifier ou supprimer un Opérateur
-        Route::apiResource('operators', OperatorController::class)->except(['index', 'show']);
-    });
+            // 4.6 Assignation de dossiers à un opérateur
+            Route::post('/cases/assign', [AdminModerationQueueController::class, 'assign'])
+                ->middleware('admin.permission:moderation:assign')
+                ->name('cases.assign');
 
-    // ----------------------------------------------------------------------
-    // MODULE 4 : CATALOGUE D'ABONNEMENTS & TARIFS
-    // ----------------------------------------------------------------------
-    Route::prefix('admin/catalog')->group(function () {
-        // Lister tous les produits d'abonnement du catalogue (actifs et archivés)
-        Route::get('/products', [SubscriptionCatalogController::class, 'index']);
-        // Créer un nouveau produit d'abonnement
-        Route::post('/products', [SubscriptionCatalogController::class, 'store']);
-        // Afficher les détails d'un produit avec ses tarifs associés
-        Route::get('/products/{id}', [SubscriptionCatalogController::class, 'show']);
-        // Mettre à jour les informations d'un produit d'abonnement
-        Route::put('/products/{id}', [SubscriptionCatalogController::class, 'update']);
-        // Ajouter une nouvelle grille tarifaire (prix / période) à un produit
-        Route::post('/products/{id}/prices', [SubscriptionCatalogController::class, 'addPrice']);
-        // Modifier un tarif existant (ajustement de prix, activation/désactivation)
-        Route::put('/prices/{priceId}', [SubscriptionCatalogController::class, 'updatePrice']);
-    });
+            // 4.6 Escalade d'un dossier vers un responsable/superviseur
+            Route::post('/cases/{ref}/escalate', [AdminModerationQueueController::class, 'escalate'])
+                ->middleware('admin.permission:moderation:assign')
+                ->name('cases.escalate');
 
-    // ----------------------------------------------------------------------
-    // MODULE 5 : ABONNEMENTS & BADGES (Supervision & Support)
-    // ----------------------------------------------------------------------
-    Route::prefix('admin/subscriptions')->group(function () {
-        // Lister et filtrer tous les abonnements de la plateforme
-        Route::get('/', [SubscriptionManagementController::class, 'index']);
-        // Afficher les détails complets d'un abonnement et son journal d'événements
-        Route::get('/{id}', [SubscriptionManagementController::class, 'show']);
-        // Suspendre administrativement un abonnement
-        Route::post('/{id}/suspend', [SubscriptionManagementController::class, 'suspend']);
-        // Réactiver un abonnement précédemment suspendu
-        Route::post('/{id}/reactivate', [SubscriptionManagementController::class, 'reactivate']);
-        // Prolonger la durée de validité d'un abonnement
-        Route::post('/{id}/extend', [SubscriptionManagementController::class, 'extend']);
-        // Révoquer définitivement un abonnement et supprimer le badge associé
-        Route::post('/{id}/revoke', [SubscriptionManagementController::class, 'revoke']);
-    });
+            // 4.7 Ouverture et traçabilité d'accès à une preuve
+            Route::post('/cases/{ref}/evidence/{id}/open', [AdminModerationEvidenceController::class, 'open'])
+                ->middleware('admin.permission:moderation:view')
+                ->name('cases.evidence.open');
 
-    // Journal d'audit global des attributions et modifications de badges
-    Route::get('admin/badges/history', [SubscriptionManagementController::class, 'badgeHistories']);
+            // 4.7 Téléversement sécurisé de pièces probatoires
+            Route::post('/uploads', [AdminModerationEvidenceController::class, 'upload'])
+                ->middleware('admin.permission:moderation:view')
+                ->name('uploads');
 
-    // ----------------------------------------------------------------------
-    // MODULE 6 : MODULE PAIEMENT (Supervision, Audits, Litiges, Remboursements)
-    // ----------------------------------------------------------------------
-    Route::prefix('admin/payments')->group(function () {
-        // Transactions : Supervision, recherche et détail
-        // Lister et filtrer toutes les transactions de paiement de la plateforme
-        Route::get('/transactions', [AdminPaymentController::class, 'index']);
-        // Afficher les détails complets d'une transaction de paiement
-        Route::get('/transactions/{id}', [AdminPaymentController::class, 'show']);
-        // Consulter le journal d'événements et d'audits d'une transaction
-        Route::get('/transactions/{id}/events', [AdminPaymentController::class, 'events']);
-        // Rembourser manuellement une transaction payée
-        Route::post('/transactions/{id}/refund', [AdminPaymentController::class, 'refund']);
+            // 4.8 Historique des décisions prises par l'opérateur connecté
+            Route::get('/decisions/mine', [AdminModerationQueueController::class, 'myDecisions'])
+                ->middleware('admin.permission:moderation:view')
+                ->name('decisions.mine');
 
-        // Litiges & Contestations
-        // Lister l'ensemble des litiges et contestations de paiement
-        Route::get('/disputes', [AdminPaymentController::class, 'disputes']);
-        // Déclarer un nouveau litige de paiement pour investigation
-        Route::post('/disputes', [AdminPaymentController::class, 'createDispute']);
-        // Consulter les détails d'un litige spécifique
-        Route::get('/disputes/{id}', [AdminPaymentController::class, 'showDispute']);
-        // Mettre à jour le statut d'un litige (en cours, résolu, rejeté)
-        Route::post('/disputes/{id}/status', [AdminPaymentController::class, 'updateDisputeStatus']);
-        // Ajouter une note interne d'investigation sur un litige
-        Route::post('/disputes/{id}/notes', [AdminPaymentController::class, 'addDisputeNote']);
+            // 4.8 Export contrôlé de l'activité de l'opérateur
+            Route::post('/mine/export', [AdminModerationQueueController::class, 'export'])
+                ->middleware('admin.permission:moderation:export')
+                ->name('mine.export');
 
-        // Réclamations Doubles Débits
-        // Lister toutes les réclamations de double débit soumises
-        Route::get('/double-charge-claims', [AdminPaymentController::class, 'doubleChargeClaims']);
-        // Enregistrer une nouvelle réclamation de double débit
-        Route::post('/double-charge-claims', [AdminPaymentController::class, 'createDoubleChargeClaim']);
-    });
+            // 5.1 File paginée des contestations et recours (SLA 72h)
+            Route::get('/appeals', [AdminModerationAppealController::class, 'index'])
+                ->middleware('admin.permission:moderation:appeals')
+                ->name('appeals.index');
 
-    // ----------------------------------------------------------------------
-    // MODULE 7 : REELS SOUND CATALOG (Administration du catalogue audio)
-    // ----------------------------------------------------------------------
-    Route::prefix('admin/sounds')->group(function () {
-        // Lister tous les sons du catalogue audio (actifs, inactifs, supprimés)
-        Route::get('/', [AdminSoundCatalogController::class, 'index'])->name('api.admin.sounds.index');
-        // Importer et ajouter un nouveau son au catalogue avec son fichier audio
-        Route::post('/', [AdminSoundCatalogController::class, 'store'])->name('api.admin.sounds.store');
-        // Consulter les métadonnées et droits d'un son du catalogue
-        Route::get('/{id}', [AdminSoundCatalogController::class, 'show'])->name('api.admin.sounds.show');
-        // Mettre à jour les métadonnées ou remplacer le fichier audio d'un son
-        Route::post('/{id}', [AdminSoundCatalogController::class, 'update'])->name('api.admin.sounds.update');
-        // Activer ou désactiver la visibilité d'un son dans le catalogue
-        Route::patch('/{id}/publication', [AdminSoundCatalogController::class, 'togglePublication'])->name('api.admin.sounds.publication');
-        // Mettre à jour les licences, la provenance et les droits de diffusion d'un son
-        Route::patch('/{id}/rights', [AdminSoundCatalogController::class, 'updateRights'])->name('api.admin.sounds.rights');
-        // Désactiver et masquer un son du catalogue (soft delete)
-        Route::delete('/{id}', [AdminSoundCatalogController::class, 'removeFromCatalog'])->name('api.admin.sounds.remove');
-        // Restaurer un son précédemment retiré du catalogue
-        Route::post('/{id}/restore', [AdminSoundCatalogController::class, 'restore'])->name('api.admin.sounds.restore');
-        // Supprimer définitivement un son et purger son fichier audio
-        Route::delete('/{id}/force', [AdminSoundCatalogController::class, 'destroy'])->name('api.admin.sounds.destroy');
-    });
+            // 5.2 Réexamen d'une sanction avec décision explicite (séparation stricte des rôles)
+            Route::post('/appeals/{ref}/resolution', [AdminModerationAppealController::class, 'resolve'])
+                ->middleware('admin.permission:moderation:appeals')
+                ->name('appeals.resolve');
 
-    // ----------------------------------------------------------------------
-    // MODULE 8 : PAGES PROFESSIONNELLES & CERTIFICATIONS (Module 12 PG)
-    // ----------------------------------------------------------------------
-    Route::prefix('admin/pages')->group(function () {
-        // Lister et filtrer les demandes de certification de pages en attente d'instruction
-        Route::get('/certifications', [PageCertificationAdminController::class, 'index'])->name('api.admin.pages.certifications.index');
-        // Rendre une décision formelle sur une demande de certification (approuver ou rejeter)
-        Route::post('/certifications/{certification}/decide', [PageCertificationAdminController::class, 'decide'])->name('api.admin.pages.certifications.decide');
-        // Suspendre ou retirer administrativement le badge de certification d'une page
-        Route::post('/{page}/suspend-certification', [PageCertificationAdminController::class, 'suspendCertification'])->name('api.admin.pages.suspend_certification');
-        // Suspendre une page professionnelle (masquage public immédiat sur l'application)
-        Route::post('/{page}/suspend', [PageCertificationAdminController::class, 'suspendPage'])->name('api.admin.pages.suspend');
-        // Lever la suspension d'une page professionnelle et rétablir son affichage public
-        Route::post('/{page}/unsuspend', [PageCertificationAdminController::class, 'unsuspendPage'])->name('api.admin.pages.unsuspend');
-    });
+            // 6. Consultation des règles de modération
+            Route::get('/rules', [AdminModerationRuleController::class, 'index'])
+                ->middleware('admin.permission:moderation:view')
+                ->name('rules.index');
 
-    // ----------------------------------------------------------------------
-    // MODULE 9 : BILLETTERIE SUPPORT CLIENT (Module 18 SUP)
-    // ----------------------------------------------------------------------
-    Route::prefix('admin/support/tickets')->group(function () {
-        // Lister et filtrer l'ensemble des tickets support (statut, priorité, catégorie)
-        Route::get('/', [AdminSupportTicketController::class, 'index'])->name('api.admin.support.tickets.index');
-        // Modifier le statut de traitement d'un ticket (en cours, résolu, fermé)
-        Route::patch('/{id}/status', [AdminSupportTicketController::class, 'updateStatus'])->name('api.admin.support.tickets.status');
-        // Assigner ou réaffecter un ticket support à un agent de l'équipe
-        Route::patch('/{id}/assign', [AdminSupportTicketController::class, 'assign'])->name('api.admin.support.tickets.assign');
-        // Répondre publiquement à l'utilisateur ou consigner une note interne d'investigation
-        Route::post('/{id}/messages', [AdminSupportTicketController::class, 'reply'])->name('api.admin.support.tickets.reply');
+            // 6. Création d'une nouvelle règle de modération
+            Route::post('/rules', [AdminModerationRuleController::class, 'store'])
+                ->middleware('admin.permission:moderation:rules')
+                ->name('rules.store');
+
+            // 6. Mise à jour d'une règle de modération existante
+            Route::patch('/rules/{reason}', [AdminModerationRuleController::class, 'update'])
+                ->middleware('admin.permission:moderation:rules')
+                ->name('rules.update');
+
+            // 6. Correspondance officielle entre les 6 motifs de l'application et les motifs internes
+            Route::get('/app-reasons', [AdminModerationRuleController::class, 'appReasons'])
+                ->middleware('admin.permission:moderation:view')
+                ->name('app-reasons');
+
+            // 7. Déclenchements et alertes du filtre textuel automatique
+            Route::get('/filter', [AdminModerationFilterController::class, 'index'])
+                ->middleware('admin.permission:moderation:view')
+                ->name('filter');
+
+            // 8. File des revendications de propriété intellectuelle et droits d'auteur
+            Route::get('/rights', [AdminCopyrightController::class, 'index'])
+                ->middleware('admin.permission:copyright:manage')
+                ->name('rights.index');
+
+            // 8. Décision validée sur une revendication de droits d'auteur
+            Route::post('/rights/{ref}/decision', [AdminCopyrightController::class, 'decision'])
+                ->middleware('admin.permission:copyright:manage')
+                ->name('rights.decision');
+
+            // 9. Consultation des sons du catalogue et de leur statut de modération
+            Route::get('/sounds', [AdminModerationSoundController::class, 'index'])
+                ->middleware('admin.permission:moderation:view')
+                ->name('sounds.index');
+
+            // 9. Actions de modération sur un son (validation, désactivation, restauration)
+            Route::post('/sounds/{id}/action', [AdminModerationSoundController::class, 'action'])
+                ->middleware('admin.permission:moderation:action')
+                ->name('sounds.action');
+
+            // 10. File des tendances globales avec annotations d'exclusions
+            Route::get('/trends', [AdminModerationTrendController::class, 'index'])
+                ->middleware('admin.permission:trends:manage')
+                ->name('trends.index');
+
+            // 10. Liste des exclusions de hashtags
+            Route::get('/trends/exclusions', [AdminModerationTrendController::class, 'listExclusions'])
+                ->middleware('admin.permission:trends:manage')
+                ->name('trends.exclusions.list');
+
+            // 10. Exclusion d'un hashtag des tendances sans destruction du contenu source
+            Route::post('/trends/exclusions', [AdminModerationTrendController::class, 'exclude'])
+                ->middleware('admin.permission:trends:manage')
+                ->name('trends.exclusions.create');
+
+            // 10. Restauration d'un hashtag exclu vers les tendances
+            Route::post('/exclusions/restore', [AdminModerationTrendController::class, 'restore'])
+                ->middleware('admin.permission:trends:manage')
+                ->name('exclusions.restore');
+
+            // 10. Alias de restauration sous le préfixe trends
+            Route::post('/trends/exclusions/restore', [AdminModerationTrendController::class, 'restore'])
+                ->middleware('admin.permission:trends:manage')
+                ->name('trends.exclusions.restore');
+        });
+
+        // Téléversement sécurisé de preuves (alias direct POST /admin/uploads tel que requis en section 4.7)
+        Route::post('/uploads', [AdminModerationEvidenceController::class, 'upload'])
+            ->middleware('admin.permission:moderation:view')
+            ->name('uploads');
+
+        // ------------------------------------------------------------------
+        // MODULE 1 : RÔLES & PERMISSIONS (Strictement réservé Super-Admin / Direction)
+        // ------------------------------------------------------------------
+        Route::prefix('roles')->name('roles.')->middleware('admin.permission:roles:manage')->group(function () {
+            Route::get('/', [RoleController::class, 'index'])->name('index');
+            Route::post('/', [RoleController::class, 'store'])->name('store');
+            Route::get('/{role}', [RoleController::class, 'show'])->name('show');
+            Route::put('/{role}', [RoleController::class, 'update'])->name('update');
+            Route::delete('/{role}', [RoleController::class, 'destroy'])->name('destroy');
+            Route::get('/{role}/users', [RoleController::class, 'users'])->name('users');
+        });
+
+        // ------------------------------------------------------------------
+        // MODULE 2 : GESTION DES UTILISATEURS (Strictement réservé Super-Admin / Direction)
+        // ------------------------------------------------------------------
+        Route::prefix('users')->name('users.')->middleware('admin.permission:operators:manage')->group(function () {
+            Route::get('/', [UserController::class, 'index'])->name('index');
+            Route::get('/{user}', [UserController::class, 'show'])->name('show');
+            Route::patch('/{user}', [UserController::class, 'update'])->name('update');
+            Route::delete('/{user}', [UserController::class, 'destroy'])->name('destroy');
+
+            Route::get('/{user}/role', [RoleController::class, 'getUserRole'])->name('role.get');
+            Route::patch('/{user}/role', [RoleController::class, 'updateUserRole'])->name('role.update');
+
+            Route::post('/{user}/suspend', [UserController::class, 'suspend'])->name('suspend');
+            Route::post('/{user}/unsuspend', [UserController::class, 'unsuspend'])->name('unsuspend');
+            Route::post('/{user}/block', [UserController::class, 'block'])->name('block');
+            Route::post('/{user}/unblock', [UserController::class, 'unblock'])->name('unblock');
+
+            Route::get('/{user}/sessions', [UserController::class, 'sessions'])->name('sessions.index');
+            Route::delete('/{user}/sessions', [UserController::class, 'revokeAllSessions'])->name('sessions.revoke_all');
+            Route::delete('/{user}/sessions/{session}', [UserController::class, 'revokeSession'])->name('sessions.revoke');
+        });
+
+        // ------------------------------------------------------------------
+        // MODULE 3 : GESTION GÉOGRAPHIQUE (PAYS, DEVISES, VILLES, OPÉRATEURS)
+        // ------------------------------------------------------------------
+        Route::prefix('geo')->name('geo.')->middleware('admin.permission:operators:manage')->group(function () {
+            Route::apiResource('countries', CountryController::class)->except(['index', 'show']);
+            Route::apiResource('currencies', CurrencyController::class)->except(['index', 'show']);
+            Route::apiResource('cities', CityController::class)->except(['index', 'show']);
+            Route::apiResource('neighbourhoods', NeighbourhoodController::class)->except(['index', 'show']);
+            Route::apiResource('operators', OperatorController::class)->except(['index', 'show']);
+        });
+
+        // ------------------------------------------------------------------
+        // MODULE 4 : CATALOGUE D'ABONNEMENTS & TARIFS
+        // ------------------------------------------------------------------
+        Route::prefix('catalog')->name('catalog.')->middleware('admin.permission:operators:manage')->group(function () {
+            Route::get('/products', [SubscriptionCatalogController::class, 'index'])->name('products.index');
+            Route::post('/products', [SubscriptionCatalogController::class, 'store'])->name('products.store');
+            Route::get('/products/{id}', [SubscriptionCatalogController::class, 'show'])->name('products.show');
+            Route::put('/products/{id}', [SubscriptionCatalogController::class, 'update'])->name('products.update');
+            Route::post('/products/{id}/prices', [SubscriptionCatalogController::class, 'addPrice'])->name('prices.store');
+            Route::put('/prices/{priceId}', [SubscriptionCatalogController::class, 'updatePrice'])->name('prices.update');
+        });
+
+        // ------------------------------------------------------------------
+        // MODULE 5 : ABONNEMENTS & BADGES (Supervision & Support)
+        // ------------------------------------------------------------------
+        Route::prefix('subscriptions')->name('subscriptions.')->middleware('admin.permission:verification:view')->group(function () {
+            Route::get('/', [SubscriptionManagementController::class, 'index'])->name('index');
+            Route::get('/{id}', [SubscriptionManagementController::class, 'show'])->name('show');
+            Route::post('/{id}/suspend', [SubscriptionManagementController::class, 'suspend'])->middleware('admin.permission:verification:action')->name('suspend');
+            Route::post('/{id}/reactivate', [SubscriptionManagementController::class, 'reactivate'])->middleware('admin.permission:verification:action')->name('reactivate');
+            Route::post('/{id}/extend', [SubscriptionManagementController::class, 'extend'])->middleware('admin.permission:verification:action')->name('extend');
+            Route::post('/{id}/revoke', [SubscriptionManagementController::class, 'revoke'])->middleware('admin.permission:verification:action')->name('revoke');
+        });
+        Route::get('/badges/history', [SubscriptionManagementController::class, 'badgeHistories'])
+            ->middleware('admin.permission:verification:view')
+            ->name('badges.history');
+
+        // ------------------------------------------------------------------
+        // MODULE 6 : PAIEMENTS, AUDITS & LITIGES (Finance)
+        // ------------------------------------------------------------------
+        Route::prefix('payments')->name('payments.')->middleware('admin.permission:finance:view')->group(function () {
+            Route::get('/transactions', [AdminPaymentController::class, 'index'])->name('transactions.index');
+            Route::get('/transactions/{id}', [AdminPaymentController::class, 'show'])->name('transactions.show');
+            Route::get('/transactions/{id}/events', [AdminPaymentController::class, 'events'])->name('transactions.events');
+            Route::post('/transactions/{id}/refund', [AdminPaymentController::class, 'refund'])->middleware('admin.permission:finance:action')->name('transactions.refund');
+
+            Route::get('/disputes', [AdminPaymentController::class, 'disputes'])->name('disputes.index');
+            Route::post('/disputes', [AdminPaymentController::class, 'createDispute'])->middleware('admin.permission:finance:action')->name('disputes.store');
+            Route::get('/disputes/{id}', [AdminPaymentController::class, 'showDispute'])->name('disputes.show');
+            Route::post('/disputes/{id}/status', [AdminPaymentController::class, 'updateDisputeStatus'])->middleware('admin.permission:finance:action')->name('disputes.status');
+            Route::post('/disputes/{id}/notes', [AdminPaymentController::class, 'addDisputeNote'])->middleware('admin.permission:finance:action')->name('disputes.notes');
+
+            Route::get('/double-charge-claims', [AdminPaymentController::class, 'doubleChargeClaims'])->name('double_charge_claims.index');
+            Route::post('/double-charge-claims', [AdminPaymentController::class, 'createDoubleChargeClaim'])->middleware('admin.permission:finance:action')->name('double_charge_claims.store');
+        });
+
+        // ------------------------------------------------------------------
+        // MODULE 7 : CATALOGUE AUDIO & SONS REELS (Administration)
+        // ------------------------------------------------------------------
+        $soundCatalogRoutes = function () {
+            Route::get('/', [AdminSoundCatalogController::class, 'index'])->name('index');
+            Route::post('/', [AdminSoundCatalogController::class, 'store'])->middleware('admin.permission:moderation:action')->name('store');
+            Route::get('/{id}', [AdminSoundCatalogController::class, 'show'])->name('show');
+            Route::post('/{id}', [AdminSoundCatalogController::class, 'update'])->middleware('admin.permission:moderation:action')->name('update');
+            Route::patch('/{id}/publication', [AdminSoundCatalogController::class, 'togglePublication'])->middleware('admin.permission:moderation:action')->name('publication');
+            Route::patch('/{id}/rights', [AdminSoundCatalogController::class, 'updateRights'])->middleware('admin.permission:moderation:action')->name('rights');
+            Route::delete('/{id}', [AdminSoundCatalogController::class, 'removeFromCatalog'])->middleware('admin.permission:moderation:action')->name('remove');
+            Route::post('/{id}/restore', [AdminSoundCatalogController::class, 'restore'])->middleware('admin.permission:moderation:action')->name('restore');
+            Route::delete('/{id}/force', [AdminSoundCatalogController::class, 'destroy'])->middleware('admin.permission:operators:manage')->name('destroy');
+        };
+
+        Route::prefix('sounds')->name('sounds.')->middleware('admin.permission:moderation:view')->group($soundCatalogRoutes);
+        Route::prefix('sounds-catalog')->name('sounds-catalog.')->middleware('admin.permission:moderation:view')->group($soundCatalogRoutes);
+
+        // ------------------------------------------------------------------
+        // MODULE 8 : PAGES PROFESSIONNELLES & CERTIFICATIONS (Module 12 PG)
+        // ------------------------------------------------------------------
+        Route::prefix('pages')->name('pages.')->middleware('admin.permission:verification:view')->group(function () {
+            Route::get('/certifications', [PageCertificationAdminController::class, 'index'])->name('certifications.index');
+            Route::post('/certifications/{certification}/decide', [PageCertificationAdminController::class, 'decide'])->middleware('admin.permission:verification:action')->name('certifications.decide');
+            Route::post('/{page}/suspend-certification', [PageCertificationAdminController::class, 'suspendCertification'])->middleware('admin.permission:verification:action')->name('suspend_certification');
+            Route::post('/{page}/suspend', [PageCertificationAdminController::class, 'suspendPage'])->middleware('admin.permission:verification:action')->name('suspend');
+            Route::post('/{page}/unsuspend', [PageCertificationAdminController::class, 'unsuspendPage'])->middleware('admin.permission:verification:action')->name('unsuspend');
+        });
+
+        // ------------------------------------------------------------------
+        // MODULE 9 : BILLETTERIE SUPPORT CLIENT (Module 18 SUP)
+        // ------------------------------------------------------------------
+        Route::prefix('support/tickets')->name('support.tickets.')->middleware('admin.permission:support:view')->group(function () {
+            Route::get('/', [AdminSupportTicketController::class, 'index'])->name('index');
+            Route::patch('/{id}/status', [AdminSupportTicketController::class, 'updateStatus'])->middleware('admin.permission:support:action')->name('status');
+            Route::patch('/{id}/assign', [AdminSupportTicketController::class, 'assign'])->middleware('admin.permission:support:action')->name('assign');
+            Route::post('/{id}/messages', [AdminSupportTicketController::class, 'reply'])->middleware('admin.permission:support:action')->name('reply');
+        });
     });
 });

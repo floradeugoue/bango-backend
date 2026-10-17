@@ -45,7 +45,7 @@ it('denies admin access to user with passport token and user role', function () 
 
     Passport::actingAs($user);
 
-    $response = $this->getJson('/api/roles');
+    $response = $this->getJson('/api/admin/roles');
     $response->assertStatus(403);
 });
 
@@ -59,6 +59,6 @@ it('allows admin access with passport token and admin role', function () {
 
     Passport::actingAs($admin);
 
-    $response = $this->getJson('/api/roles');
+    $response = $this->getJson('/api/admin/roles');
     $response->assertStatus(200);
 });

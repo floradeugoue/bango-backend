@@ -44,6 +44,7 @@ use App\Models\Story\StoryReply;
 use App\Models\Story\StoryView;
 use App\Models\Subscription\BadgeHistory;
 use App\Models\Subscription\Subscription;
+use App\Models\Support\Report;
 use App\Models\Support\SupportTicket;
 use App\Models\Visit\VisitReservation;
 use Database\Factories\UserFactory;
@@ -154,6 +155,11 @@ class User extends Authenticatable
     public function role()
     {
         return $this->belongsTo(Role::class);
+    }
+
+    public function assignedReports(): HasMany
+    {
+        return $this->hasMany(Report::class, 'assigned_to');
     }
 
     public function isAdmin(): bool
