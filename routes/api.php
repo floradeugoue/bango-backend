@@ -2,7 +2,16 @@
 
 use App\Http\Controllers\Admin\AdminPaymentController;
 use App\Http\Controllers\Admin\AdminSoundCatalogController;
+use App\Http\Controllers\Admin\Auth\AdminAccessRequestController;
+use App\Http\Controllers\Admin\Auth\AdminAuthController;
+use App\Http\Controllers\Admin\Auth\AdminDeviceController;
+use App\Http\Controllers\Admin\Auth\AdminInvitationController;
+use App\Http\Controllers\Admin\Auth\AdminPasswordResetController;
 use App\Http\Controllers\Admin\RoleController;
+use App\Http\Controllers\Admin\Shell\AdminNotificationController;
+use App\Http\Controllers\Admin\Shell\AdminSearchController;
+use App\Http\Controllers\Admin\Shell\AdminShellController;
+use App\Http\Controllers\Admin\Shell\AdminWorkspaceController;
 use App\Http\Controllers\Admin\SubscriptionCatalogController;
 use App\Http\Controllers\Admin\SubscriptionManagementController;
 use App\Http\Controllers\Admin\UserController;
@@ -1141,22 +1150,159 @@ Route::middleware('auth:api')->group(function () {
 
 /*
 |==========================================================================
-| 3. 🖥️ BACK-OFFICE — Administration (Token Passport + Rôle système "Admin")
+| 3. 🖥️ BANGO-ADMIN & BACK-OFFICE — ESPACE D'ADMINISTRATION CENTRALISÉ
+|==========================================================================
+|
+| Cet espace regroupe l'intégralité des routes d'administration et de supervision
+| de la plateforme BANGO, structurées et documentées par modules métiers :
+|
+| ├── MODULE 0 : SOCLE DE SÉCURITÉ, AUTHENTIFICATION 2FA & COQUE (Étape 1)
+| ├── MODULE 1 : RÔLES & PERMISSIONS
+| ├── MODULE 2 : GESTION DES UTILISATEURS
+| ├── MODULE 3 : GESTION GÉOGRAPHIQUE (PAYS, DEVISES, VILLES, OPÉRATEURS)
+| ├── MODULE 4 : CATALOGUE D'ABONNEMENTS & TARIFS
+| ├── MODULE 5 : GESTION DES ABONNEMENTS & BADGES
+| ├── MODULE 6 : PAIEMENTS, AUDITS & GESTION DES LITIGES
+| ├── MODULE 7 : CATALOGUE AUDIO & SONS REELS
+| ├── MODULE 8 : PAGES PROFESSIONNELLES & CERTIFICATIONS (PG)
+| └── MODULE 9 : BILLETTERIE SUPPORT CLIENT (SUP)
+|
 |==========================================================================
 */
+
+// ==========================================================================
+// MODULE 0 : SOCLE DE SÉCURITÉ, 2FA & COQUE GLOBALE (BANGO-ADMIN ÉTAPE 1)
+// ==========================================================================
+Route::prefix('admin')->name('api.admin.')->group(function () {
+
+    // ----------------------------------------------------------------------
+    // 0.1 Authentification & Pré-session (Sans session préalable)
+    // ----------------------------------------------------------------------
+    Route::prefix('auth')->group(function () {
+        // Obtenir le contexte de connexion (branding, statut 2FA requis, politique de sécurité)
+        Route::get('/context', [AdminAuthController::class, 'context'])
+            ->name('auth.context');
+
+        // Initier la connexion opérateur (credentials) et générer un challenge 2FA temporaire
+        Route::post('/login', [AdminAuthController::class, 'login'])
+            ->name('auth.login');
+
+        // Valider le code TOTP du challenge 2FA et délivrer le cookie HTTP-only bango_admin_session
+        Route::post('/2fa/verify', [AdminAuthController::class, 'verify2fa'])
+            ->name('auth.2fa.verify');
+
+        // Obtenir les informations et options d'assistance pour la récupération de compte 2FA
+        Route::get('/2fa/recovery', [AdminAuthController::class, 'recoveryInfo'])
+            ->name('auth.2fa.recovery.info');
+
+        // Valider un code de secours (recovery code) d'urgence pour accéder à la session
+        Route::post('/2fa/recovery', [AdminAuthController::class, 'verifyRecovery'])
+            ->name('auth.2fa.recovery.verify');
+
+        // Renvoyer le code OTP de vérification d'appareil sur le canal sécurisé
+        Route::post('/device/resend', [AdminDeviceController::class, 'resend'])
+            ->name('auth.device.resend');
+
+        // Signaler une tentative de connexion ou un appareil suspect non reconnu par l'opérateur
+        Route::post('/device/report', [AdminDeviceController::class, 'report'])
+            ->name('auth.device.report');
+
+        // Consulter les règles strictes de complexité des mots de passe (12 caractères min.)
+        Route::get('/password/policy', [AdminAuthController::class, 'passwordPolicy'])
+            ->name('auth.password.policy');
+
+        // Soumettre une demande d'accès corporate opérateur (réservé aux adresses @bango.app)
+        Route::post('/access-requests', [AdminAccessRequestController::class, 'store'])
+            ->name('auth.access-requests.store');
+
+        // Consulter et vérifier la validité d'une invitation collaborateur reçue par lien
+        Route::get('/invitations/{token}', [AdminInvitationController::class, 'show'])
+            ->name('auth.invitations.show');
+
+        // Accepter une invitation interne et définir son mot de passe opérateur initial
+        Route::post('/invitations/{token}/accept', [AdminInvitationController::class, 'accept'])
+            ->name('auth.invitations.accept');
+
+        // Demander l'envoi d'un lien sécurisé de réinitialisation de mot de passe par email
+        Route::post('/password/forgot', [AdminPasswordResetController::class, 'forgot'])
+            ->name('auth.password.forgot');
+    });
+
+    // ----------------------------------------------------------------------
+    // 0.2 Réinitialisation de mot de passe opérateur
+    // ----------------------------------------------------------------------
+    // Afficher et vérifier les informations du formulaire de réinitialisation via son token
+    Route::get('/reset/{token}', [AdminPasswordResetController::class, 'showReset'])
+        ->name('password.reset.show');
+    // Valider et enregistrer le nouveau mot de passe avec le token dans l'URL
+    Route::post('/reset/{token}', [AdminPasswordResetController::class, 'reset'])
+        ->name('password.reset.submit');
+    // Valider et enregistrer le nouveau mot de passe avec le token dans le corps de requête
+    Route::post('/reset', [AdminPasswordResetController::class, 'reset'])
+        ->name('password.reset.post');
+
+    // ----------------------------------------------------------------------
+    // 0.3 Session administrative & Coque globale (Middleware: admin.session)
+    // ----------------------------------------------------------------------
+    Route::middleware(['admin.session'])->group(function () {
+        // Consulter la session active, l'opérateur connecté et ses permissions effectives
+        Route::get('/auth/session', [AdminAuthController::class, 'session'])
+            ->name('auth.session');
+
+        // Prolonger la session active (fenêtre glissante d'inactivité de 30 minutes)
+        Route::post('/auth/session/touch', [AdminAuthController::class, 'touch'])
+            ->name('auth.session.touch');
+
+        // Déconnecter l'opérateur, révoquer la session en base et purger les cookies sécurisés
+        Route::post('/auth/logout', [AdminAuthController::class, 'logout'])
+            ->name('auth.logout');
+
+        // Obtenir les compteurs KPI globaux en temps réel (utilisateurs, abonnements, tickets)
+        Route::get('/shell/counters', [AdminShellController::class, 'counters'])
+            ->name('shell.counters');
+
+        // Lister les pays couverts et opérationnels avec devises et opérateurs télécoms
+        Route::get('/shell/countries', [AdminShellController::class, 'countries'])
+            ->name('shell.countries');
+
+        // Consulter le flux des notifications internes destinées aux opérateurs
+        Route::get('/notifications', [AdminNotificationController::class, 'index'])
+            ->name('notifications.index');
+
+        // Marquer l'ensemble des notifications internes comme lues
+        Route::post('/notifications/read-all', [AdminNotificationController::class, 'readAll'])
+            ->name('notifications.read_all');
+
+        // Effectuer une recherche transverse rapide (⌘K) sur les entités de la plateforme
+        Route::get('/search', [AdminSearchController::class, 'search'])
+            ->name('search');
+
+        // Consulter l'espace de travail personnel de l'opérateur (tâches, assignations, raccourcis)
+        Route::get('/me/workspace', [AdminWorkspaceController::class, 'workspace'])
+            ->name('me.workspace');
+
+        // Consulter la file d'attente des demandes soumises à la validation au principe des 4 yeux
+        Route::get('/me/approvals', [AdminWorkspaceController::class, 'approvals'])
+            ->name('me.approvals');
+    });
+});
+
+// ==========================================================================
+// MODULES MÉTIERS DU BACK-OFFICE (Rôles, Utilisateurs, Catalogue, Paiements, etc.)
+// ==========================================================================
 Route::middleware(['auth:api', 'admin'])->group(function () {
 
-    // --------------------------------------------------------------------------
-    // ROLES
-    // --------------------------------------------------------------------------
+    // ----------------------------------------------------------------------
+    // MODULE 1 : RÔLES & PERMISSIONS
+    // ----------------------------------------------------------------------
     // CRUD complet (Créer, Lire, Mettre à jour, Supprimer) sur les Rôles du système
     Route::apiResource('roles', RoleController::class);
     // Lister tous les utilisateurs possédant un rôle spécifique
     Route::get('roles/{role}/users', [RoleController::class, 'users']);
 
-    // --------------------------------------------------------------------------
-    // USERS
-    // --------------------------------------------------------------------------
+    // ----------------------------------------------------------------------
+    // MODULE 2 : GESTION DES UTILISATEURS
+    // ----------------------------------------------------------------------
     Route::prefix('users')->group(function () {
         // Lister tous les utilisateurs (avec filtres, tris et pagination)
         Route::get('/', [UserController::class, 'index']);
@@ -1189,9 +1335,9 @@ Route::middleware(['auth:api', 'admin'])->group(function () {
         Route::delete('/{user}/sessions/{session}', [UserController::class, 'revokeSession']);
     });
 
-    // --------------------------------------------------------------------------
-    // GEO (CRUD — l'index/show est public, voir section COMMUN)
-    // --------------------------------------------------------------------------
+    // ----------------------------------------------------------------------
+    // MODULE 3 : GESTION GÉOGRAPHIQUE (CRUD — l'index/show public est dans COMMUN)
+    // ----------------------------------------------------------------------
     Route::prefix('geo')->group(function () {
         // Créer, modifier ou supprimer un Pays
         Route::apiResource('countries', CountryController::class)->except(['index', 'show']);
@@ -1205,9 +1351,9 @@ Route::middleware(['auth:api', 'admin'])->group(function () {
         Route::apiResource('operators', OperatorController::class)->except(['index', 'show']);
     });
 
-    // --------------------------------------------------------------------------
-    // SUB CATALOG (Administration des offres & tarifs)
-    // --------------------------------------------------------------------------
+    // ----------------------------------------------------------------------
+    // MODULE 4 : CATALOGUE D'ABONNEMENTS & TARIFS
+    // ----------------------------------------------------------------------
     Route::prefix('admin/catalog')->group(function () {
         // Lister tous les produits d'abonnement du catalogue (actifs et archivés)
         Route::get('/products', [SubscriptionCatalogController::class, 'index']);
@@ -1223,9 +1369,9 @@ Route::middleware(['auth:api', 'admin'])->group(function () {
         Route::put('/prices/{priceId}', [SubscriptionCatalogController::class, 'updatePrice']);
     });
 
-    // --------------------------------------------------------------------------
-    // SUBSCRIPTIONS & BADGES (Supervision & Support)
-    // --------------------------------------------------------------------------
+    // ----------------------------------------------------------------------
+    // MODULE 5 : ABONNEMENTS & BADGES (Supervision & Support)
+    // ----------------------------------------------------------------------
     Route::prefix('admin/subscriptions')->group(function () {
         // Lister et filtrer tous les abonnements de la plateforme
         Route::get('/', [SubscriptionManagementController::class, 'index']);
@@ -1244,9 +1390,9 @@ Route::middleware(['auth:api', 'admin'])->group(function () {
     // Journal d'audit global des attributions et modifications de badges
     Route::get('admin/badges/history', [SubscriptionManagementController::class, 'badgeHistories']);
 
-    // --------------------------------------------------------------------------
-    // PAY MODULE - BACK-OFFICE (Supervision, Audits, Litiges, Remboursements)
-    // --------------------------------------------------------------------------
+    // ----------------------------------------------------------------------
+    // MODULE 6 : MODULE PAIEMENT (Supervision, Audits, Litiges, Remboursements)
+    // ----------------------------------------------------------------------
     Route::prefix('admin/payments')->group(function () {
         // Transactions : Supervision, recherche et détail
         // Lister et filtrer toutes les transactions de paiement de la plateforme
@@ -1277,9 +1423,9 @@ Route::middleware(['auth:api', 'admin'])->group(function () {
         Route::post('/double-charge-claims', [AdminPaymentController::class, 'createDoubleChargeClaim']);
     });
 
-    // --------------------------------------------------------------------------
-    // REELS SOUND CATALOG (Administration & alimentation réelle du catalogue audio)
-    // --------------------------------------------------------------------------
+    // ----------------------------------------------------------------------
+    // MODULE 7 : REELS SOUND CATALOG (Administration du catalogue audio)
+    // ----------------------------------------------------------------------
     Route::prefix('admin/sounds')->group(function () {
         // Lister tous les sons du catalogue audio (actifs, inactifs, supprimés)
         Route::get('/', [AdminSoundCatalogController::class, 'index'])->name('api.admin.sounds.index');
@@ -1301,24 +1447,33 @@ Route::middleware(['auth:api', 'admin'])->group(function () {
         Route::delete('/{id}/force', [AdminSoundCatalogController::class, 'destroy'])->name('api.admin.sounds.destroy');
     });
 
-    // --------------------------------------------------------------------------
-    // MODULE 12 : PG — PAGES PROFESSIONNELLES (Administration des Pages & Instruction des Certifications)
-    // --------------------------------------------------------------------------
+    // ----------------------------------------------------------------------
+    // MODULE 8 : PAGES PROFESSIONNELLES & CERTIFICATIONS (Module 12 PG)
+    // ----------------------------------------------------------------------
     Route::prefix('admin/pages')->group(function () {
+        // Lister et filtrer les demandes de certification de pages en attente d'instruction
         Route::get('/certifications', [PageCertificationAdminController::class, 'index'])->name('api.admin.pages.certifications.index');
+        // Rendre une décision formelle sur une demande de certification (approuver ou rejeter)
         Route::post('/certifications/{certification}/decide', [PageCertificationAdminController::class, 'decide'])->name('api.admin.pages.certifications.decide');
+        // Suspendre ou retirer administrativement le badge de certification d'une page
         Route::post('/{page}/suspend-certification', [PageCertificationAdminController::class, 'suspendCertification'])->name('api.admin.pages.suspend_certification');
+        // Suspendre une page professionnelle (masquage public immédiat sur l'application)
         Route::post('/{page}/suspend', [PageCertificationAdminController::class, 'suspendPage'])->name('api.admin.pages.suspend');
+        // Lever la suspension d'une page professionnelle et rétablir son affichage public
         Route::post('/{page}/unsuspend', [PageCertificationAdminController::class, 'unsuspendPage'])->name('api.admin.pages.unsuspend');
     });
 
-    // --------------------------------------------------------------------------
-    // MODULE 18 : SUP — ADMINISTRATION DE LA BILLETTERIE SUPPORT
-    // --------------------------------------------------------------------------
+    // ----------------------------------------------------------------------
+    // MODULE 9 : BILLETTERIE SUPPORT CLIENT (Module 18 SUP)
+    // ----------------------------------------------------------------------
     Route::prefix('admin/support/tickets')->group(function () {
+        // Lister et filtrer l'ensemble des tickets support (statut, priorité, catégorie)
         Route::get('/', [AdminSupportTicketController::class, 'index'])->name('api.admin.support.tickets.index');
+        // Modifier le statut de traitement d'un ticket (en cours, résolu, fermé)
         Route::patch('/{id}/status', [AdminSupportTicketController::class, 'updateStatus'])->name('api.admin.support.tickets.status');
+        // Assigner ou réaffecter un ticket support à un agent de l'équipe
         Route::patch('/{id}/assign', [AdminSupportTicketController::class, 'assign'])->name('api.admin.support.tickets.assign');
+        // Répondre publiquement à l'utilisateur ou consigner une note interne d'investigation
         Route::post('/{id}/messages', [AdminSupportTicketController::class, 'reply'])->name('api.admin.support.tickets.reply');
     });
 });
