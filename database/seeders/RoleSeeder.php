@@ -96,5 +96,18 @@ class RoleSeeder extends Seeder
                 ]
             );
         }
+
+        $financeRole = Role::where('slug', 'finance')->first();
+        if ($financeRole) {
+            User::firstOrCreate(
+                ['email' => 'aminata.traore@bango.app'],
+                [
+                    'name' => 'Aminata Traoré',
+                    'password' => bcrypt('AdminPassword123!'),
+                    'role_id' => $financeRole->id,
+                    'status' => 'active',
+                ]
+            );
+        }
     }
 }
