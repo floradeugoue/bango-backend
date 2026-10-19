@@ -2,6 +2,7 @@
 
 use App\Enums\Boost\CreditTransactionType;
 use App\Exceptions\Boost\InsufficientCreditException;
+use App\Models\Auth\Role;
 use App\Models\Boost\Campaign;
 use App\Models\Boost\CreditTransaction;
 use App\Models\User;
@@ -82,16 +83,52 @@ test('GET /api/boost/wallet/transactions retourne l\'historique paginé du grand
         ->and((float) $response->json('data.0.balance_after'))->toBe(12000.0);
 });
 
-test('POST /api/boost/wallet/deposit recharge le portefeuille et enregistre l\'écriture', function () {
+test('POST /api/boost/wallet/deposit est strictement interdit aux utilisateurs standards', function () {
     Passport::actingAs($this->user);
 
     $response = $this->postJson('/api/boost/wallet/deposit', [
         'amount' => 15000,
-        'description' => 'Recharge test',
+        'description' => 'Tentative recharge gratuite',
         'idempotency_key' => 'dep_unique_12345',
     ]);
 
-    $response->assertStatus(201)
+    $response->assertStatus(403)
+        ->assertJson([
+            'code' => 'DIRECT_DEPOSIT_FORBIDDEN',
+        ]);
+
+    expect($this->walletService->getBalance($this->user))->toBe(0.0);
+});
+
+test('POST /api/boost/wallet/deposit autorise uniquement un opérateur avec motif valide et journalise', function () {
+    $operatorRole = Role::firstOrCreate(
+        ['slug' => 'admin'],
+        ['name' => 'Admin', 'permissions' => []]
+    );
+    $operator = User::factory()->create([
+        'role_id' => $operatorRole->id,
+        'status' => 'active',
+    ]);
+
+    Passport::actingAs($operator);
+
+    // 1. Rejet si motif absent ou trop court
+    $invalidResponse = $this->postJson('/api/boost/wallet/deposit', [
+        'amount' => 15000,
+        'user_id' => $this->user->id,
+        'reason' => 'abc',
+    ]);
+    $invalidResponse->assertStatus(422);
+
+    // 2. Dépôt réussi avec motif par l'opérateur
+    $validResponse = $this->postJson('/api/boost/wallet/deposit', [
+        'amount' => 15000,
+        'user_id' => $this->user->id,
+        'reason' => 'Geste commercial suite à un incident réseau',
+        'idempotency_key' => 'dep_unique_12345',
+    ]);
+
+    $validResponse->assertStatus(201)
         ->assertJsonPath('data.amount', 15000)
         ->assertJsonPath('data.balance_before', 0)
         ->assertJsonPath('data.balance_after', 15000);

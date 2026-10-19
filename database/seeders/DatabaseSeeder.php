@@ -24,15 +24,17 @@ class DatabaseSeeder extends Seeder
             SoundSeeder::class,
         ]);
 
-        $adminRole = Role::where('slug', 'admin')->first();
+        if (app()->environment('local', 'testing')) {
+            $adminRole = Role::where('slug', 'admin')->first();
 
-        User::firstOrCreate(
-            ['email' => 'test@example.com'],
-            [
-                'name' => 'Test User',
-                'password' => bcrypt('password'),
-                'role_id' => $adminRole?->id,
-            ]
-        );
+            User::firstOrCreate(
+                ['email' => 'test@example.com'],
+                [
+                    'name' => 'Test User',
+                    'password' => bcrypt('password'),
+                    'role_id' => $adminRole?->id,
+                ]
+            );
+        }
     }
 }

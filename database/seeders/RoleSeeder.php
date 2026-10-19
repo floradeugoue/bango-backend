@@ -71,69 +71,71 @@ class RoleSeeder extends Seeder
             );
         }
 
-        $moderationRole = Role::where('slug', 'moderation')->first();
-        if ($moderationRole) {
-            User::firstOrCreate(
-                ['email' => 'fatou.diop@bango.app'],
-                [
-                    'name' => 'Fatou Diop',
-                    'password' => bcrypt('AdminPassword123!'),
-                    'role_id' => $moderationRole->id,
-                    'status' => 'active',
-                ]
-            );
-        }
+        if (app()->environment('local', 'testing')) {
+            $moderationRole = Role::where('slug', 'moderation')->first();
+            if ($moderationRole) {
+                User::firstOrCreate(
+                    ['email' => 'fatou.diop@bango.app'],
+                    [
+                        'name' => 'Fatou Diop',
+                        'password' => bcrypt('AdminPassword123!'),
+                        'role_id' => $moderationRole->id,
+                        'status' => 'active',
+                    ]
+                );
+            }
 
-        $verificationRole = Role::where('slug', 'verification')->first();
-        if ($verificationRole) {
-            User::firstOrCreate(
-                ['email' => 'solange.bikoi@bango.app'],
-                [
-                    'name' => 'Solange Bikoi',
-                    'password' => bcrypt('AdminPassword123!'),
-                    'role_id' => $verificationRole->id,
-                    'status' => 'active',
-                ]
-            );
-        }
+            $verificationRole = Role::where('slug', 'verification')->first();
+            if ($verificationRole) {
+                User::firstOrCreate(
+                    ['email' => 'solange.bikoi@bango.app'],
+                    [
+                        'name' => 'Solange Bikoi',
+                        'password' => bcrypt('AdminPassword123!'),
+                        'role_id' => $verificationRole->id,
+                        'status' => 'active',
+                    ]
+                );
+            }
 
-        $financeRole = Role::where('slug', 'finance')->first();
-        if ($financeRole) {
-            User::firstOrCreate(
-                ['email' => 'aminata.traore@bango.app'],
-                [
-                    'name' => 'Aminata Traoré',
-                    'password' => bcrypt('AdminPassword123!'),
-                    'role_id' => $financeRole->id,
-                    'status' => 'active',
-                ]
-            );
-        }
+            $financeRole = Role::where('slug', 'finance')->first();
+            if ($financeRole) {
+                User::firstOrCreate(
+                    ['email' => 'aminata.traore@bango.app'],
+                    [
+                        'name' => 'Aminata Traoré',
+                        'password' => bcrypt('AdminPassword123!'),
+                        'role_id' => $financeRole->id,
+                        'status' => 'active',
+                    ]
+                );
+            }
 
-        $supportRole = Role::where('slug', 'support')->first();
-        if ($supportRole) {
-            User::firstOrCreate(
-                ['email' => 'jean-marc.kouassi@bango.app'],
-                [
-                    'name' => 'Jean-Marc Kouassi',
-                    'password' => bcrypt('AdminPassword123!'),
-                    'role_id' => $supportRole->id,
-                    'status' => 'active',
-                ]
-            );
-        }
+            $supportRole = Role::where('slug', 'support')->first();
+            if ($supportRole) {
+                User::firstOrCreate(
+                    ['email' => 'jean-marc.kouassi@bango.app'],
+                    [
+                        'name' => 'Jean-Marc Kouassi',
+                        'password' => bcrypt('AdminPassword123!'),
+                        'role_id' => $supportRole->id,
+                        'status' => 'active',
+                    ]
+                );
+            }
 
-        $directionRole = Role::where('slug', 'direction')->first();
-        if ($directionRole) {
-            User::firstOrCreate(
-                ['email' => 'ousmane.ba@bango.app'],
-                [
-                    'name' => 'Ousmane Bâ',
-                    'password' => bcrypt('AdminPassword123!'),
-                    'role_id' => $directionRole->id,
-                    'status' => 'active',
-                ]
-            );
+            $directionRole = Role::where('slug', 'direction')->first();
+            if ($directionRole) {
+                User::firstOrCreate(
+                    ['email' => 'ousmane.ba@bango.app'],
+                    [
+                        'name' => 'Ousmane Bâ',
+                        'password' => bcrypt('AdminPassword123!'),
+                        'role_id' => $directionRole->id,
+                        'status' => 'active',
+                    ]
+                );
+            }
         }
     }
 }

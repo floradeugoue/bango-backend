@@ -177,7 +177,7 @@ class AdminAuthService
         $user = $challenge->user;
 
         // Vérification du code TOTP
-        $isValid = $this->verifyTotpOrTestFallback($user, $code);
+        $isValid = $this->verifyTotp($user, $code);
 
         if (! $isValid) {
             $attempts = $challenge->incrementAttempts();
@@ -377,23 +377,18 @@ class AdminAuthService
     }
 
     /**
-     * Vérification TOTP avec prise en charge sécurisée des configurations de test.
+     * Vérification cryptographique TOTP ou code de secours.
      */
-    protected function verifyTotpOrTestFallback(User $user, string $code): bool
+    protected function verifyTotp(User $user, string $code): bool
     {
         // 1. Si l'utilisateur possède un secret TOTP configuré
         if (! empty($user->two_factor_secret)) {
             return $this->totpService->verifyUser($user, $code);
         }
 
-        // 2. Si le secret n'est pas encore activé, vérification avec code de secours si configuré
+        // 2. Vérification avec code de secours si configuré
         if (! empty($user->backup_codes) && is_array($user->backup_codes)) {
             return $this->backupCodeService->verifyAndConsume($user, $code);
-        }
-
-        // 3. Pour un nouvel opérateur sans secret généré en environnement de test ou initial
-        if (app()->environment('testing', 'local') && $code === '123456') {
-            return true;
         }
 
         return false;

@@ -4,8 +4,10 @@ use App\Models\Admin\AdminChallenge;
 use App\Models\Auth\Role;
 use App\Models\User;
 use App\Services\Auth\BackupCodeService;
+use App\Services\Auth\TotpService;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Hash;
 
 uses(RefreshDatabase::class);
@@ -137,10 +139,25 @@ it('validates 2FA and establishes authenticated session with HttpOnly and CSRF c
 
     $challengeToken = $loginResponse->json('challenge_token');
 
-    // Validation 2FA (123456 est accepté comme fallback en environnement de test si secret non initialisé)
-    $verifyResponse = $this->postJson('/api/admin/auth/2fa/verify', [
+    // Configure un vrai secret TOTP sur le compte opérateur
+    $totpService = app(TotpService::class);
+    $rawSecret = $totpService->generateSecret();
+    $operator->two_factor_secret = Crypt::encryptString($rawSecret);
+    $operator->save();
+
+    // 1. Vérifie qu'un code fictif comme '123456' est immédiatement rejeté
+    $fakeCodeResponse = $this->postJson('/api/admin/auth/2fa/verify', [
         'challenge_token' => $challengeToken,
         'code' => '123456',
+    ]);
+    $fakeCodeResponse->assertStatus(422);
+
+    // 2. Validation 2FA avec le vrai code TOTP calculé cryptographiquement
+    $validCode = $totpService->calculateTotpForStep($rawSecret, (int) floor(time() / 30));
+
+    $verifyResponse = $this->postJson('/api/admin/auth/2fa/verify', [
+        'challenge_token' => $challengeToken,
+        'code' => $validCode,
     ]);
 
     $verifyResponse->assertStatus(200)
@@ -161,7 +178,7 @@ it('validates 2FA and establishes authenticated session with HttpOnly and CSRF c
     // Vérifie qu'une seconde utilisation du même challenge est rejetée
     $replayResponse = $this->postJson('/api/admin/auth/2fa/verify', [
         'challenge_token' => $challengeToken,
-        'code' => '123456',
+        'code' => $validCode,
     ]);
     $replayResponse->assertStatus(400);
 });
