@@ -42,9 +42,12 @@ class EnsureAdminSession
             $sessionId = $rawCookie;
         }
 
+        $hashedSessionId = hash('sha256', $sessionId);
+
         // 2. Recherche et vérification de la session en base de données
         /** @var AdminSession|null $adminSession */
-        $adminSession = AdminSession::with('user.role')->find($sessionId);
+        $adminSession = AdminSession::with('user.role')->find($hashedSessionId)
+            ?? AdminSession::with('user.role')->find($sessionId);
 
         if (! $adminSession) {
             return response()->json([
@@ -69,16 +72,33 @@ class EnsureAdminSession
         // 5. Vérification du compte opérateur
         $user = $adminSession->user;
 
-        if (! $user || $user->trashed()) {
+        if (! $user || $user->trashed() || ($user->status ?? null) === 'deleted') {
             return response()->json([
                 'message' => 'Compte opérateur introuvable ou supprimé.',
+                'code' => 'ACCOUNT_DELETED',
             ], 401);
+        }
+
+        if ($user->isBlocked()) {
+            return response()->json([
+                'message' => 'Compte opérateur bloqué.',
+                'code' => 'ACCOUNT_BLOCKED',
+            ], 403);
         }
 
         if ($user->isSuspended()) {
             return response()->json([
                 'message' => 'Compte opérateur actuellement suspendu.',
+                'code' => 'ACCOUNT_SUSPENDED',
             ], 403);
+        }
+
+        if ($user->isLocked()) {
+            return response()->json([
+                'message' => 'Compte opérateur temporairement verrouillé suite à plusieurs tentatives infructueuses.',
+                'code' => 'account_locked',
+                'locked_until' => $user->locked_until?->toIso8601String(),
+            ], 423);
         }
 
         if (! $user->isInternalOperator()) {

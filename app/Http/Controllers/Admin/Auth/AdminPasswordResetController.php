@@ -42,18 +42,19 @@ class AdminPasswordResetController extends Controller
             'message' => 'Si cette adresse correspond à un compte opérateur actif, les instructions de réinitialisation ont été transmises.',
         ], 200);
 
-        if (! $user || ! $user->isInternalOperator() || $user->isSuspended() || $user->trashed()) {
+        if (! $user || ! $user->isInternalOperator() || $user->isSuspended() || $user->isBlocked() || $user->trashed() || ($user->status ?? null) === 'deleted') {
             return $genericResponse;
         }
 
         // Génération d'un token cryptographique unique de 64 caractères
-        $token = bin2hex(random_bytes(32));
+        $rawToken = bin2hex(random_bytes(32));
+        $hashedToken = hash('sha256', $rawToken);
 
-        // Remplacement atomique de l'ancien token pour cet email
+        // Remplacement atomique de l'ancien token pour cet email (stockage du SHA-256 uniquement)
         DB::table('password_reset_tokens')->where('email', $email)->delete();
         DB::table('password_reset_tokens')->insert([
             'email' => $email,
-            'token' => $token,
+            'token' => $hashedToken,
             'created_at' => Carbon::now(),
         ]);
 
@@ -68,7 +69,10 @@ class AdminPasswordResetController extends Controller
      */
     public function showReset(string $token): JsonResponse
     {
-        $record = DB::table('password_reset_tokens')->where('token', $token)->first();
+        $record = DB::table('password_reset_tokens')
+            ->where('token', hash('sha256', $token))
+            ->orWhere('token', $token)
+            ->first();
 
         if (! $record) {
             return response()->json([
@@ -79,7 +83,7 @@ class AdminPasswordResetController extends Controller
 
         $createdAt = Carbon::parse($record->created_at);
         if ($createdAt->addMinutes(60)->isPast()) {
-            DB::table('password_reset_tokens')->where('token', $token)->delete();
+            DB::table('password_reset_tokens')->where('email', $record->email)->delete();
 
             return response()->json([
                 'message' => 'Ce lien de réinitialisation a expiré.',
@@ -106,7 +110,10 @@ class AdminPasswordResetController extends Controller
         }
 
         return DB::transaction(function () use ($request, $activeToken) {
-            $record = DB::table('password_reset_tokens')->where('token', $activeToken)->first();
+            $record = DB::table('password_reset_tokens')
+                ->where('token', hash('sha256', $activeToken))
+                ->orWhere('token', $activeToken)
+                ->first();
 
             if (! $record) {
                 return response()->json([
@@ -116,7 +123,7 @@ class AdminPasswordResetController extends Controller
 
             $createdAt = Carbon::parse($record->created_at);
             if ($createdAt->addMinutes(60)->isPast()) {
-                DB::table('password_reset_tokens')->where('token', $activeToken)->delete();
+                DB::table('password_reset_tokens')->where('email', $record->email)->delete();
 
                 return response()->json([
                     'message' => 'Ce lien de réinitialisation a expiré.',
@@ -135,7 +142,7 @@ class AdminPasswordResetController extends Controller
             ]);
 
             // Consommation atomique du token (usage unique)
-            DB::table('password_reset_tokens')->where('token', $activeToken)->delete();
+            DB::table('password_reset_tokens')->where('email', $record->email)->delete();
 
             // Invalidation obligatoire de toutes les sessions actives de l'opérateur pour empêcher tout détournement
             AdminSession::where('user_id', $user->id)->update(['revoked_at' => now()]);

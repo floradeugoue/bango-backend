@@ -11,6 +11,7 @@ use App\Services\Auth\BackupCodeService;
 use App\Services\Auth\TotpService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\RateLimiter;
 use Symfony\Component\HttpFoundation\Cookie;
@@ -32,7 +33,8 @@ class AdminAuthService
         $operatorInfo = null;
 
         if ($sessionId) {
-            $session = AdminSession::with('user.role')->find($sessionId);
+            $session = AdminSession::with('user.role')->find(hash('sha256', $sessionId))
+                ?? AdminSession::with('user.role')->find($sessionId);
             if ($session && ! $session->isRevoked() && ! $session->isExpired()) {
                 $hasActiveSession = true;
                 $operatorInfo = [
@@ -89,7 +91,7 @@ class AdminAuthService
             ], 429);
         }
 
-        $user = User::where('email', strtolower(trim($email)))->first();
+        $user = User::withTrashed()->where('email', strtolower(trim($email)))->first();
 
         // Protection anti-énumération : vérification timing-safe du mot de passe même si utilisateur inexistant
         if (! $user || ! Hash::check($password, $user->password)) {
@@ -106,9 +108,29 @@ class AdminAuthService
         }
 
         // Vérification de l'état du compte
-        if ($user->trashed()) {
+        if ($user->isLocked()) {
+            AdminAuditLog::logEvent('auth.login.locked', $user, $request->ip(), $request->userAgent());
+
+            return response()->json([
+                'message' => 'Ce compte est temporairement verrouillé suite à plusieurs tentatives 2FA infructueuses.',
+                'code' => 'account_locked',
+                'locked_until' => $user->locked_until?->toIso8601String(),
+            ], 423);
+        }
+
+        if ($user->trashed() || ($user->status ?? null) === 'deleted') {
             return response()->json([
                 'message' => 'Ce compte opérateur a été désactivé.',
+                'code' => 'ACCOUNT_DELETED',
+            ], 403);
+        }
+
+        if ($user->isBlocked()) {
+            AdminAuditLog::logEvent('auth.login.blocked_account', $user, $request->ip(), $request->userAgent());
+
+            return response()->json([
+                'message' => 'Ce compte opérateur est bloqué.',
+                'code' => 'ACCOUNT_BLOCKED',
             ], 403);
         }
 
@@ -117,6 +139,7 @@ class AdminAuthService
 
             return response()->json([
                 'message' => 'Ce compte opérateur est temporairement suspendu.',
+                'code' => 'ACCOUNT_SUSPENDED',
                 'suspension_reason' => $user->suspension_reason,
             ], 403);
         }
@@ -167,6 +190,14 @@ class AdminAuthService
         /** @var AdminChallenge|null $challenge */
         $challenge = AdminChallenge::with('user.role')->where('token', $challengeToken)->first();
 
+        if ($challenge && $challenge->user && $challenge->user->isLocked()) {
+            return response()->json([
+                'message' => 'Compte verrouillé suite à 5 tentatives 2FA infructueuses.',
+                'code' => 'account_locked',
+                'locked_until' => $challenge->user->locked_until?->toIso8601String(),
+            ], 423);
+        }
+
         if (! $challenge || ! $challenge->isValid()) {
             return response()->json([
                 'message' => 'Le challenge 2FA est invalide, expiré ou a dépassé le nombre maximal de tentatives.',
@@ -176,25 +207,23 @@ class AdminAuthService
 
         $user = $challenge->user;
 
+        if ($user->isBlocked() || $user->trashed() || ($user->status ?? null) === 'deleted') {
+            return response()->json([
+                'message' => 'Ce compte opérateur n\'est plus autorisé à se connecter.',
+                'code' => 'ACCOUNT_BLOCKED',
+            ], 403);
+        }
+
         // Vérification du code TOTP
         $isValid = $this->verifyTotp($user, $code);
 
         if (! $isValid) {
-            $attempts = $challenge->incrementAttempts();
-            $remaining = max(0, 5 - $attempts);
-
-            AdminAuditLog::logEvent('auth.2fa.failed', $user, $request->ip(), $request->userAgent(), [
-                'attempts' => $attempts,
-            ]);
-
-            return response()->json([
-                'message' => "Code de vérification 2FA invalide. Tentatives restantes : {$remaining}.",
-                'remaining_attempts' => $remaining,
-            ], 422);
+            return $this->handleFailed2faAttempt($user, $challenge, $request, 'auth.2fa.failed');
         }
 
-        // Invalidation atomique du challenge
+        // Invalidation atomique du challenge et réinitialisation du compteur de verrouillage
         $challenge->markUsed();
+        Cache::forget("admin_2fa_failed_attempts:{$user->id}");
 
         // Établissement de la session administrative sécurisée
         return $this->establishSession($user, $request);
@@ -208,6 +237,14 @@ class AdminAuthService
         /** @var AdminChallenge|null $challenge */
         $challenge = AdminChallenge::with('user.role')->where('token', $challengeToken)->first();
 
+        if ($challenge && $challenge->user && $challenge->user->isLocked()) {
+            return response()->json([
+                'message' => 'Compte verrouillé suite à 5 tentatives 2FA infructueuses.',
+                'code' => 'account_locked',
+                'locked_until' => $challenge->user->locked_until?->toIso8601String(),
+            ], 423);
+        }
+
         if (! $challenge || ! $challenge->isValid()) {
             return response()->json([
                 'message' => 'Le challenge 2FA est invalide ou expiré.',
@@ -217,25 +254,72 @@ class AdminAuthService
 
         $user = $challenge->user;
 
+        if ($user->isBlocked() || $user->trashed() || ($user->status ?? null) === 'deleted') {
+            return response()->json([
+                'message' => 'Ce compte opérateur n\'est plus autorisé à se connecter.',
+                'code' => 'ACCOUNT_BLOCKED',
+            ], 403);
+        }
+
         // Consommation atomique protégée contre les accès concurrents
         $consumed = $this->backupCodeService->verifyAndConsume($user, $recoveryCode);
 
         if (! $consumed) {
-            $attempts = $challenge->incrementAttempts();
-
-            AdminAuditLog::logEvent('auth.recovery.failed', $user, $request->ip(), $request->userAgent());
-
-            return response()->json([
-                'message' => 'Code de secours invalide ou déjà utilisé.',
-            ], 422);
+            return $this->handleFailed2faAttempt($user, $challenge, $request, 'auth.recovery.failed');
         }
 
-        // Invalidation atomique du challenge
+        // Invalidation atomique du challenge et réinitialisation du compteur de verrouillage
         $challenge->markUsed();
+        Cache::forget("admin_2fa_failed_attempts:{$user->id}");
 
         AdminAuditLog::logEvent('auth.recovery.success', $user, $request->ip(), $request->userAgent());
 
         return $this->establishSession($user, $request, isRecovery: true);
+    }
+
+    /**
+     * Gestion centralisée des échecs 2FA avec verrouillage par compte après 5 échecs toutes sessions confondues.
+     */
+    protected function handleFailed2faAttempt(User $user, AdminChallenge $challenge, Request $request, string $eventType): JsonResponse
+    {
+        $challengeAttempts = $challenge->incrementAttempts();
+        $cacheKey = "admin_2fa_failed_attempts:{$user->id}";
+        $totalFailed = Cache::increment($cacheKey);
+        if ($totalFailed === 1) {
+            Cache::put($cacheKey, 1, now()->addHours(1));
+        }
+
+        if ($totalFailed >= 5) {
+            $user->update([
+                'locked_until' => now()->addMinutes(30),
+            ]);
+            Cache::forget($cacheKey);
+            AdminChallenge::where('user_id', $user->id)->update(['expires_at' => now()]);
+
+            AdminAuditLog::logEvent('auth.2fa.account_locked', $user, $request->ip(), $request->userAgent(), [
+                'failed_attempts' => $totalFailed,
+                'locked_until' => $user->locked_until?->toIso8601String(),
+            ]);
+
+            return response()->json([
+                'message' => 'Compte verrouillé suite à 5 tentatives 2FA infructueuses.',
+                'code' => 'account_locked',
+                'locked_until' => $user->locked_until?->toIso8601String(),
+            ], 423);
+        }
+
+        $remaining = max(0, 5 - $totalFailed);
+
+        AdminAuditLog::logEvent($eventType, $user, $request->ip(), $request->userAgent(), [
+            'challenge_attempts' => $challengeAttempts,
+            'total_failed' => $totalFailed,
+            'remaining' => $remaining,
+        ]);
+
+        return response()->json([
+            'message' => "Code de vérification 2FA invalide. Tentatives restantes : {$remaining}.",
+            'remaining_attempts' => $remaining,
+        ], 422);
     }
 
     /**
@@ -244,12 +328,13 @@ class AdminAuthService
     public function establishSession(User $user, Request $request, bool $isRecovery = false): JsonResponse
     {
         // 1. Génération cryptographique aléatoire de l'ID de session et du jeton CSRF
-        $sessionId = bin2hex(random_bytes(32));
+        $rawSessionId = bin2hex(random_bytes(32));
+        $hashedSessionId = hash('sha256', $rawSessionId);
         $csrfToken = bin2hex(random_bytes(32));
 
-        // 2. Création de la session en base de données
+        // 2. Création de la session en base de données avec le hash SHA-256 (aucun secret en clair en base)
         $session = AdminSession::create([
-            'id' => $sessionId,
+            'id' => $hashedSessionId,
             'user_id' => $user->id,
             'csrf_token' => $csrfToken,
             'ip_address' => $request->ip(),
@@ -274,10 +359,10 @@ class AdminAuthService
         // 4. Configuration des cookies
         $isSecure = config('session.secure', false) || app()->environment('production');
 
-        // Cookie HttpOnly de session (valeur JAMAIS exposée dans le JSON)
+        // Cookie HttpOnly de session (valeur RAW transmise au navigateur, jamais le hash)
         $sessionCookie = cookie(
             name: 'bango_admin_session',
-            value: $sessionId,
+            value: $rawSessionId,
             minutes: 720, // 12h max
             path: '/',
             domain: config('session.domain'),
@@ -358,7 +443,7 @@ class AdminAuthService
         if (! $session) {
             $sessionId = $request->cookie('bango_admin_session') ?? $request->bearerToken();
             if ($sessionId) {
-                $session = AdminSession::find($sessionId);
+                $session = AdminSession::find(hash('sha256', $sessionId)) ?? AdminSession::find($sessionId);
             }
         }
 

@@ -22,7 +22,7 @@ class AdminInvitationController extends Controller
     public function show(string $token): JsonResponse
     {
         /** @var AdminInvitation|null $invitation */
-        $invitation = AdminInvitation::where('token', $token)->first();
+        $invitation = AdminInvitation::findByToken($token);
 
         if (! $invitation || ! $invitation->isValid()) {
             return response()->json([
@@ -51,7 +51,10 @@ class AdminInvitationController extends Controller
     {
         return DB::transaction(function () use ($request, $token) {
             /** @var AdminInvitation|null $invitation */
-            $invitation = AdminInvitation::where('token', $token)->lockForUpdate()->first();
+            $invitation = AdminInvitation::where('token', hash('sha256', $token))
+                ->orWhere('token', $token)
+                ->lockForUpdate()
+                ->first();
 
             if (! $invitation || ! $invitation->isValid()) {
                 return response()->json([
@@ -70,6 +73,12 @@ class AdminInvitationController extends Controller
 
             // Création ou mise à jour de l'opérateur
             $user = User::where('email', $invitation->email)->first();
+
+            if ($user && ($user->isBlocked() || $user->trashed() || ($user->status ?? null) === 'deleted')) {
+                return response()->json([
+                    'message' => 'Ce compte opérateur est bloqué ou désactivé.',
+                ], 403);
+            }
 
             if (! $user) {
                 $baseHandle = explode('@', $invitation->email)[0];

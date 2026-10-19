@@ -214,6 +214,16 @@ class User extends Authenticatable
             || ($this->suspended_until !== null && $this->suspended_until->isFuture());
     }
 
+    public function isBlocked(): bool
+    {
+        return ($this->status ?? null) === 'blocked';
+    }
+
+    public function isLocked(): bool
+    {
+        return $this->locked_until !== null && $this->locked_until->isFuture();
+    }
+
     public function hasRole(string $roleSlug): bool
     {
         return $this->role?->slug === $roleSlug;
