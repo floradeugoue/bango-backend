@@ -7,6 +7,7 @@ use App\Models\Listing\Listing;
 use App\Services\Admin\AdminListingControlService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 
 class AdminListingControlController extends Controller
 {
@@ -175,7 +176,7 @@ class AdminListingControlController extends Controller
             'reason' => ['nullable', 'string', 'max:1000'],
         ]);
 
-        $listing = Listing::findOrFail($ref);
+        $listing = $this->findListing($ref);
 
         $updated = $this->listingService->review(
             listing: $listing,
@@ -232,7 +233,7 @@ class AdminListingControlController extends Controller
             'evidence' => ['nullable', 'array'],
         ]);
 
-        $listing = Listing::findOrFail($ref);
+        $listing = $this->findListing($ref);
 
         $certification = $this->listingService->certifyAgentVisit(
             listing: $listing,
@@ -266,7 +267,7 @@ class AdminListingControlController extends Controller
             'reason' => ['nullable', 'string', 'max:1000'],
         ]);
 
-        $listing = Listing::findOrFail($ref);
+        $listing = $this->findListing($ref);
 
         $updated = $this->listingService->unpublish(
             listing: $listing,
@@ -296,7 +297,7 @@ class AdminListingControlController extends Controller
             return response()->json(['message' => 'Référence d\'annonce obligatoire.'], 422);
         }
 
-        $listing = Listing::findOrFail($listingId);
+        $listing = $this->findListing($listingId);
 
         $updated = $this->listingService->republish(
             listing: $listing,
@@ -324,7 +325,7 @@ class AdminListingControlController extends Controller
             'reason' => ['nullable', 'string', 'max:1000'],
         ]);
 
-        $listing = Listing::findOrFail($ref);
+        $listing = $this->findListing($ref);
 
         $updated = $this->listingService->markAsRented(
             listing: $listing,
@@ -361,5 +362,15 @@ class AdminListingControlController extends Controller
             'data' => $markers,
             'count' => $markers->count(),
         ]);
+    }
+
+    /**
+     * Recherche sécurisée d'une annonce par UUID ou référence métier.
+     */
+    protected function findListing(string $ref): Listing
+    {
+        return Str::isUuid($ref)
+            ? Listing::where('id', $ref)->firstOrFail()
+            : Listing::where('reference', $ref)->firstOrFail();
     }
 }

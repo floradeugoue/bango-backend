@@ -2,22 +2,29 @@
 
 namespace App\Services\Admin;
 
+use App\Enums\Admin\AdminPermission;
 use App\Enums\Boost\CampaignStatus;
 use App\Enums\Boost\CreditTransactionType;
+use App\Enums\Listing\ListingStatus;
 use App\Enums\Support\ReportStatus;
 use App\Models\Admin\AdminAuditLog;
 use App\Models\Auth\Role;
 use App\Models\Boost\Campaign;
+use App\Models\Listing\Listing;
 use App\Models\Support\ModerationAppeal;
 use App\Models\Support\ModerationDecision;
 use App\Models\Support\Report;
+use App\Models\Support\UserAccountSanction;
 use App\Models\User;
+use App\Notifications\Support\ModerationDecisionNotification;
 use App\Services\Boost\CampaignService;
 use App\Services\Boost\CreditWalletService;
 use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
@@ -35,7 +42,7 @@ class ModerationQueueService
      */
     public function getQueue(array $filters, int $perPage = 20): array
     {
-        $query = Report::query()->with(['reporter:id,name,email,avatar', 'assignedOperator:id,name,email']);
+        $query = Report::query()->with(['reporter:id,name,email,avatar_url', 'assignedOperator:id,name,email']);
 
         // 1. Filtrage par onglet (tab)
         $tab = $filters['tab'] ?? 'all';
@@ -128,7 +135,7 @@ class ModerationQueueService
             ->where('reference', $ref)
             ->orWhere('id', is_numeric($ref) ? (int) $ref : 0)
             ->with([
-                'reporter:id,name,email,avatar,created_at',
+                'reporter:id,name,email,avatar_url,created_at',
                 'assignedOperator:id,name,email',
                 'escalatedOperator:id,name,email',
                 'resolver:id,name,email',
@@ -239,6 +246,12 @@ class ModerationQueueService
                 throw new InvalidArgumentException("Le dossier {$lockedReport->reference} a déjà été traité.");
             }
 
+            // Validation des actions admissibles selon le type de cible
+            $isTargetUser = in_array(strtolower($lockedReport->reportable_type), ['user', 'app\\models\\user', 'users', 'account'], true);
+            if ($isTargetUser && in_array($action, ['remove', 'hide'], true)) {
+                throw new InvalidArgumentException("L'action '{$action}' n'est pas applicable à un profil utilisateur. Utilisez la suspension d'auteur ou l'avertissement.");
+            }
+
             // 1. Résolution du contenu polymorphique
             $targetClass = Report::resolveReportableClass($lockedReport->reportable_type);
             $content = $targetClass ? $targetClass::find($lockedReport->reportable_id) : null;
@@ -253,38 +266,107 @@ class ModerationQueueService
             if ($content) {
                 switch ($action) {
                     case 'remove':
-                        // Soft delete si supporté
-                        if (method_exists($content, 'delete')) {
+                        // Soft delete si supporté (mais ne jamais supprimer un compte utilisateur via 'remove')
+                        if (! ($content instanceof User) && method_exists($content, 'delete')) {
                             $content->delete();
                         }
                         break;
 
                     case 'hide':
-                        if (isset($content->is_archived)) {
+                        if ($content instanceof Listing) {
+                            $content->status = ListingStatus::Draft;
+                            $content->rejection_reason = $justification;
+                            $content->save();
+                        } elseif (isset($content->is_archived)) {
                             $content->is_archived = true;
                             $content->save();
                         } elseif (isset($content->status)) {
-                            $content->status = 'suspended';
+                            $content->status = 'rejected';
                             $content->save();
                         }
                         break;
 
                     case 'suspend_author':
+                        $durationDays = (int) ($metadata['duration_days'] ?? 14);
+                        $suspendedUntil = now()->addDays($durationDays);
                         $authorId = $content->user_id ?? ($content instanceof User ? $content->id : null);
+
                         if ($authorId) {
                             $author = User::find($authorId);
                             if ($author) {
                                 $author->status = 'suspended';
+                                $author->suspended_from = now();
+                                $author->suspended_until = $suspendedUntil;
+                                $author->restricted_until = $suspendedUntil;
                                 $author->save();
+
+                                UserAccountSanction::create([
+                                    'user_id' => $author->id,
+                                    'operator_id' => $operator->id,
+                                    'type' => 'suspension',
+                                    'level' => 2,
+                                    'duration_days' => $durationDays,
+                                    'starts_at' => now(),
+                                    'ends_at' => $suspendedUntil,
+                                    'reason' => $justification,
+                                    'is_active' => true,
+                                    'metadata' => [
+                                        'report_reference' => $lockedReport->reference,
+                                        'target_type' => $lockedReport->reportable_type,
+                                        'target_id' => $lockedReport->reportable_id,
+                                    ],
+                                ]);
+
+                                try {
+                                    $author->notify(new ModerationDecisionNotification($lockedReport, 'suspend_author', $justification, $suspendedUntil));
+                                } catch (\Throwable $e) {
+                                    Log::warning('Échec notification suspension auteur : '.$e->getMessage());
+                                }
                             }
                         }
-                        if (method_exists($content, 'delete')) {
-                            $content->delete();
+
+                        // Si le contenu n'est pas le compte utilisateur lui-même, on masque ou retire le contenu
+                        if (! ($content instanceof User)) {
+                            if ($content instanceof Listing) {
+                                $content->status = ListingStatus::Draft;
+                                $content->rejection_reason = $justification;
+                                $content->save();
+                            } elseif (isset($content->is_archived)) {
+                                $content->is_archived = true;
+                                $content->save();
+                            } elseif (method_exists($content, 'delete')) {
+                                $content->delete();
+                            }
                         }
                         break;
 
                     case 'warn_author':
-                        // Enregistrement de l'avertissement
+                        $authorId = $content->user_id ?? ($content instanceof User ? $content->id : null);
+                        if ($authorId) {
+                            $author = User::find($authorId);
+                            if ($author) {
+                                UserAccountSanction::create([
+                                    'user_id' => $author->id,
+                                    'operator_id' => $operator->id,
+                                    'type' => 'warning',
+                                    'level' => 1,
+                                    'starts_at' => now(),
+                                    'reason' => $justification,
+                                    'is_active' => true,
+                                    'metadata' => [
+                                        'report_reference' => $lockedReport->reference,
+                                        'target_type' => $lockedReport->reportable_type,
+                                        'target_id' => $lockedReport->reportable_id,
+                                    ],
+                                ]);
+
+                                try {
+                                    $author->notify(new ModerationDecisionNotification($lockedReport, 'warn_author', $justification));
+                                } catch (\Throwable $e) {
+                                    Log::warning('Échec notification avertissement auteur : '.$e->getMessage());
+                                }
+                            }
+                        }
                         $decisionMetadata['warning_sent'] = true;
                         break;
 
@@ -427,7 +509,7 @@ class ModerationQueueService
                     $q->whereIn('status', [ReportStatus::Pending->value, ReportStatus::Investigating->value]);
                 },
             ])
-            ->get(['id', 'name', 'email', 'avatar', 'role_id']);
+            ->get(['id', 'name', 'email', 'avatar_url', 'role_id']);
     }
 
     /**
@@ -438,7 +520,18 @@ class ModerationQueueService
      */
     public function assignCases(array $caseRefs, int $operatorId, User $currentOperator): array
     {
-        $assignee = User::findOrFail($operatorId);
+        $assignee = User::with('role')->findOrFail($operatorId);
+
+        $isAuthorized = $assignee->isAdmin()
+            || in_array($assignee->role?->slug, ['moderation', 'admin', 'direction'], true)
+            || $assignee->hasPermission(AdminPermission::ModerationAction->value)
+            || $assignee->hasPermission(AdminPermission::ModerationView->value);
+
+        if (! $isAuthorized) {
+            throw ValidationException::withMessages([
+                'operator_id' => ["L'utilisateur sélectionné n'est pas un opérateur de modération habilité."],
+            ]);
+        }
 
         $assigned = [];
         foreach ($caseRefs as $ref) {
@@ -468,7 +561,18 @@ class ModerationQueueService
      */
     public function escalateCase(Report $report, int $seniorOperatorId, string $reason, User $currentOperator): Report
     {
-        $senior = User::findOrFail($seniorOperatorId);
+        $senior = User::with('role')->findOrFail($seniorOperatorId);
+
+        $isAuthorized = $senior->isAdmin()
+            || in_array($senior->role?->slug, ['direction', 'admin'], true)
+            || $senior->hasPermission(AdminPermission::ApprovalsAction->value)
+            || $senior->hasPermission(AdminPermission::ModerationAction->value);
+
+        if (! $isAuthorized) {
+            throw ValidationException::withMessages([
+                'senior_operator_id' => ["L'opérateur cible n'a pas les habilitations requises pour recevoir une escalade de modération."],
+            ]);
+        }
 
         $report->escalated_to = $senior->id;
         $report->escalation_reason = $reason;

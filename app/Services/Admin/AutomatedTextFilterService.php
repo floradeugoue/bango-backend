@@ -66,7 +66,7 @@ class AutomatedTextFilterService
      */
     public function getFilterLogs(array $filters, int $perPage = 20): LengthAwarePaginator
     {
-        $query = ModerationFilterLog::query()->with(['user:id,name,email,avatar']);
+        $query = ModerationFilterLog::query()->with(['user:id,name,email,avatar_url']);
 
         if (! empty($filters['category'])) {
             $query->where('category', $filters['category']);

@@ -1255,6 +1255,18 @@ Route::prefix('admin')->name('api.admin.')->group(function () {
         Route::post('/invitations/{token}/accept', [AdminInvitationController::class, 'accept'])
             ->name('auth.invitations.accept');
 
+        // Étape 1 : définition du mot de passe et génération du secret TOTP
+        Route::post('/invitations/{token}/password', [AdminInvitationController::class, 'password'])
+            ->name('auth.invitations.password');
+
+        // Étape 2 : validation du premier code TOTP et génération des 10 codes de secours
+        Route::post('/invitations/{token}/totp', [AdminInvitationController::class, 'totp'])
+            ->name('auth.invitations.totp');
+
+        // Étape 3 : finalisation de l'activation avec 2FA validé
+        Route::post('/invitations/{token}/complete', [AdminInvitationController::class, 'complete'])
+            ->name('auth.invitations.complete');
+
         // Demander l'envoi d'un lien sécurisé de réinitialisation de mot de passe par email
         Route::post('/password/forgot', [AdminPasswordResetController::class, 'forgot'])
             ->name('auth.password.forgot');
@@ -1316,6 +1328,28 @@ Route::prefix('admin')->name('api.admin.')->group(function () {
         // Consulter la file d'attente des demandes soumises à la validation au principe des 4 yeux
         Route::get('/me/approvals', [AdminWorkspaceController::class, 'approvals'])
             ->name('me.approvals');
+
+        // Gestion des demandes d'accès collaborateurs (Direction / Admins)
+        Route::get('/access-requests', [AdminAccessRequestController::class, 'index'])
+            ->middleware('admin.permission:operators:manage')
+            ->name('access_requests.index');
+
+        Route::post('/access-requests/{id}/approve', [AdminAccessRequestController::class, 'approve'])
+            ->middleware('admin.permission:operators:manage')
+            ->name('access_requests.approve');
+
+        Route::post('/access-requests/{id}/reject', [AdminAccessRequestController::class, 'reject'])
+            ->middleware('admin.permission:operators:manage')
+            ->name('access_requests.reject');
+
+        // Gestion des invitations collaborateurs (Direction / Admins)
+        Route::get('/invitations', [AdminInvitationController::class, 'index'])
+            ->middleware('admin.permission:operators:manage')
+            ->name('invitations.index');
+
+        Route::post('/invitations', [AdminInvitationController::class, 'store'])
+            ->middleware('admin.permission:operators:manage')
+            ->name('invitations.store');
 
         // ==================================================================
         // MODULE 0.4 : ESPACE MODÉRATION, SANCTIONS, RECOURS & DROITS D'AUTEUR (ÉTAPE 2)
@@ -2297,4 +2331,13 @@ Route::prefix('admin')->name('api.admin.')->group(function () {
         Route::get('/me/onboarding', [AdminDirectionDashboardController::class, 'onboarding'])
             ->name('me.onboarding');
     });
+});
+
+// Alias routes pour l'onboarding collaborateur (sans le préfixe /admin)
+Route::prefix('auth/invitations')->group(function () {
+    Route::get('/{token}', [AdminInvitationController::class, 'show']);
+    Route::post('/{token}/accept', [AdminInvitationController::class, 'accept']);
+    Route::post('/{token}/password', [AdminInvitationController::class, 'password']);
+    Route::post('/{token}/totp', [AdminInvitationController::class, 'totp']);
+    Route::post('/{token}/complete', [AdminInvitationController::class, 'complete']);
 });

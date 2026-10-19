@@ -7,6 +7,7 @@ use App\Models\Kyc\KycSubmission;
 use App\Services\Admin\AdminKycService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 
 class AdminKycQueueController extends Controller
 {
@@ -159,7 +160,7 @@ class AdminKycQueueController extends Controller
             'reason' => ['nullable', 'string', 'max:1000'],
         ]);
 
-        $submission = KycSubmission::where('id', $id)->orWhere('reference', $id)->firstOrFail();
+        $submission = $this->findSubmission($id);
 
         try {
             $updated = $this->kycService->decide(
@@ -203,7 +204,7 @@ class AdminKycQueueController extends Controller
             'reason' => ['required', 'string', 'min:5', 'max:1000'],
         ]);
 
-        $submission = KycSubmission::where('id', $id)->orWhere('reference', $id)->firstOrFail();
+        $submission = $this->findSubmission($id);
 
         $updated = $this->kycService->escalate(
             submission: $submission,
@@ -257,5 +258,15 @@ class AdminKycQueueController extends Controller
             'success' => true,
             'data' => $this->kycService->getRules(),
         ]);
+    }
+
+    /**
+     * Recherche sécurisée d'un dossier KYC par UUID ou référence métier.
+     */
+    protected function findSubmission(string $idOrRef): KycSubmission
+    {
+        return Str::isUuid($idOrRef)
+            ? KycSubmission::where(fn ($q) => $q->where('id', $idOrRef)->orWhere('reference', $idOrRef))->firstOrFail()
+            : KycSubmission::where('reference', $idOrRef)->firstOrFail();
     }
 }

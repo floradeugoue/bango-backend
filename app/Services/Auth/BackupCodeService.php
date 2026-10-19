@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\DB;
 
 class BackupCodeService
 {
-    public const CODE_COUNT = 8;
+    public const CODE_COUNT = 10;
 
     /**
      * Standard alphabet without confusing characters: no I, O, 0, or 1.
@@ -15,16 +15,16 @@ class BackupCodeService
     public const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
     /**
-     * Generate 8 cryptographically secure, unguessable single-use backup codes.
+     * Generate cryptographically secure, unguessable single-use backup codes.
      *
      * @return array{plain: array<string>, hashed: array<string>}
      */
-    public function generateCodes(): array
+    public function generateCodes(int $count = self::CODE_COUNT): array
     {
         $plainCodes = [];
         $hashedCodes = [];
 
-        for ($i = 0; $i < self::CODE_COUNT; $i++) {
+        for ($i = 0; $i < $count; $i++) {
             $code = $this->generateSingleCode();
             $plainCodes[] = $code;
             $hashedCodes[] = hash('sha256', $code);

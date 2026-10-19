@@ -13,12 +13,14 @@ use App\Models\Listing\ListingMerge;
 use App\Models\Listing\ListingReviewLog;
 use App\Models\User;
 use App\Models\Visit\VisitReservation;
+use App\Notifications\Listing\ListingDecisionNotification;
 use DomainException;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class AdminListingControlService
@@ -116,7 +118,13 @@ class AdminListingControlService
             'agentCertifications.agent',
             'reviewLogs.operator',
         ])
-            ->where('id', $idOrRef)
+            ->where(function (Builder $q) use ($idOrRef) {
+                if (Str::isUuid($idOrRef)) {
+                    $q->where('id', $idOrRef)->orWhere('reference', $idOrRef);
+                } else {
+                    $q->where('reference', $idOrRef);
+                }
+            })
             ->firstOrFail();
     }
 
@@ -267,8 +275,12 @@ class AdminListingControlService
             throw new DomainException('Cette annonce a déjà été fusionnée ou fait l\'objet d\'une fusion circulaire.');
         }
 
-        $primary = Listing::findOrFail($primaryId);
-        $secondary = Listing::findOrFail($secondaryId);
+        $primary = Str::isUuid($primaryId)
+            ? Listing::where('id', $primaryId)->firstOrFail()
+            : Listing::where('reference', $primaryId)->firstOrFail();
+        $secondary = Str::isUuid($secondaryId)
+            ? Listing::where('id', $secondaryId)->firstOrFail()
+            : Listing::where('reference', $secondaryId)->firstOrFail();
 
         return DB::transaction(function () use ($primary, $secondary, $operator, $reason) {
             // 1. Dépublication de l'annonce secondaire
@@ -276,6 +288,15 @@ class AdminListingControlService
                 'status' => ListingStatus::Draft,
                 'rejection_reason' => "Fusionnée avec l'annonce principale ref: {$primary->id}",
             ]);
+
+            // Notification au propriétaire de l'annonce secondaire fusionnée
+            if ($secondary->owner) {
+                try {
+                    $secondary->owner->notify(new ListingDecisionNotification($secondary, 'merge', $reason ?? 'Doublon avéré fusionné'));
+                } catch (\Throwable $e) {
+                    Log::warning('Échec notification fusion annonce : '.$e->getMessage());
+                }
+            }
 
             // 2. Préservation des visites réservées : rattachement à l'annonce principale
             VisitReservation::where('listing_id', $secondary->id)
@@ -392,6 +413,15 @@ class AdminListingControlService
                 'created_at' => $now,
             ]);
 
+            // Notification au propriétaire en cas de refus ou de demande de modifications
+            if (in_array($decision, ['reject', 'request_changes'], true) && $listing->owner) {
+                try {
+                    $listing->owner->notify(new ListingDecisionNotification($listing, $decision, $reason));
+                } catch (\Throwable $e) {
+                    Log::warning('Échec notification contrôle annonce : '.$e->getMessage());
+                }
+            }
+
             return $listing->fresh();
         });
     }
@@ -504,6 +534,15 @@ class AdminListingControlService
                 'reason' => $reason,
                 'created_at' => $now,
             ]);
+
+            // Notification de dépublication au propriétaire
+            if ($listing->owner) {
+                try {
+                    $listing->owner->notify(new ListingDecisionNotification($listing, 'unpublish', $reason));
+                } catch (\Throwable $e) {
+                    Log::warning('Échec notification dépublication annonce : '.$e->getMessage());
+                }
+            }
 
             return $listing->fresh();
         });

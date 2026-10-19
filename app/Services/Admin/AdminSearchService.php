@@ -73,7 +73,7 @@ class AdminSearchService
             ($operator->isAdmin() || $operator->hasPermission(AdminPermission::FinanceView->value))) {
 
             $payments = PaymentTransaction::query()
-                ->select(['id', 'reference', 'amount', 'currency', 'status', 'payment_method', 'created_at'])
+                ->select(['id', 'reference', 'amount', 'currency', 'status', 'channel', 'provider', 'created_at'])
                 ->where(function ($q) use ($cleanQuery) {
                     $q->where('reference', 'like', "%{$cleanQuery}%")
                         ->orWhere('id', 'like', "%{$cleanQuery}%");
@@ -84,7 +84,7 @@ class AdminSearchService
                     'id' => $p->id,
                     'type' => 'paiement',
                     'title' => 'Réf: '.$p->reference,
-                    'subtitle' => $p->amount.' '.$p->currency.' ('.$p->payment_method.')',
+                    'subtitle' => $p->amount.' '.$p->currency.' ('.($p->channel?->value ?? $p->provider?->value ?? 'N/A').')',
                     'status' => $p->status,
                 ]);
 

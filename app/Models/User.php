@@ -703,7 +703,7 @@ class User extends Authenticatable
      */
     public function latestKycSubmission(): HasOne
     {
-        return $this->hasOne(KycSubmission::class, 'user_id')->latestOfMany();
+        return $this->hasOne(KycSubmission::class, 'user_id')->latestOfMany('created_at');
     }
 
     /**

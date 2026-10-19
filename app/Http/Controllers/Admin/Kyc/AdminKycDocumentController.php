@@ -8,6 +8,7 @@ use App\Models\Kyc\KycDocumentAccessLog;
 use App\Models\Kyc\KycSubmission;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\Response;
 
 class AdminKycDocumentController extends Controller
@@ -17,9 +18,13 @@ class AdminKycDocumentController extends Controller
      */
     public function open(Request $request, string $id, string $docId): Response
     {
-        $submission = KycSubmission::where('id', $id)
-            ->orWhere('reference', $id)
-            ->firstOrFail();
+        $submission = Str::isUuid($id)
+            ? KycSubmission::where(fn ($q) => $q->where('id', $id)->orWhere('reference', $id))->firstOrFail()
+            : KycSubmission::where('reference', $id)->firstOrFail();
+
+        if (! Str::isUuid($docId)) {
+            abort(404, 'Pièce KYC introuvable.');
+        }
 
         /** @var KycDocument $document */
         $document = $submission->documents()->where('id', $docId)->firstOrFail();
