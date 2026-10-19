@@ -26,6 +26,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Str;
 
 class Listing extends Model
 {
@@ -36,6 +37,7 @@ class Listing extends Model
 
     protected $fillable = [
         'id',
+        'reference',
         'owner_id',
         'created_by_id',
         'agent_id',
@@ -81,6 +83,15 @@ class Listing extends Model
         'draft_data',
         'video_metrics',
     ];
+
+    protected static function booted(): void
+    {
+        static::creating(function (Listing $listing) {
+            if (empty($listing->reference)) {
+                $listing->reference = 'LST-'.strtoupper(Str::random(10));
+            }
+        });
+    }
 
     protected function casts(): array
     {

@@ -9,6 +9,7 @@ use App\Models\Housing\HousingSearch;
 use App\Notifications\Listing\NewMatchingListingNotification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class NotifyMatchingHousingSearches implements ShouldQueue
@@ -56,8 +57,13 @@ class NotifyMatchingHousingSearches implements ShouldQueue
                 }
 
                 // Déduplication : éviter les notifications répétées pour une même annonce
+                $driver = DB::connection()->getDriverName();
                 $alreadyNotified = $user->notifications()
-                    ->where('data->listing_id', (string) $listing->id)
+                    ->when(
+                        $driver === 'pgsql',
+                        fn ($q) => $q->whereRaw("CAST(data AS jsonb)->>'listing_id' = ?", [(string) $listing->id]),
+                        fn ($q) => $q->where('data->listing_id', (string) $listing->id)
+                    )
                     ->exists();
 
                 if ($alreadyNotified) {

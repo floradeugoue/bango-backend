@@ -10,9 +10,11 @@ use App\Models\Page\Page;
 use App\Models\Support\ModerationAppeal;
 use App\Models\Support\Report;
 use App\Models\User;
+use App\Notifications\Support\ModerationAppealDecisionNotification;
 use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
@@ -165,6 +167,15 @@ class ModerationAppealAdminService
             $appeal->reviewed_by = $operator->id;
             $appeal->reviewed_at = now();
             $appeal->save();
+
+            // Notification de la décision de recours à l'utilisateur
+            if ($appeal->user) {
+                try {
+                    $appeal->user->notify(new ModerationAppealDecisionNotification($appeal, $resolution, $decisionNotes));
+                } catch (\Throwable $e) {
+                    Log::warning('Échec notification décision recours : '.$e->getMessage());
+                }
+            }
 
             AdminAuditLog::logEvent('moderation.appeal.resolved', $operator, request()->ip(), request()->userAgent(), [
                 'appeal_reference' => $appeal->reference,

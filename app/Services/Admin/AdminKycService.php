@@ -5,14 +5,16 @@ namespace App\Services\Admin;
 use App\Enums\Admin\AdminPermission;
 use App\Enums\Kyc\KycStatus;
 use App\Models\Kyc\KycSubmission;
-use App\Models\Subscription\BadgeHistory;
 use App\Models\User;
+use App\Notifications\Kyc\KycDecisionNotification;
 use App\Services\Subscription\BadgeResolutionService;
 use DomainException;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class AdminKycService
@@ -85,8 +87,13 @@ class AdminKycService
             'escalatedBy',
             'accessLogs.operator',
         ])
-            ->where('id', $idOrRef)
-            ->orWhere('reference', $idOrRef)
+            ->where(function (Builder $q) use ($idOrRef) {
+                if (Str::isUuid($idOrRef)) {
+                    $q->where('id', $idOrRef)->orWhere('reference', $idOrRef);
+                } else {
+                    $q->where('reference', $idOrRef);
+                }
+            })
             ->firstOrFail();
     }
 
@@ -192,39 +199,15 @@ class AdminKycService
                     'rejection_reason' => null,
                 ]);
 
-                // 2. Mise à jour de l'utilisateur
+                // 2. Mise à jour de l'utilisateur : validation d'identité uniquement
                 $user->is_verified = true;
                 $user->verification_lapsed = false;
-
-                // 3. Détermination du badge approprié (landlord, agent ou double)
-                $badgeToGrant = match ($submission->profile_category) {
-                    'agent' => 'agent',
-                    default => 'landlord',
-                };
-
-                // Si l'utilisateur avait déjà un badge différent, combiner en 'double'
-                if ($user->badge !== 'none' && $user->badge !== $badgeToGrant) {
-                    $user->badge = 'double';
-                } else {
-                    $user->badge = $badgeToGrant;
-                }
                 $user->save();
 
-                // 4. Écriture dans l'historique d'audit des badges
-                BadgeHistory::create([
-                    'user_id' => $user->id,
-                    'badge' => $user->badge,
-                    'event' => 'granted',
-                    'source' => 'kyc_approval',
-                    'actor_id' => $operator->id,
-                    'reason' => 'Vérification KYC approuvée pour 24 mois',
-                    'metadata' => [
-                        'kyc_submission_id' => $submission->id,
-                        'reference' => $submission->reference,
-                        'valid_until' => $expiresOn->toDateString(),
-                    ],
-                    'created_at' => $now,
-                ]);
+                // 3. Règle produit : les badges proviennent exclusivement des abonnements actifs.
+                // Si l'utilisateur possède déjà un abonnement payé (landlord ou agent), son badge est synchronisé.
+                // Sinon, le badge reste 'none' jusqu'à souscription d'un abonnement.
+                $this->badgeResolutionService->syncUserBadge($user, 'kyc_approval', $operator, 'Vérification KYC approuvée pour 24 mois');
 
             } elseif ($decision === 'reject') {
                 if (empty(trim((string) $reason))) {
@@ -255,6 +238,17 @@ class AdminKycService
                 ]);
             } else {
                 throw new DomainException("Décision '{$decision}' non reconnue.");
+            }
+
+            // Notification de la décision d'instruction à l'utilisateur
+            try {
+                $user->notify(new KycDecisionNotification($submission, $decision, $reason));
+            } catch (\Throwable $e) {
+                Log::warning('Échec envoi notification décision KYC : '.$e->getMessage(), [
+                    'user_id' => $user->id,
+                    'submission_id' => $submission->id,
+                    'decision' => $decision,
+                ]);
             }
 
             return $submission->fresh(['user', 'decidedBy', 'documents']);

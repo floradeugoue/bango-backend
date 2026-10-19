@@ -32,7 +32,7 @@ class MessageService
         }
 
         return $conversation->messages()
-            ->with(['sender:id,name,username,avatar,avatar_url', 'replyTo'])
+            ->with(['sender:id,name,handle,avatar_url', 'replyTo'])
             ->orderBy('created_at', 'asc')
             ->paginate($perPage);
     }

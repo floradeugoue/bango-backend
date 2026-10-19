@@ -58,7 +58,7 @@ class AdminCountryService
             if ($canViewMetrics && $record) {
                 $countryData['metrics'] = [
                     'users_count' => User::where('country_id', $record->id)->count(),
-                    'listings_count' => Listing::where('country_id', $record->id)->count(),
+                    'listings_count' => Listing::whereHas('owner', fn ($q) => $q->where('country_id', $record->id))->count(),
                 ];
             }
 

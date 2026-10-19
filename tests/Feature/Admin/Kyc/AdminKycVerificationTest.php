@@ -195,9 +195,10 @@ it('approves a KYC submission with 24-month validity and awards the badge', func
     $expectedExpiration = Carbon::today()->addMonths(24);
     expect($submission->expires_on->toDateString())->toBe($expectedExpiration->toDateString());
 
-    // Check user badge
+    // Check user is verified without giving badge (badges are strictly subscriptions)
     $user->refresh();
-    expect($user->badge)->toBe('landlord');
+    expect($user->is_verified)->toBeTrue()
+        ->and($user->badge)->toBe('none');
 });
 
 it('rejects a KYC submission with required reason and logs it into refusals queue', function () {
