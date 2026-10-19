@@ -175,3 +175,12 @@ Schedule::command('visits:settle-overdue')
     ->hourly()
     ->withoutOverlapping()
     ->onOneServer();
+
+// --------------------------------------------------------------------------
+// PLANIFICATEUR DES REVERSEMENTS BAILLEURS (Étape 4 — Règle J+1 à 08:00)
+// --------------------------------------------------------------------------
+// 8. Reversements des frais de visite aux bailleurs à J+1 à 08:00
+Schedule::command('payouts:process-scheduled')
+    ->dailyAt('08:00')
+    ->withoutOverlapping()
+    ->onOneServer();

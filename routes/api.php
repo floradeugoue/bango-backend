@@ -7,6 +7,11 @@ use App\Http\Controllers\Admin\Auth\AdminAuthController;
 use App\Http\Controllers\Admin\Auth\AdminDeviceController;
 use App\Http\Controllers\Admin\Auth\AdminInvitationController;
 use App\Http\Controllers\Admin\Auth\AdminPasswordResetController;
+use App\Http\Controllers\Admin\Finance\AdminCampaignManagementController;
+use App\Http\Controllers\Admin\Finance\AdminPaymentExportController;
+use App\Http\Controllers\Admin\Finance\AdminPaymentOperationsController;
+use App\Http\Controllers\Admin\Finance\AdminPayoutController;
+use App\Http\Controllers\Admin\Finance\AdminRefundController;
 use App\Http\Controllers\Admin\Kyc\AdminKycBadgeController;
 use App\Http\Controllers\Admin\Kyc\AdminKycDocumentController;
 use App\Http\Controllers\Admin\Kyc\AdminKycQueueController;
@@ -1519,9 +1524,10 @@ Route::prefix('admin')->name('api.admin.')->group(function () {
             ->name('badges.history');
 
         // ------------------------------------------------------------------
-        // MODULE 6 : PAIEMENTS, AUDITS & LITIGES (Finance)
+        // MODULE 6 : PAIEMENTS, RAPPROCHEMENT & LITIGES (Finance - Étape 4)
         // ------------------------------------------------------------------
         Route::prefix('payments')->name('payments.')->middleware('admin.permission:finance:view')->group(function () {
+            // Endpoints existants préservés pour compatibilité
             Route::get('/transactions', [AdminPaymentController::class, 'index'])->name('transactions.index');
             Route::get('/transactions/{id}', [AdminPaymentController::class, 'show'])->name('transactions.show');
             Route::get('/transactions/{id}/events', [AdminPaymentController::class, 'events'])->name('transactions.events');
@@ -1535,6 +1541,114 @@ Route::prefix('admin')->name('api.admin.')->group(function () {
 
             Route::get('/double-charge-claims', [AdminPaymentController::class, 'doubleChargeClaims'])->name('double_charge_claims.index');
             Route::post('/double-charge-claims', [AdminPaymentController::class, 'createDoubleChargeClaim'])->middleware('admin.permission:finance:action')->name('double_charge_claims.store');
+
+            // 4.1 Liste paginée des transactions
+            Route::get('/', [AdminPaymentOperationsController::class, 'index'])->name('index');
+
+            // 4.3 Grand livre des Crédits BANGO et soldes actifs
+            Route::get('/credits', [AdminPaymentOperationsController::class, 'credits'])->name('credits');
+
+            // 4.4 Monitoring des passerelles et opérateurs
+            Route::get('/operators', [AdminPaymentOperationsController::class, 'operators'])->name('operators');
+
+            // 4.5 Liste des reversements aux bailleurs
+            Route::get('/payouts', [AdminPayoutController::class, 'index'])
+                ->middleware('admin.permission:finance:payout')
+                ->name('payouts.index');
+
+            // 4.6 Relance d'un reversement échoué ou bloqué
+            Route::post('/{id}/payout/retry', [AdminPayoutController::class, 'retry'])
+                ->middleware('admin.permission:finance:payout')
+                ->name('payouts.retry');
+
+            // 4.8 Supervision des abonnements de badges & période de grâce
+            Route::get('/subscriptions', [AdminPaymentOperationsController::class, 'subscriptions'])->name('subscriptions.index');
+
+            // 4.11 Opérateurs habilités à l'approbation des remboursements
+            Route::get('/refund-approvers', [AdminRefundController::class, 'approvers'])->name('refund.approvers');
+
+            // 4.12 Création d'une demande de remboursement (double validation)
+            Route::post('/{id}/refund', [AdminRefundController::class, 'createRequest'])
+                ->middleware('admin.permission:finance:refund')
+                ->name('refund.create');
+
+            // 4.13 Décision du 2e opérateur : validation ou rejet
+            Route::post('/{id}/refund/decision', [AdminRefundController::class, 'decision'])
+                ->middleware('admin.permission:finance:approve')
+                ->name('refund.decision');
+
+            // 4.14 Retrait d'une demande de remboursement par le demandeur
+            Route::post('/{id}/refund/withdraw', [AdminRefundController::class, 'withdraw'])
+                ->middleware('admin.permission:finance:refund')
+                ->name('refund.withdraw');
+
+            // 4.9 Clôture administrative d'un incident de paiement sans mouvement financier
+            Route::post('/{id}/close', [AdminPaymentOperationsController::class, 'close'])
+                ->middleware('admin.permission:finance:action')
+                ->name('close');
+
+            // 4.10 Émission compensatoire de Crédits BANGO
+            Route::post('/{id}/credit', [AdminPaymentOperationsController::class, 'credit'])
+                ->middleware('admin.permission:finance:credits')
+                ->name('credit');
+
+            // 4.15 Rapprochement ciblé auprès du provider
+            Route::post('/{id}/check', [AdminPaymentOperationsController::class, 'check'])
+                ->middleware('admin.permission:finance:reconcile')
+                ->name('check');
+
+            // 4.16 Rapprochement groupé et contrôlé
+            Route::post('/resync', [AdminPaymentOperationsController::class, 'resync'])
+                ->middleware('admin.permission:finance:reconcile')
+                ->name('resync');
+
+            // 4.17 Reçu officiel de transaction avec signature cryptographique
+            Route::get('/{id}/receipt', [AdminPaymentOperationsController::class, 'receipt'])->name('receipt');
+
+            // 4.18 Aperçu d'export comptable sans mutation
+            Route::post('/exports/preview', [AdminPaymentExportController::class, 'preview'])
+                ->middleware('admin.permission:finance:export')
+                ->name('exports.preview');
+
+            // 4.19 Export comptable CSV signé et sécurisé
+            Route::post('/exports', [AdminPaymentExportController::class, 'export'])
+                ->middleware('admin.permission:finance:export')
+                ->name('exports.download');
+
+            // 4.2 Fiche détaillée d'une transaction
+            Route::get('/{id}', [AdminPaymentOperationsController::class, 'show'])->name('show');
+        });
+
+        // ------------------------------------------------------------------
+        // MODULE 6.1 : GESTION DES CAMPAGNES DE BOOST (Étape 4)
+        // ------------------------------------------------------------------
+        Route::prefix('campaigns')->name('campaigns.')->middleware('admin.permission:boost:view')->group(function () {
+            // 5.1 Liste paginée des campagnes de Boost
+            Route::get('/', [AdminCampaignManagementController::class, 'index'])->name('index');
+
+            // 5.3 Liste des restitutions de budget
+            Route::get('/refunds', [AdminCampaignManagementController::class, 'refunds'])->name('refunds');
+
+            // 5.4 Aperçu du montant restituable avant suspension
+            Route::post('/suspend/preview', [AdminCampaignManagementController::class, 'previewSuspend'])->name('suspend.preview');
+
+            // 5.5 Suspension de campagne et restitution de crédits à l'annonceur
+            Route::post('/suspend', [AdminCampaignManagementController::class, 'suspend'])
+                ->middleware('admin.permission:boost:manage')
+                ->name('suspend');
+
+            // 5.7 Export CSV des campagnes sécurisé contre l'injection de formules
+            Route::post('/exports', [AdminCampaignManagementController::class, 'export'])
+                ->middleware('admin.permission:boost:export')
+                ->name('exports');
+
+            // 5.2 Détail d'une campagne de Boost
+            Route::get('/{id}', [AdminCampaignManagementController::class, 'show'])->name('show');
+
+            // 5.6 Envoi d'un message explicatif à l'annonceur dans sa langue
+            Route::post('/{id}/notify', [AdminCampaignManagementController::class, 'notify'])
+                ->middleware('admin.permission:boost:manage')
+                ->name('notify');
         });
 
         // ------------------------------------------------------------------

@@ -35,6 +35,15 @@ enum AdminPermission: string
     case ListingsCertify = 'listings:certify';
     case ListingsStatus = 'listings:status';
     case ListingsExport = 'listings:export';
+    case FinanceReconcile = 'finance:reconcile';
+    case FinanceRefund = 'finance:refund';
+    case FinanceApprove = 'finance:approve';
+    case FinancePayout = 'finance:payout';
+    case FinanceCredits = 'finance:credits';
+    case FinanceExport = 'finance:export';
+    case BoostView = 'boost:view';
+    case BoostManage = 'boost:manage';
+    case BoostExport = 'boost:export';
 
     /**
      * @return array<string>
@@ -77,6 +86,15 @@ enum AdminPermission: string
                 self::DashboardView->value,
                 self::FinanceView->value,
                 self::FinanceAction->value,
+                self::FinanceReconcile->value,
+                self::FinanceRefund->value,
+                self::FinanceApprove->value,
+                self::FinancePayout->value,
+                self::FinanceCredits->value,
+                self::FinanceExport->value,
+                self::BoostView->value,
+                self::BoostManage->value,
+                self::BoostExport->value,
                 self::SearchTransverse->value,
                 self::NotificationsView->value,
                 self::ApprovalsView->value,
