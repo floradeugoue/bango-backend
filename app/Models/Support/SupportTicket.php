@@ -21,10 +21,14 @@ class SupportTicket extends Model
         'reference',
         'user_id',
         'assigned_to',
+        'resolved_by_id',
         'subject',
         'category',
+        'channel',
         'status',
         'priority',
+        'resolution_category',
+        'resolution_reason',
         'last_reply_at',
         'resolved_at',
         'closed_at',
@@ -55,6 +59,11 @@ class SupportTicket extends Model
         return $this->belongsTo(User::class, 'assigned_to');
     }
 
+    public function resolvedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'resolved_by_id');
+    }
+
     public function messages(): HasMany
     {
         return $this->hasMany(SupportTicketMessage::class)->orderBy('created_at', 'asc');
@@ -63,6 +72,11 @@ class SupportTicket extends Model
     public function attachments(): HasMany
     {
         return $this->hasMany(SupportTicketAttachment::class);
+    }
+
+    public function escalations(): HasMany
+    {
+        return $this->hasMany(SupportTicketEscalation::class)->orderByDesc('created_at');
     }
 
     /**
