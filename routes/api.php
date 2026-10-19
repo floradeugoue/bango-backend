@@ -1559,6 +1559,9 @@ Route::prefix('admin')->name('api.admin.')->group(function () {
 
             // 4.3 Grand livre des Crédits BANGO et soldes actifs
             Route::get('/credits', [AdminPaymentOperationsController::class, 'credits'])->name('credits');
+            Route::post('/credits/wallets/{user}/deposit', [CreditWalletController::class, 'adminDeposit'])
+                ->middleware('admin.permission:finance:manage')
+                ->name('credits.deposit');
 
             // 4.4 Monitoring des passerelles et opérateurs
             Route::get('/operators', [AdminPaymentOperationsController::class, 'operators'])->name('operators');

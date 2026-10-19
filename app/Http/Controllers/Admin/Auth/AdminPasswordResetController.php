@@ -59,14 +59,6 @@ class AdminPasswordResetController extends Controller
 
         AdminAuditLog::logEvent('auth.password.forgot_requested', $user, $request->ip(), $request->userAgent());
 
-        // En environnement de test/local, on peut renvoyer le token dans l'audit/réponse pour faciliter les tests automatisés
-        if (app()->environment('testing', 'local')) {
-            return response()->json([
-                'message' => 'Si cette adresse correspond à un compte opérateur actif, les instructions de réinitialisation ont été transmises.',
-                'debug_token' => $token,
-            ], 200);
-        }
-
         return $genericResponse;
     }
 

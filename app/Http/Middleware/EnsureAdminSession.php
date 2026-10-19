@@ -16,21 +16,7 @@ class EnsureAdminSession
      */
     public function handle(Request $request, Closure $next): Response
     {
-        // 0. Compatibilité Guard API / Passport / Authentification préexistante
-        $authenticatedUser = $request->user() ?? $request->user('api');
-        if ($authenticatedUser) {
-            if ($authenticatedUser->isAdmin() || $authenticatedUser->hasRole('direction') || $authenticatedUser->hasRole('admin')) {
-                $request->setUserResolver(fn () => $authenticatedUser);
-
-                return $next($request);
-            }
-
-            return response()->json([
-                'message' => 'Accès refusé. Privilèges administratifs requis.',
-                'code' => 'ADMIN_FORBIDDEN',
-            ], 403);
-        }
-
+        // 1. Extraction du cookie ou de l'en-tête de session administrative
         $rawCookie = $request->cookie('bango_admin_session');
 
         if (empty($rawCookie) && ($cookieHeader = $request->header('Cookie'))) {
@@ -40,7 +26,7 @@ class EnsureAdminSession
         }
 
         if (empty($rawCookie)) {
-            $rawCookie = $request->header('X-Bango-Admin-Session') ?? $request->bearerToken();
+            $rawCookie = $request->header('X-Bango-Admin-Session');
         }
 
         if (empty($rawCookie) || ! is_string($rawCookie)) {
