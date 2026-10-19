@@ -22,6 +22,18 @@ class AdminInvitation extends Model
         'accepted_at',
     ];
 
+    public function setTokenAttribute(string $value): void
+    {
+        $this->attributes['token'] = hash('sha256', $value);
+    }
+
+    public static function findByToken(string $token): ?self
+    {
+        return static::where('token', hash('sha256', $token))
+            ->orWhere('token', $token)
+            ->first();
+    }
+
     /**
      * @return array<string, string>
      */

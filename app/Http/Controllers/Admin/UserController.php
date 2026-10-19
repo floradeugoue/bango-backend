@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\Admin\AdminAuditLog;
+use App\Models\Admin\AdminSession;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -101,11 +103,23 @@ class UserController extends Controller
      *
      * @bodyParam display_name string Le nouveau nom.
      * @bodyParam handle string Le nouveau pseudo.
-     * @bodyParam status string Le nouveau statut.
-     * @bodyParam is_verified boolean Activer/Désactiver la vérification.
      */
     public function update(Request $request, User $user)
     {
+        if ($request->has('status')) {
+            return response()->json([
+                'message' => 'La modification du statut utilisateur est restreinte aux routes administratives dédiées (/suspend, /unsuspend, /block, /unblock).',
+                'code' => 'STATUS_CHANGE_RESTRICTED',
+            ], 422);
+        }
+
+        if ($request->has('is_verified')) {
+            return response()->json([
+                'message' => 'La vérification d\'identité (is_verified) ne peut être modifiée que par une décision formelle de modération KYC.',
+                'code' => 'KYC_VERIFICATION_RESTRICTED',
+            ], 422);
+        }
+
         $validated = $request->validate([
             'display_name' => 'sometimes|string|max:255',
             'handle' => 'sometimes|string|max:255|unique:users,handle,'.$user->id,
@@ -113,8 +127,6 @@ class UserController extends Controller
             'gender' => 'sometimes|string',
             'locale' => 'sometimes|string',
             'account_type' => 'sometimes|string',
-            'status' => 'sometimes|string',
-            'is_verified' => 'sometimes|boolean',
         ]);
 
         $user->update($validated);
@@ -133,6 +145,9 @@ class UserController extends Controller
     {
         $user->update(['status' => 'suspended']);
         $user->tokens()->delete(); // Kick the user out
+        AdminSession::where('user_id', $user->id)->whereNull('revoked_at')->update(['revoked_at' => now()]);
+
+        AdminAuditLog::logEvent('user.status.suspended', $user, request()->ip(), request()->userAgent());
 
         return response()->json(['success' => true, 'status' => 'suspended']);
     }
@@ -145,6 +160,8 @@ class UserController extends Controller
     public function unsuspend(User $user)
     {
         $user->update(['status' => 'active']);
+
+        AdminAuditLog::logEvent('user.status.unsuspended', $user, request()->ip(), request()->userAgent());
 
         return response()->json(['success' => true, 'status' => 'active']);
     }
@@ -160,6 +177,9 @@ class UserController extends Controller
     {
         $user->update(['status' => 'blocked']);
         $user->tokens()->delete(); // Kick the user out
+        AdminSession::where('user_id', $user->id)->whereNull('revoked_at')->update(['revoked_at' => now()]);
+
+        AdminAuditLog::logEvent('user.status.blocked', $user, request()->ip(), request()->userAgent());
 
         return response()->json(['success' => true, 'status' => 'blocked']);
     }
@@ -172,6 +192,8 @@ class UserController extends Controller
     public function unblock(User $user)
     {
         $user->update(['status' => 'active']);
+
+        AdminAuditLog::logEvent('user.status.unblocked', $user, request()->ip(), request()->userAgent());
 
         return response()->json(['success' => true, 'status' => 'active']);
     }
@@ -187,6 +209,9 @@ class UserController extends Controller
     {
         $user->delete(); // Soft delete
         $user->tokens()->delete();
+        AdminSession::where('user_id', $user->id)->whereNull('revoked_at')->update(['revoked_at' => now()]);
+
+        AdminAuditLog::logEvent('user.status.deleted', $user, request()->ip(), request()->userAgent());
 
         return response()->json(['success' => true]);
     }
