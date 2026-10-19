@@ -46,6 +46,8 @@ use App\Models\Subscription\BadgeHistory;
 use App\Models\Subscription\Subscription;
 use App\Models\Support\Report;
 use App\Models\Support\SupportTicket;
+use App\Models\Support\UserAccountSanction;
+use App\Models\Support\UserAnonymizationRequest;
 use App\Models\Visit\VisitReservation;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -102,6 +104,8 @@ class User extends Authenticatable
         'is_private',
         'privacy_settings',
         'badge',
+        'is_certified',
+        'certified_at',
         'verification_lapsed',
         'restricted_until',
         'terms_accepted_at',
@@ -126,6 +130,8 @@ class User extends Authenticatable
             'birth_date' => 'date',
             'gender_hidden' => 'boolean',
             'is_verified' => 'boolean',
+            'is_certified' => 'boolean',
+            'certified_at' => 'datetime',
             'locked_until' => 'datetime',
             'suspended_from' => 'datetime',
             'suspended_until' => 'datetime',
@@ -444,6 +450,22 @@ class User extends Authenticatable
     public function paymentTransactions(): HasMany
     {
         return $this->hasMany(PaymentTransaction::class)->orderByDesc('created_at');
+    }
+
+    /**
+     * Sanctions et avertissements formels appliqués à cet utilisateur.
+     */
+    public function sanctions(): HasMany
+    {
+        return $this->hasMany(UserAccountSanction::class)->orderByDesc('created_at');
+    }
+
+    /**
+     * Demandes d'anonymisation RGPD associées à ce compte.
+     */
+    public function anonymizationRequests(): HasMany
+    {
+        return $this->hasMany(UserAnonymizationRequest::class)->orderByDesc('created_at');
     }
 
     /**

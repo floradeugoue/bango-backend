@@ -13,6 +13,13 @@ class Operator extends Model
 
     protected $guarded = [];
 
+    protected function casts(): array
+    {
+        return [
+            'is_active' => 'boolean',
+        ];
+    }
+
     public function country()
     {
         return $this->belongsTo(Country::class);

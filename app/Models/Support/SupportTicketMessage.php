@@ -19,6 +19,7 @@ class SupportTicketMessage extends Model
         'sender_type',
         'message',
         'is_internal',
+        'retained_until',
         'metadata',
     ];
 
@@ -30,6 +31,7 @@ class SupportTicketMessage extends Model
         return [
             'sender_type' => TicketMessageSenderType::class,
             'is_internal' => 'boolean',
+            'retained_until' => 'datetime',
             'metadata' => 'array',
         ];
     }

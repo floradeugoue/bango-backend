@@ -109,5 +109,31 @@ class RoleSeeder extends Seeder
                 ]
             );
         }
+
+        $supportRole = Role::where('slug', 'support')->first();
+        if ($supportRole) {
+            User::firstOrCreate(
+                ['email' => 'jean-marc.kouassi@bango.app'],
+                [
+                    'name' => 'Jean-Marc Kouassi',
+                    'password' => bcrypt('AdminPassword123!'),
+                    'role_id' => $supportRole->id,
+                    'status' => 'active',
+                ]
+            );
+        }
+
+        $directionRole = Role::where('slug', 'direction')->first();
+        if ($directionRole) {
+            User::firstOrCreate(
+                ['email' => 'ousmane.ba@bango.app'],
+                [
+                    'name' => 'Ousmane Bâ',
+                    'password' => bcrypt('AdminPassword123!'),
+                    'role_id' => $directionRole->id,
+                    'status' => 'active',
+                ]
+            );
+        }
     }
 }

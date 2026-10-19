@@ -44,6 +44,38 @@ enum AdminPermission: string
     case BoostView = 'boost:view';
     case BoostManage = 'boost:manage';
     case BoostExport = 'boost:export';
+    case SupportReply = 'support:reply';
+    case SupportNotes = 'support:notes';
+    case SupportAssign = 'support:assign';
+    case SupportEscalate = 'support:escalate';
+    case SupportResolve = 'support:resolve';
+    case SupportTemplates = 'support:templates';
+    case SupportHelp = 'support:help';
+    case SupportExport = 'support:export';
+    case AccountsView = 'accounts:view';
+    case AccountsSanctions = 'accounts:sanctions';
+    case AccountsBadges = 'accounts:badges';
+    case AccountsSecurity = 'accounts:security';
+    case AccountsGdprRequest = 'accounts:gdpr:request';
+    case AccountsGdprApprove = 'accounts:gdpr:approve';
+    case AccountsExport = 'accounts:export';
+    case AuditView = 'audit:view';
+    case AuditVerify = 'audit:verify';
+    case AuditExport = 'audit:export';
+    case RolesView = 'roles:view';
+    case RolesRequest = 'roles:request';
+    case RolesConfirm = 'roles:confirm';
+    case SettingsPricing = 'settings:pricing';
+    case SettingsThresholds = 'settings:thresholds';
+    case SettingsOperators = 'settings:operators';
+    case SettingsGeo = 'settings:geo';
+    case SettingsInterests = 'settings:interests';
+    case SettingsLegal = 'settings:legal';
+    case SettingsMaintenance = 'settings:maintenance';
+    case SettingsDelays = 'settings:delays';
+    case StatsView = 'stats:view';
+    case StatsReports = 'stats:reports';
+    case StatsExport = 'stats:export';
 
     /**
      * @return array<string>
@@ -79,6 +111,20 @@ enum AdminPermission: string
                 self::DashboardView->value,
                 self::SupportView->value,
                 self::SupportAction->value,
+                self::SupportReply->value,
+                self::SupportNotes->value,
+                self::SupportAssign->value,
+                self::SupportEscalate->value,
+                self::SupportResolve->value,
+                self::SupportTemplates->value,
+                self::SupportHelp->value,
+                self::SupportExport->value,
+                self::AccountsView->value,
+                self::AccountsSanctions->value,
+                self::AccountsBadges->value,
+                self::AccountsSecurity->value,
+                self::AccountsGdprRequest->value,
+                self::AccountsExport->value,
                 self::SearchTransverse->value,
                 self::NotificationsView->value,
             ],

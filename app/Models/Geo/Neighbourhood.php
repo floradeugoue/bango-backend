@@ -13,6 +13,13 @@ class Neighbourhood extends Model
 
     protected $guarded = [];
 
+    protected function casts(): array
+    {
+        return [
+            'is_ignored' => 'boolean',
+        ];
+    }
+
     public function city()
     {
         return $this->belongsTo(City::class);
