@@ -122,8 +122,10 @@ Route::prefix('auth')->group(function () {
         ->name('auth.password.forgot');
 
     // Réinitialisation de mot de passe opérateur selon contrat API: /auth/password/reset/{token}
+    // Afficher le formulaire de réinitialisation de mot de passe opérateur
     Route::get('/password/reset/{token}', [AdminPasswordResetController::class, 'showReset'])
         ->name('auth.password.reset.show');
+    // Soumettre le nouveau mot de passe opérateur avec le jeton de réinitialisation
     Route::post('/password/reset/{token}', [AdminPasswordResetController::class, 'reset'])
         ->name('auth.password.reset.submit');
 });
@@ -190,23 +192,28 @@ Route::middleware(['admin.session'])->group(function () {
         ->name('me.approvals');
 
     // Gestion des demandes d'accès collaborateurs (Direction / Admins)
+    // Lister les demandes d'accès collaborateurs en attente d'approbation
     Route::get('/access-requests', [AdminAccessRequestController::class, 'index'])
         ->middleware('admin.permission:operators:manage')
         ->name('access_requests.index');
 
+    // Approuver une demande d'accès collaborateur et déclencher l'invitation
     Route::post('/access-requests/{id}/approve', [AdminAccessRequestController::class, 'approve'])
         ->middleware('admin.permission:operators:manage')
         ->name('access_requests.approve');
 
+    // Rejeter une demande d'accès collaborateur avec motif
     Route::post('/access-requests/{id}/reject', [AdminAccessRequestController::class, 'reject'])
         ->middleware('admin.permission:operators:manage')
         ->name('access_requests.reject');
 
     // Gestion des invitations collaborateurs (Direction / Admins)
+    // Lister les invitations collaborateur envoyées et leur statut
     Route::get('/invitations', [AdminInvitationController::class, 'index'])
         ->middleware('admin.permission:operators:manage')
         ->name('invitations.index');
 
+    // Créer et envoyer une nouvelle invitation collaborateur par email
     Route::post('/invitations', [AdminInvitationController::class, 'store'])
         ->middleware('admin.permission:operators:manage')
         ->name('invitations.store');
@@ -371,11 +378,17 @@ Route::middleware(['admin.session'])->group(function () {
     // MODULE 1 : RÔLES & PERMISSIONS (Strictement réservé Super-Admin / Direction)
     // ------------------------------------------------------------------
     Route::prefix('roles')->name('roles.')->middleware('admin.permission:roles:manage')->group(function () {
+        // Lister tous les rôles administratifs et leurs permissions
         Route::get('/', [RoleController::class, 'index'])->name('index');
+        // Créer un nouveau rôle avec attribution des permissions
         Route::post('/', [RoleController::class, 'store'])->name('store');
+        // Consulter les détails d'un rôle et sa matrice de permissions
         Route::get('/{role}', [RoleController::class, 'show'])->name('show');
+        // Mettre à jour les libellés et permissions d'un rôle
         Route::put('/{role}', [RoleController::class, 'update'])->name('update');
+        // Supprimer un rôle administratif non critique
         Route::delete('/{role}', [RoleController::class, 'destroy'])->name('destroy');
+        // Lister les opérateurs ou utilisateurs assignés à un rôle spécifique
         Route::get('/{role}/users', [RoleController::class, 'users'])->name('users');
     });
 
@@ -383,21 +396,34 @@ Route::middleware(['admin.session'])->group(function () {
     // MODULE 2 : GESTION DES UTILISATEURS (Strictement réservé Super-Admin / Direction)
     // ------------------------------------------------------------------
     Route::prefix('users')->name('users.')->middleware('admin.permission:operators:manage')->group(function () {
+        // Lister et filtrer l'ensemble des comptes utilisateurs de la plateforme
         Route::get('/', [UserController::class, 'index'])->name('index');
+        // Consulter la fiche complète d'un utilisateur par son ID
         Route::get('/{user}', [UserController::class, 'show'])->name('show');
+        // Mettre à jour les informations administratives d'un utilisateur
         Route::patch('/{user}', [UserController::class, 'update'])->name('update');
+        // Supprimer définitivement un compte utilisateur (soft/hard delete)
         Route::delete('/{user}', [UserController::class, 'destroy'])->name('destroy');
 
+        // Obtenir le rôle administratif actuellement attribué à un utilisateur
         Route::get('/{user}/role', [RoleController::class, 'getUserRole'])->name('role.get');
+        // Modifier le rôle administratif d'un utilisateur
         Route::patch('/{user}/role', [RoleController::class, 'updateUserRole'])->name('role.update');
 
+        // Suspendre temporairement l'accès d'un utilisateur à la plateforme
         Route::post('/{user}/suspend', [UserController::class, 'suspend'])->name('suspend');
+        // Lever la suspension d'un compte utilisateur
         Route::post('/{user}/unsuspend', [UserController::class, 'unsuspend'])->name('unsuspend');
+        // Bloquer définitivement un utilisateur pour motif disciplinaire grave
         Route::post('/{user}/block', [UserController::class, 'block'])->name('block');
+        // Débloquer un compte utilisateur précédemment banni
         Route::post('/{user}/unblock', [UserController::class, 'unblock'])->name('unblock');
 
+        // Lister les sessions actives et appareils connectés d'un utilisateur
         Route::get('/{user}/sessions', [UserController::class, 'sessions'])->name('sessions.index');
+        // Révoquer immédiatement toutes les sessions actives d'un utilisateur
         Route::delete('/{user}/sessions', [UserController::class, 'revokeAllSessions'])->name('sessions.revoke_all');
+        // Révoquer une session ou un appareil spécifique d'un utilisateur
         Route::delete('/{user}/sessions/{session}', [UserController::class, 'revokeSession'])->name('sessions.revoke');
     });
 
@@ -405,10 +431,15 @@ Route::middleware(['admin.session'])->group(function () {
     // MODULE 3 : GESTION GÉOGRAPHIQUE (PAYS, DEVISES, VILLES, OPÉRATEURS)
     // ------------------------------------------------------------------
     Route::prefix('geo')->name('geo.')->middleware('admin.permission:operators:manage')->group(function () {
+        // CRUD administratif des pays pris en charge (création, mise à jour, suppression)
         Route::apiResource('countries', CountryController::class)->except(['index', 'show']);
+        // CRUD administratif des devises monétaires
         Route::apiResource('currencies', CurrencyController::class)->except(['index', 'show']);
+        // CRUD administratif des villes
         Route::apiResource('cities', CityController::class)->except(['index', 'show']);
+        // CRUD administratif des quartiers
         Route::apiResource('neighbourhoods', NeighbourhoodController::class)->except(['index', 'show']);
+        // CRUD administratif des opérateurs télécoms et Mobile Money
         Route::apiResource('operators', OperatorController::class)->except(['index', 'show']);
     });
 
@@ -416,11 +447,17 @@ Route::middleware(['admin.session'])->group(function () {
     // MODULE 4 : CATALOGUE D'ABONNEMENTS & TARIFS
     // ------------------------------------------------------------------
     Route::prefix('catalog')->name('catalog.')->middleware('admin.permission:operators:manage')->group(function () {
+        // Lister les produits et forfaits d'abonnement du catalogue
         Route::get('/products', [SubscriptionCatalogController::class, 'index'])->name('products.index');
+        // Créer un nouveau produit d'abonnement ou badge au catalogue
         Route::post('/products', [SubscriptionCatalogController::class, 'store'])->name('products.store');
+        // Consulter la fiche technique et les prix d'un produit du catalogue
         Route::get('/products/{id}', [SubscriptionCatalogController::class, 'show'])->name('products.show');
+        // Mettre à jour les caractéristiques d'un produit d'abonnement
         Route::put('/products/{id}', [SubscriptionCatalogController::class, 'update'])->name('products.update');
+        // Ajouter un tarif ou une tarification par pays/devise pour un produit
         Route::post('/products/{id}/prices', [SubscriptionCatalogController::class, 'addPrice'])->name('prices.store');
+        // Modifier un tarif existant d'un produit
         Route::put('/prices/{priceId}', [SubscriptionCatalogController::class, 'updatePrice'])->name('prices.update');
     });
 
@@ -428,13 +465,20 @@ Route::middleware(['admin.session'])->group(function () {
     // MODULE 5 : ABONNEMENTS & BADGES (Supervision & Support)
     // ------------------------------------------------------------------
     Route::prefix('subscriptions')->name('subscriptions.')->middleware('admin.permission:verification:view')->group(function () {
+        // Lister l'ensemble des souscriptions et abonnements actifs avec filtres
         Route::get('/', [SubscriptionManagementController::class, 'index'])->name('index');
+        // Consulter les détails d'un abonnement et son historique de facturation
         Route::get('/{id}', [SubscriptionManagementController::class, 'show'])->name('show');
+        // Suspendre manuellement un abonnement actif
         Route::post('/{id}/suspend', [SubscriptionManagementController::class, 'suspend'])->middleware('admin.permission:verification:action')->name('suspend');
+        // Réactiver un abonnement suspendu
         Route::post('/{id}/reactivate', [SubscriptionManagementController::class, 'reactivate'])->middleware('admin.permission:verification:action')->name('reactivate');
+        // Prolonger manuellement la période de validité d'un abonnement
         Route::post('/{id}/extend', [SubscriptionManagementController::class, 'extend'])->middleware('admin.permission:verification:action')->name('extend');
+        // Révoquer définitivement un abonnement et le badge associé
         Route::post('/{id}/revoke', [SubscriptionManagementController::class, 'revoke'])->middleware('admin.permission:verification:action')->name('revoke');
     });
+    // Consulter le journal d'attribution, suspension et révocation des badges
     Route::get('/badges/history', [SubscriptionManagementController::class, 'badgeHistories'])
         ->middleware('admin.permission:verification:view')
         ->name('badges.history');
@@ -444,18 +488,29 @@ Route::middleware(['admin.session'])->group(function () {
     // ------------------------------------------------------------------
     Route::prefix('payments')->name('payments.')->middleware('admin.permission:finance:view')->group(function () {
         // Endpoints existants préservés pour compatibilité
+        // Lister les transactions financières enregistrées sur la plateforme
         Route::get('/transactions', [AdminPaymentController::class, 'index'])->name('transactions.index');
+        // Consulter les détails complets d'une transaction financière
         Route::get('/transactions/{id}', [AdminPaymentController::class, 'show'])->name('transactions.show');
+        // Journal des événements IPN et webhooks liés à une transaction
         Route::get('/transactions/{id}/events', [AdminPaymentController::class, 'events'])->name('transactions.events');
+        // Initier une demande de remboursement sur une transaction
         Route::post('/transactions/{id}/refund', [AdminPaymentController::class, 'refund'])->middleware('admin.permission:finance:action')->name('transactions.refund');
 
+        // Lister les litiges et contestations financières ouvertes
         Route::get('/disputes', [AdminPaymentController::class, 'disputes'])->name('disputes.index');
+        // Ouvrir un dossier de litige financier
         Route::post('/disputes', [AdminPaymentController::class, 'createDispute'])->middleware('admin.permission:finance:action')->name('disputes.store');
+        // Consulter la fiche d'instruction d'un litige financier
         Route::get('/disputes/{id}', [AdminPaymentController::class, 'showDispute'])->name('disputes.show');
+        // Mettre à jour le statut d'un litige financier
         Route::post('/disputes/{id}/status', [AdminPaymentController::class, 'updateDisputeStatus'])->middleware('admin.permission:finance:action')->name('disputes.status');
+        // Ajouter une note d'instruction interne sur un litige
         Route::post('/disputes/{id}/notes', [AdminPaymentController::class, 'addDisputeNote'])->middleware('admin.permission:finance:action')->name('disputes.notes');
 
+        // Lister les déclarations d'incidents de double débit
         Route::get('/double-charge-claims', [AdminPaymentController::class, 'doubleChargeClaims'])->name('double_charge_claims.index');
+        // Enregistrer une réclamation administrative de double débit
         Route::post('/double-charge-claims', [AdminPaymentController::class, 'createDoubleChargeClaim'])->middleware('admin.permission:finance:action')->name('double_charge_claims.store');
 
         // 4.1 Liste paginée des transactions
@@ -463,6 +518,7 @@ Route::middleware(['admin.session'])->group(function () {
 
         // 4.3 Grand livre des Crédits BANGO et soldes actifs
         Route::get('/credits', [AdminPaymentOperationsController::class, 'credits'])->name('credits');
+        // Créditer manuellement le portefeuille de Crédits BANGO d'un utilisateur (geste commercial/ajustement)
         Route::post('/credits/wallets/{user}/deposit', [CreditWalletController::class, 'adminDeposit'])
             ->middleware('admin.permission:finance:manage')
             ->name('credits.deposit');
@@ -574,14 +630,23 @@ Route::middleware(['admin.session'])->group(function () {
     // MODULE 7 : CATALOGUE AUDIO & SONS REELS (Administration)
     // ------------------------------------------------------------------
     $soundCatalogRoutes = function () {
+        // Lister les sons musicaux et pistes audio du catalogue public
         Route::get('/', [AdminSoundCatalogController::class, 'index'])->name('index');
+        // Téléverser et ajouter un nouveau son officiel au catalogue
         Route::post('/', [AdminSoundCatalogController::class, 'store'])->middleware('admin.permission:moderation:action')->name('store');
+        // Consulter la fiche détaillée d'un son et ses métadonnées
         Route::get('/{id}', [AdminSoundCatalogController::class, 'show'])->name('show');
+        // Mettre à jour les informations d'un son (titre, artiste, genre)
         Route::post('/{id}', [AdminSoundCatalogController::class, 'update'])->middleware('admin.permission:moderation:action')->name('update');
+        // Publier ou dépublier un son du catalogue public
         Route::patch('/{id}/publication', [AdminSoundCatalogController::class, 'togglePublication'])->middleware('admin.permission:moderation:action')->name('publication');
+        // Mettre à jour les droits d'auteur et licences associées à un son
         Route::patch('/{id}/rights', [AdminSoundCatalogController::class, 'updateRights'])->middleware('admin.permission:moderation:action')->name('rights');
+        // Retirer un son du catalogue sans purger les Reels existants
         Route::delete('/{id}', [AdminSoundCatalogController::class, 'removeFromCatalog'])->middleware('admin.permission:moderation:action')->name('remove');
+        // Restaurer un son précédemment retiré du catalogue
         Route::post('/{id}/restore', [AdminSoundCatalogController::class, 'restore'])->middleware('admin.permission:moderation:action')->name('restore');
+        // Supprimer définitivement un son et purger les fichiers audio physiques
         Route::delete('/{id}/force', [AdminSoundCatalogController::class, 'destroy'])->middleware('admin.permission:operators:manage')->name('destroy');
     };
 
@@ -592,10 +657,15 @@ Route::middleware(['admin.session'])->group(function () {
     // MODULE 8 : PAGES PROFESSIONNELLES & CERTIFICATIONS (Module 12 PG)
     // ------------------------------------------------------------------
     Route::prefix('pages')->name('pages.')->middleware('admin.permission:verification:view')->group(function () {
+        // Lister les dossiers de certification d'entreprises en attente d'instruction
         Route::get('/certifications', [PageCertificationAdminController::class, 'index'])->name('certifications.index');
+        // Valider ou rejeter la certification d'une page professionnelle
         Route::post('/certifications/{certification}/decide', [PageCertificationAdminController::class, 'decide'])->middleware('admin.permission:verification:action')->name('certifications.decide');
+        // Suspendre la certification d'une page professionnelle
         Route::post('/{page}/suspend-certification', [PageCertificationAdminController::class, 'suspendCertification'])->middleware('admin.permission:verification:action')->name('suspend_certification');
+        // Suspendre l'ensemble des activités d'une page professionnelle
         Route::post('/{page}/suspend', [PageCertificationAdminController::class, 'suspendPage'])->middleware('admin.permission:verification:action')->name('suspend');
+        // Réactiver une page professionnelle suspendue
         Route::post('/{page}/unsuspend', [PageCertificationAdminController::class, 'unsuspendPage'])->middleware('admin.permission:verification:action')->name('unsuspend');
     });
 
@@ -605,31 +675,41 @@ Route::middleware(['admin.session'])->group(function () {
     Route::prefix('support')->name('support.')->group(function () {
         // Modèles de réponse types (4.10)
         Route::prefix('templates')->name('templates.')->middleware('admin.permission:support:templates')->group(function () {
+            // Lister les modèles de réponses types prédéfinies
             Route::get('/', [AdminSupportTemplateController::class, 'index'])->name('index');
+            // Créer un nouveau modèle de réponse type
             Route::post('/', [AdminSupportTemplateController::class, 'store'])->name('store');
+            // Mettre à jour un modèle de réponse existant
             Route::put('/{id}', [AdminSupportTemplateController::class, 'update'])->name('update');
         });
 
         // Centre d'aide et FAQ (4.11)
         Route::prefix('help')->name('help.')->middleware('admin.permission:support:help')->group(function () {
+            // Lister les articles d'aide et catégories de FAQ
             Route::get('/', [AdminSupportHelpCenterController::class, 'index'])->name('index');
+            // Consulter un article du centre d'aide pour édition
             Route::get('/{id}', [AdminSupportHelpCenterController::class, 'show'])->name('show');
+            // Mettre à jour le contenu ou le statut d'un article d'aide
             Route::put('/{id}', [AdminSupportHelpCenterController::class, 'update'])->name('update');
         });
 
         // Référentiels & Statistiques (4.8)
+        // Liste des agents et opérateurs assignables aux tickets de support
         Route::get('/assignees', [AdminSupportTicketOperationsController::class, 'assignees'])
             ->middleware('admin.permission:support:view')
             ->name('assignees');
 
+        // Règles et destinataires par défaut pour l'escalade d'un ticket
         Route::get('/escalation/default', [AdminSupportTicketOperationsController::class, 'defaultEscalation'])
             ->middleware('admin.permission:support:view')
             ->name('escalation.default');
 
+        // Réponse ou arbitrage suite à l'escalade d'un ticket
         Route::post('/escalation/answer', [AdminSupportTicketOperationsController::class, 'answerEscalation'])
             ->middleware('admin.permission:support:escalate')
             ->name('escalation.answer');
 
+        // Répartition statistique des modes et motifs de résolution des tickets
         Route::get('/resolutions/shares', [AdminSupportTicketOperationsController::class, 'resolutionsShares'])
             ->middleware('admin.permission:support:view')
             ->name('resolutions.shares');
@@ -642,53 +722,65 @@ Route::middleware(['admin.session'])->group(function () {
         // Billetterie Support (4.1 - 4.7)
         Route::prefix('tickets')->name('tickets.')->group(function () {
             // Consultation et création
+            // Lister les tickets de support avec pagination et filtres
             Route::get('/', [AdminSupportTicketOperationsController::class, 'index'])
                 ->middleware('admin.permission:support:view')
                 ->name('index');
 
+            // Créer manuellement un ticket de support au nom d'un client
             Route::post('/', [AdminSupportTicketOperationsController::class, 'store'])
                 ->middleware('admin.permission:support:action')
                 ->name('store');
 
             // Assignation groupée ou unitaire (4.4)
+            // Assigner un ou plusieurs tickets à un opérateur
             Route::post('/assign', [AdminSupportTicketOperationsController::class, 'assign'])
                 ->middleware('admin.permission:support:assign')
                 ->name('assign.bulk');
 
             // Actions ciblées par ID
+            // Consulter le fil complet d'un ticket de support
             Route::get('/{id}', [AdminSupportTicketOperationsController::class, 'show'])
                 ->middleware('admin.permission:support:view')
                 ->name('show');
 
+            // Répondre officiellement à un utilisateur sur son ticket
             Route::post('/{id}/replies', [AdminSupportTicketOperationsController::class, 'reply'])
                 ->middleware('admin.permission:support:reply')
                 ->name('replies');
 
+            // Ajouter une note interne privée visible uniquement des opérateurs
             Route::post('/{id}/notes', [AdminSupportTicketOperationsController::class, 'note'])
                 ->middleware('admin.permission:support:notes')
                 ->name('notes');
 
+            // Marquer un ticket de support comme résolu
             Route::post('/{id}/resolve', [AdminSupportTicketOperationsController::class, 'resolve'])
                 ->middleware('admin.permission:support:resolve')
                 ->name('resolve');
 
+            // Rouvrir un ticket de support précédemment résolu
             Route::post('/{id}/reopen', [AdminSupportTicketOperationsController::class, 'reopen'])
                 ->middleware('admin.permission:support:resolve')
                 ->name('reopen');
 
+            // Escalader un ticket vers un niveau d'assistance supérieur
             Route::post('/{id}/escalate', [AdminSupportTicketOperationsController::class, 'escalate'])
                 ->middleware('admin.permission:support:escalate')
                 ->name('escalate');
 
             // Routes historiques conservées pour rétrocompatibilité
+            // Mettre à jour le statut d'un ticket (alias rétrocompatible)
             Route::patch('/{id}/status', [AdminSupportTicketController::class, 'updateStatus'])
                 ->middleware('admin.permission:support:action')
                 ->name('status');
 
+            // Assigner un ticket à un opérateur (alias rétrocompatible)
             Route::patch('/{id}/assign', [AdminSupportTicketController::class, 'assign'])
                 ->middleware('admin.permission:support:action')
                 ->name('assign');
 
+            // Ajouter un message dans un ticket (alias rétrocompatible)
             Route::post('/{id}/messages', [AdminSupportTicketController::class, 'reply'])
                 ->middleware('admin.permission:support:action')
                 ->name('reply');
@@ -698,6 +790,7 @@ Route::middleware(['admin.session'])->group(function () {
     // ------------------------------------------------------------------
     // MODULE 9.1 : GESTION 360° DES COMPTES & SANCTIONS (Étape 5)
     // ------------------------------------------------------------------
+    // Lister les membres de l'équipe opérationnelle et leurs disponibilités
     Route::get('/team', [AdminAccountOperationsController::class, 'team'])
         ->middleware('admin.permission:accounts:view')
         ->name('team');
@@ -719,22 +812,27 @@ Route::middleware(['admin.session'])->group(function () {
             ->name('support_summary');
 
         // Sous-onglets transverses de la fiche compte (5.3)
+        // Lister les annonces immobilières publiées par le compte
         Route::get('/{id}/listings', [AdminAccountOperationsController::class, 'listings'])
             ->middleware('admin.permission:accounts:view')
             ->name('listings');
 
+        // Lister les contenus (posts, reels, stories) publiés par le compte
         Route::get('/{id}/contents', [AdminAccountOperationsController::class, 'contents'])
             ->middleware('admin.permission:accounts:view')
             ->name('contents');
 
+        // Historique des paiements et transactions effectués par le compte
         Route::get('/{id}/payments', [AdminAccountOperationsController::class, 'payments'])
             ->middleware('admin.permission:accounts:view')
             ->name('payments');
 
+        // Historique des dossiers de modération impliquant ce compte
         Route::get('/{id}/cases', [AdminAccountOperationsController::class, 'cases'])
             ->middleware('admin.permission:accounts:view')
             ->name('cases');
 
+        // Historique des tickets de support client associés à ce compte
         Route::get('/{id}/tickets', [AdminAccountOperationsController::class, 'tickets'])
             ->middleware('admin.permission:accounts:view')
             ->name('tickets');
@@ -750,31 +848,38 @@ Route::middleware(['admin.session'])->group(function () {
             ->name('actions.preview');
 
         // Sanctions et avertissements (5.6 - 5.7)
+        // Appliquer une suspension temporaire ou disciplinaire sur le compte
         Route::post('/{id}/suspend', [AdminAccountSanctionController::class, 'suspend'])
             ->middleware('admin.permission:accounts:sanctions')
             ->name('suspend');
 
+        // Lever la suspension d'un compte
         Route::post('/{id}/suspend/lift', [AdminAccountSanctionController::class, 'liftSuspension'])
             ->middleware('admin.permission:accounts:sanctions')
             ->name('suspend.lift');
 
+        // Émettre un avertissement formel à l'encontre de l'utilisateur
         Route::post('/{id}/warnings', [AdminAccountSanctionController::class, 'warning'])
             ->middleware('admin.permission:accounts:sanctions')
             ->name('warnings');
 
         // Badges et Certifications (5.8 - 5.9)
+        // Prolonger la durée de validité du badge professionnel de l'utilisateur
         Route::post('/{id}/badge/extend', [AdminAccountSanctionController::class, 'extendBadge'])
             ->middleware('admin.permission:accounts:badges')
             ->name('badge.extend');
 
+        // Retirer le badge professionnel d'un utilisateur
         Route::post('/{id}/badge/remove', [AdminAccountSanctionController::class, 'removeBadge'])
             ->middleware('admin.permission:accounts:badges')
             ->name('badge.remove');
 
+        // Octroyer la certification officielle à un utilisateur
         Route::post('/{id}/certification', [AdminAccountSanctionController::class, 'certify'])
             ->middleware('admin.permission:accounts:badges')
             ->name('certification.grant');
 
+        // Retirer la certification d'un utilisateur
         Route::post('/{id}/certification/remove', [AdminAccountSanctionController::class, 'removeCertification'])
             ->middleware('admin.permission:accounts:badges')
             ->name('certification.remove');
@@ -785,10 +890,12 @@ Route::middleware(['admin.session'])->group(function () {
             ->name('contact');
 
         // Anonymisation RGPD à double approbation (5.11)
+        // Initier une demande d'anonymisation / droit à l'oubli RGPD (1er œil)
         Route::post('/{id}/anonymize', [AdminAccountGdprController::class, 'requestAnonymization'])
             ->middleware('admin.permission:accounts:gdpr:request')
             ->name('anonymize.request');
 
+        // Valider l'anonymisation RGPD par un second opérateur (2e œil)
         Route::post('/{id}/anonymize/approve', [AdminAccountGdprController::class, 'approveAnonymization'])
             ->middleware('admin.permission:accounts:gdpr:approve')
             ->name('anonymize.approve');
@@ -811,10 +918,12 @@ Route::middleware(['admin.session'])->group(function () {
 
     // Alias direct pour la gestion des utilisateurs / certification (Point 46)
     Route::prefix('users')->name('users.')->group(function () {
+        // Alias pour octroyer la certification officielle d'un utilisateur
         Route::post('/{id}/certification', [AdminAccountSanctionController::class, 'certify'])
             ->middleware('admin.permission:accounts:badges')
             ->name('certification.grant');
 
+        // Alias pour retirer la certification d'un utilisateur
         Route::post('/{id}/certification/remove', [AdminAccountSanctionController::class, 'removeCertification'])
             ->middleware('admin.permission:accounts:badges')
             ->name('certification.remove');
@@ -969,69 +1078,103 @@ Route::middleware(['admin.session'])->group(function () {
     // ------------------------------------------------------------------
     Route::prefix('audit')->name('audit.')->group(function () {
         // 4.1 Registre d'audit & vérification cryptographique
+        // Consultation du registre d'audit administratif paginé et filtré
         Route::get('/', [AdminAuditController::class, 'index'])
             ->middleware('admin.permission:audit:view')
             ->name('index');
+
+        // Vérification cryptographique de l'intégrité de la chaîne d'audit SHA-256
         Route::get('/verify', [AdminAuditController::class, 'verify'])
             ->middleware('admin.permission:audit:verify')
             ->name('verify');
+
+        // Historique des exports d'audit réalisés
         Route::get('/exports', [AdminAuditController::class, 'exports'])
             ->middleware('admin.permission:audit:export')
             ->name('exports');
+
+        // Prévisualisation des données d'un export d'audit avant génération
         Route::post('/exports/preview', [AdminAuditController::class, 'previewExport'])
             ->middleware('admin.permission:audit:export')
             ->name('exports.preview');
+
+        // Génération et téléchargement sécurisé d'un export d'audit scellé
         Route::post('/exports', [AdminAuditController::class, 'export'])
             ->middleware('admin.permission:audit:export')
             ->name('exports.download');
+
+        // Vérification de la signature cryptographique d'un fichier d'export
         Route::get('/exports/verify', [AdminAuditController::class, 'verifyExport'])
             ->middleware('admin.permission:audit:verify')
             ->name('exports.verify');
 
         // 4.4 & 4.5 Gouvernance des Rôles (Matrice, Prévisualisation & 4-Yeux)
         Route::prefix('roles')->name('roles.')->group(function () {
+            // Matrice des rôles, permissions et habilitations des opérateurs
             Route::get('/', [AdminRoleGovernanceController::class, 'matrix'])
                 ->middleware('admin.permission:roles:view')
                 ->name('index');
+
+            // Prévisualisation de l'impact de l'attribution d'un rôle
             Route::get('/assign-preview', [AdminRoleGovernanceController::class, 'assignPreview'])
                 ->middleware('admin.permission:roles:view')
                 ->name('assign_preview');
+
+            // Prévisualisation de l'impact de la révocation d'un rôle
             Route::get('/revoke-preview', [AdminRoleGovernanceController::class, 'revokePreview'])
                 ->middleware('admin.permission:roles:view')
                 ->name('revoke_preview');
+
+            // Création d'une demande de modification de rôle soumise au principe des 4-yeux
             Route::post('/requests', [AdminRoleGovernanceController::class, 'storeRequest'])
                 ->middleware('admin.permission:roles:request')
                 ->name('requests.store');
+
+            // Confirmation ou rejet par un second administrateur (validation 4-yeux)
             Route::post('/confirm', [AdminRoleGovernanceController::class, 'confirm'])
                 ->middleware('admin.permission:roles:confirm')
                 ->name('confirm');
         });
 
         // 4.1 bis & 4.3 Détail & Tentative d'altération
+        // Détail complet d'une entrée de journal d'audit cryptographique
         Route::get('/{id}', [AdminAuditController::class, 'show'])
             ->middleware('admin.permission:audit:view')
             ->name('show');
+
+        // Enregistrement d'une tentative d'altération d'un enregistrement d'audit
         Route::post('/{id}/edit-attempt', [AdminAuditController::class, 'editAttempt'])
             ->middleware('admin.permission:audit:view')
             ->name('edit_attempt');
     });
 
     // Alias plats pour l'audit et la gouvernance (Section 4 & prompt)
+    // Alias direct pour la prévisualisation de l'attribution d'un rôle
     Route::get('/assign-preview', [AdminRoleGovernanceController::class, 'assignPreview'])
         ->middleware('admin.permission:roles:view')
         ->name('assign_preview');
+
+    // Alias direct pour la prévisualisation de la révocation d'un rôle
     Route::get('/revoke-preview', [AdminRoleGovernanceController::class, 'revokePreview'])
         ->middleware('admin.permission:roles:view')
         ->name('revoke_preview');
+
+    // Alias direct pour la validation 4-yeux d'un changement de rôle
     Route::post('/confirm', [AdminRoleGovernanceController::class, 'confirm'])
         ->middleware('admin.permission:roles:confirm')
         ->name('confirm');
+
+    // Alias direct pour l'aperçu d'un export d'audit
     Route::post('/exports/preview', [AdminAuditController::class, 'previewExport'])
         ->middleware('admin.permission:audit:export')
         ->name('exports.preview');
+
+    // Alias direct pour la génération d'un export d'audit
     Route::post('/exports', [AdminAuditController::class, 'export'])
         ->middleware('admin.permission:audit:export')
         ->name('exports.download');
+
+    // Alias direct pour la vérification d'intégrité d'un export d'audit
     Route::get('/exports/verify', [AdminAuditController::class, 'verifyExport'])
         ->middleware('admin.permission:audit:verify')
         ->name('exports.verify');
@@ -1041,122 +1184,181 @@ Route::middleware(['admin.session'])->group(function () {
     // ------------------------------------------------------------------
     Route::prefix('settings')->name('settings.')->group(function () {
         // 5.1 Tarification & Offres
+        // Consultation de la grille tarifaire et des paramètres d'offres
         Route::get('/pricing', [AdminSystemSettingsController::class, 'pricing'])
             ->middleware('admin.permission:settings:pricing')
             ->name('pricing.index');
+
+        // Simulation et analyse d'impact d'un changement de tarification
         Route::get('/pricing/impact', [AdminSystemSettingsController::class, 'pricingImpact'])
             ->middleware('admin.permission:settings:pricing')
             ->name('pricing.impact');
+
+        // Proposition d'une modification de grille tarifaire (validation requise)
         Route::post('/pricing/changes', [AdminSystemSettingsController::class, 'proposePricingChange'])
             ->middleware('admin.permission:settings:pricing')
             ->name('pricing.changes');
 
         // 5.2 Seuils automatiques de modération
+        // Consultation des seuils automatiques d'alerte et de modération
         Route::get('/thresholds', [AdminSystemSettingsController::class, 'thresholds'])
             ->middleware('admin.permission:settings:thresholds')
             ->name('thresholds.index');
+
+        // Mise à jour des seuils automatiques de modération
         Route::put('/thresholds', [AdminSystemSettingsController::class, 'updateThresholds'])
             ->middleware('admin.permission:settings:thresholds')
             ->name('thresholds.update');
 
         // 5.3 Opérateurs Mobile Money
+        // Liste des opérateurs de paiement mobile money et leur statut opérationnel
         Route::get('/operators', [AdminSystemSettingsController::class, 'operators'])
             ->middleware('admin.permission:settings:operators')
             ->name('operators.index');
+
+        // Analyse d'impact en cas de suspension ou défaillance d'un opérateur
         Route::get('/operators/impact', [AdminSystemSettingsController::class, 'operatorImpact'])
             ->middleware('admin.permission:settings:operators')
             ->name('operators.impact');
+
+        // Suspension temporaire des flux de paiement pour un opérateur
         Route::post('/operators/{id}/suspend', [AdminSystemSettingsController::class, 'suspendOperator'])
             ->middleware('admin.permission:settings:operators')
             ->name('operators.suspend');
+
+        // Reprise des flux de paiement pour un opérateur suspendu
         Route::post('/operators/{id}/resume', [AdminSystemSettingsController::class, 'resumeOperator'])
             ->middleware('admin.permission:settings:operators')
             ->name('operators.resume');
 
         // 5.4 Référentiel géographique (Villes & Quartiers)
+        // Liste des villes configurées dans le référentiel géographique
         Route::get('/cities', [AdminSystemSettingsController::class, 'cities'])
             ->middleware('admin.permission:settings:geo')
             ->name('cities.index');
+
+        // Liste des quartiers et zones géographiques avec compteurs d'annonces
         Route::get('/areas', [AdminSystemSettingsController::class, 'areas'])
             ->middleware('admin.permission:settings:geo')
             ->name('areas.index');
+
+        // Exclusion ou masquage d'une zone géographique non couverte
         Route::post('/areas/ignore', [AdminSystemSettingsController::class, 'ignoreArea'])
             ->middleware('admin.permission:settings:geo')
             ->name('areas.ignore');
+
+        // Ajout d'un nouveau quartier rattaché à une ville
         Route::post('/areas/{city}', [AdminSystemSettingsController::class, 'createArea'])
             ->middleware('admin.permission:settings:geo')
             ->name('areas.create');
+
+        // Modification du libellé ou des métadonnées d'un quartier
         Route::patch('/areas/{city}/{name}', [AdminSystemSettingsController::class, 'updateArea'])
             ->middleware('admin.permission:settings:geo')
             ->name('areas.update');
+
+        // Exclusion d'un quartier par son identifiant unique
         Route::post('/areas/{id}/ignore', [AdminSystemSettingsController::class, 'ignoreArea'])
             ->middleware('admin.permission:settings:geo')
             ->name('areas.ignore_by_id');
 
         // 5.5 Centres d'intérêt
+        // Liste des points d'intérêt et commodités de proximité
         Route::get('/interests', [AdminSystemSettingsController::class, 'interests'])
             ->middleware('admin.permission:settings:interests')
             ->name('interests.index');
+
+        // Création d'un nouveau point d'intérêt dans le catalogue
         Route::post('/interests', [AdminSystemSettingsController::class, 'createInterest'])
             ->middleware('admin.permission:settings:interests')
             ->name('interests.store');
+
+        // Modification d'un point d'intérêt existant
         Route::patch('/interests/{id}', [AdminSystemSettingsController::class, 'updateInterest'])
             ->middleware('admin.permission:settings:interests')
             ->name('interests.update');
 
         // 5.6 CGU & Versions légales
+        // Liste des documents légaux, CGU et politiques de confidentialité
         Route::get('/legal', [AdminSystemSettingsController::class, 'legalDocuments'])
             ->middleware('admin.permission:settings:legal')
             ->name('legal.index');
+
+        // Publication d'une nouvelle version officielle d'un document légal
         Route::post('/legal/{key}/publish', [AdminSystemSettingsController::class, 'publishLegalDocument'])
             ->middleware('admin.permission:settings:legal')
             ->name('legal.publish');
 
         // 5.7 Maintenance, Incidents & Version minimale
+        // Statut des services, mode maintenance et versions minimales requises
         Route::get('/service', [AdminSystemSettingsController::class, 'service'])
             ->middleware('admin.permission:settings:maintenance')
             ->name('service.index');
+
+        // Déclenchement d'une action opérationnelle de maintenance ou bascule d'incident
         Route::post('/service/actions', [AdminSystemSettingsController::class, 'serviceAction'])
             ->middleware('admin.permission:settings:maintenance')
             ->name('service.actions');
 
         // 5.8 Référentiel des délais
+        // Consultation des délais réglementaires et SLA opérationnels de la plateforme
         Route::get('/delays', [AdminSystemSettingsController::class, 'delays'])
             ->middleware('admin.permission:settings:delays')
             ->name('delays.index');
     });
 
     // Alias plats pour les paramètres (Section 5 & prompt)
+    // Alias direct pour l'analyse d'impact tarifaire
     Route::get('/impact', [AdminSystemSettingsController::class, 'pricingImpact'])
         ->middleware('admin.permission:settings:pricing')
         ->name('impact');
+
+    // Alias direct pour proposer un changement de tarif
     Route::post('/changes', [AdminSystemSettingsController::class, 'proposePricingChange'])
         ->middleware('admin.permission:settings:pricing')
         ->name('changes');
+
+    // Alias direct pour la mise à jour des seuils de modération
     Route::put('/thresholds', [AdminSystemSettingsController::class, 'updateThresholds'])
         ->middleware('admin.permission:settings:thresholds')
         ->name('thresholds');
+
+    // Alias direct pour suspendre un opérateur Mobile Money
     Route::post('/suspend', [AdminSystemSettingsController::class, 'suspendOperator'])
         ->middleware('admin.permission:settings:operators')
         ->name('suspend');
+
+    // Alias direct pour réactiver un opérateur Mobile Money
     Route::post('/resume', [AdminSystemSettingsController::class, 'resumeOperator'])
         ->middleware('admin.permission:settings:operators')
         ->name('resume');
+
+    // Alias direct pour la liste des quartiers
     Route::get('/areas', [AdminSystemSettingsController::class, 'areas'])
         ->middleware('admin.permission:settings:geo')
         ->name('areas');
+
+    // Alias direct pour l'ajout d'un quartier à une ville
     Route::post('/areas/{city}', [AdminSystemSettingsController::class, 'createArea'])
         ->middleware('admin.permission:settings:geo')
         ->name('areas.create_alias');
+
+    // Alias direct pour la mise à jour d'un quartier
     Route::patch('/areas/{city}/{name}', [AdminSystemSettingsController::class, 'updateArea'])
         ->middleware('admin.permission:settings:geo')
         ->name('areas.update_alias');
+
+    // Alias direct pour ignorer ou exclure un quartier
     Route::post('/ignore', [AdminSystemSettingsController::class, 'ignoreArea'])
         ->middleware('admin.permission:settings:geo')
         ->name('ignore');
+
+    // Alias direct pour la création d'un point d'intérêt
     Route::post('/interests', [AdminSystemSettingsController::class, 'createInterest'])
         ->middleware('admin.permission:settings:interests')
         ->name('interests.store_alias');
+
+    // Alias direct pour la modification d'un point d'intérêt
     Route::patch('/interests/{id}', [AdminSystemSettingsController::class, 'updateInterest'])
         ->middleware('admin.permission:settings:interests')
         ->name('interests.update_alias');
@@ -1165,33 +1367,52 @@ Route::middleware(['admin.session'])->group(function () {
     // SECTION 6 : STATISTIQUES STRATÉGIQUES & PILOTAGE
     // ------------------------------------------------------------------
     Route::prefix('stats')->name('stats.')->group(function () {
+        // Vue d'ensemble des indicateurs de performance clés (KPI globaux)
         Route::get('/overview', [AdminStrategicStatsController::class, 'overview'])
             ->middleware('admin.permission:stats:view')
             ->name('overview');
+
+        // Statistiques d'acquisition utilisateurs et de conversion des canaux
         Route::get('/acquisition', [AdminStrategicStatsController::class, 'acquisition'])
             ->middleware('admin.permission:stats:view')
             ->name('acquisition');
+
+        // Métriques financières détaillées, revenus et volume d'affaires
         Route::get('/revenue', [AdminStrategicStatsController::class, 'revenue'])
             ->middleware('admin.permission:stats:view')
             ->name('revenue');
+
+        // Statistiques d'activité de modération, temps de réponse et volumes
         Route::get('/moderation', [AdminStrategicStatsController::class, 'moderation'])
             ->middleware('admin.permission:stats:view')
             ->name('moderation');
+
+        // Métriques d'engagement, churn et rétention des cohortes
         Route::get('/retention', [AdminStrategicStatsController::class, 'retention'])
             ->middleware('admin.permission:stats:view')
             ->name('retention');
+
+        // Statistiques immobilières, liquidité du parc et délais moyens de location
         Route::get('/immo', [AdminStrategicStatsController::class, 'immo'])
             ->middleware('admin.permission:stats:view')
             ->name('immo');
+
+        // Liste des rapports stratégiques périodiques générés
         Route::get('/reports', [AdminStrategicStatsController::class, 'reports'])
             ->middleware('admin.permission:stats:reports')
             ->name('reports.index');
+
+        // Mise à jour ou validation d'un rapport stratégique
         Route::put('/reports/{id}', [AdminStrategicStatsController::class, 'updateReport'])
             ->middleware('admin.permission:stats:reports')
             ->name('reports.update');
+
+        // Prévisualisation des données d'un export statistique
         Route::post('/exports/preview', [AdminStrategicStatsController::class, 'previewExport'])
             ->middleware('admin.permission:stats:export')
             ->name('exports.preview');
+
+        // Génération et export des données statistiques au format tableur
         Route::post('/exports', [AdminStrategicStatsController::class, 'export'])
             ->middleware('admin.permission:stats:export')
             ->name('exports.download');
@@ -1205,12 +1426,19 @@ Route::middleware(['admin.session'])->group(function () {
     // ------------------------------------------------------------------
     // SECTION 7 : TABLEAU DE BORD GLOBAL & ONBOARDING DIRECTION
     // ------------------------------------------------------------------
+    // Synthèse exécutive du tableau de bord direction
     Route::get('/dashboard', [AdminDirectionDashboardController::class, 'dashboard'])
         ->name('dashboard');
+
+    // Export consolidé des indicateurs du tableau de bord direction
     Route::post('/dashboard/exports', [AdminDirectionDashboardController::class, 'exportDashboard'])
         ->name('dashboard.exports');
+
+    // Téléchargement sécurisé d'un export exécutif généré
     Route::get('/exports/{id}', [AdminDirectionDashboardController::class, 'showExport'])
         ->name('exports.show');
+
+    // Guide et statut du parcours d'onboarding de l'administrateur connecté
     Route::get('/me/onboarding', [AdminDirectionDashboardController::class, 'onboarding'])
         ->name('me.onboarding');
 });

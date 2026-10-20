@@ -223,7 +223,9 @@ Route::prefix('geo')->group(function () {
 // --------------------------------------------------------------------------
 // AGENTS — ANNUAIRE PUBLIC & RECHERCHE (AG-06)
 // --------------------------------------------------------------------------
+// Rechercher des agents certifiés dans l'annuaire public BANGO (filtres par ville, langue, note)
 Route::get('/agents/search', [AgentDirectoryController::class, 'search'])->name('api.agents.search');
+// Alias de recherche d'agents dans l'annuaire public BANGO
 Route::get('/search/agents', [AgentDirectoryController::class, 'search'])->name('api.search.agents');
 
 // --------------------------------------------------------------------------
@@ -265,46 +267,63 @@ Route::prefix('listings')->group(function () {
 // --------------------------------------------------------------------------
 // MODULE 12 : PG — PAGES PROFESSIONNELLES (Consultation & Recherche Publiques)
 // --------------------------------------------------------------------------
+// Rechercher des pages professionnelles publiques par nom, catégorie ou ville
 Route::get('/search/pages', [PageSearchController::class, 'index'])->name('api.search.pages');
+// Consulter les annonces immobilières publiées par une page professionnelle
 Route::get('/pages/{page}/listings', [PageController::class, 'listings'])->name('api.pages.listings');
+// Consulter la vitrine publique d'une page professionnelle par son identifiant ou slug
 Route::get('/pages/{identifier}', [PageController::class, 'show'])->where('identifier', '^(?!my-pages$)[a-zA-Z0-9_\-]+$')->name('api.pages.show');
 
 // --------------------------------------------------------------------------
 // MODULE 3 : LG — CMS DOCUMENTS LÉGAUX VERSIONNÉS & SIGNALEMENT DROITS (LG-17)
 // --------------------------------------------------------------------------
+// Consulter la dernière version publiée d'un document légal (CGU, confidentialité, mentions)
 Route::get('/legal/documents/{slug}', [LegalDocumentController::class, 'show'])->name('api.legal.documents.show');
+// Déposer une réclamation d'atteinte aux droits d'auteur ou à la propriété intellectuelle
 Route::post('/legal/copyright-claims', [CopyrightClaimController::class, 'store'])->name('api.legal.copyright-claims.store');
+// Alias pour déposer une réclamation de droits d'auteur
 Route::post('/copyright-claims', [CopyrightClaimController::class, 'store'])->name('api.copyright-claims.store');
 
 // Aliases pour le signalement et renvoi de code d'appareil (Point 22)
+// Renvoyer le code de validation pour un nouvel appareil non reconnu
 Route::post('/auth/device/resend', [AdminDeviceController::class, 'resend'])->name('api.auth.device.resend');
+// Signaler une tentative de connexion suspecte depuis un appareil non reconnu
 Route::post('/auth/device/report', [AdminDeviceController::class, 'report'])->name('api.auth.device.report');
+// Alias pour signaler un appareil suspect
 Route::post('/device/report', [AdminDeviceController::class, 'report'])->name('api.device.report');
+// Alias pour renvoyer le code de validation d'appareil
 Route::post('/device/resend', [AdminDeviceController::class, 'resend'])->name('api.device.resend');
 
 // --------------------------------------------------------------------------
 // MODULE EDGE : RÉSOLUTION DES LIENS UNIVERSELS & COURTS
 // --------------------------------------------------------------------------
+// Résoudre un lien universel, court ou profond vers la ressource BANGO correspondante
 Route::get('/content/resolve-link', [LinkResolverController::class, 'resolve'])->name('api.content.resolve-link');
 
 // --------------------------------------------------------------------------
 // MODULE 18 : SUP — CENTRE D’AIDE FAQ & RETOUR D'UTILITÉ
 // --------------------------------------------------------------------------
 Route::prefix('help/articles')->group(function () {
+    // Lister et rechercher les articles d'aide FAQ par catégorie ou mot-clé
     Route::get('/', [HelpArticleController::class, 'index'])->name('api.help.articles.index');
+    // Consulter le contenu détaillé d'un article d'aide par son slug
     Route::get('/{slug}', [HelpArticleController::class, 'show'])->name('api.help.articles.show');
+    // Enregistrer l'avis d'utilité d'un utilisateur sur un article d'aide (utile / pas utile)
     Route::post('/{id}/feedback', [HelpArticleFeedbackController::class, 'feedback'])->name('api.help.articles.feedback');
 });
 
 // --------------------------------------------------------------------------
 // MODULE 19 : SY — PROTOCOLE TUS v1.0.0 (DÉCOUVERTE PUBLIQUE)
 // --------------------------------------------------------------------------
+// Découverte des capacités du serveur de téléversement TUS (extensions, taille max)
 Route::options('/uploads/tus', [TusUploadController::class, 'options'])->name('api.uploads.tus.options');
+// Découverte des options pour une ressource de téléversement TUS spécifique
 Route::options('/uploads/tus/{id}', [TusUploadController::class, 'options'])->name('api.uploads.tus.options.id');
 
 // --------------------------------------------------------------------------
 // MODULE SP / SY-21 : CONTRÔLE DE VERSION & MISE À JOUR REQUISE
 // --------------------------------------------------------------------------
+// Vérifier la compatibilité de version de l'application mobile et l'exigence de mise à jour
 Route::get('/system/version', AppVersionController::class)->name('api.system.version');
 
 // --------------------------------------------------------------------------
@@ -424,6 +443,7 @@ Route::middleware('auth:api')->group(function () {
     // --------------------------------------------------------------------------
     // FRIENDS & CARNET D'ADRESSES (AU-19)
     // --------------------------------------------------------------------------
+    // Trouver des contacts et amis par correspondance d'empreintes de numéros (AU-19)
     Route::post('/friends/match-fingerprints', [ContactMatchingController::class, 'match'])->name('api.friends.match-fingerprints');
 
     // --------------------------------------------------------------------------
@@ -504,8 +524,11 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/{id}/visits', [ProspectVisitController::class, 'book'])->whereUuid('id')->name('api.listings.visits.book');
 
         // Commentaires sur une annonce immobilière
+        // Lister les commentaires publiés sur une annonce immobilière
         Route::get('/{id}/comments', [ListingCommentController::class, 'index'])->whereUuid('id')->name('api.listings.comments.index');
+        // Publier un nouveau commentaire ou une question sur une annonce immobilière
         Route::post('/{id}/comments', [ListingCommentController::class, 'store'])->whereUuid('id')->name('api.listings.comments.store');
+        // Supprimer un commentaire sur une annonce immobilière (réservé à l'auteur ou au bailleur)
         Route::delete('/{id}/comments/{commentId}', [ListingCommentController::class, 'destroy'])->whereUuid('id')->name('api.listings.comments.destroy');
     });
 
@@ -537,8 +560,11 @@ Route::middleware('auth:api')->group(function () {
     // --------------------------------------------------------------------------
     Route::prefix('landlord')->group(function () {
         // KYC Bailleur (accessible à tout utilisateur authentifié pour soumission de dossier)
+        // Soumettre un dossier de vérification d'identité (KYC) pour le badge bailleur
         Route::post('/kyc/submit', [LandlordKycController::class, 'submit'])->name('api.landlord.kyc.submit');
+        // Consulter l'état d'avancement et le statut du dossier KYC bailleur
         Route::get('/kyc', [LandlordKycController::class, 'show'])->name('api.landlord.kyc.show');
+        // Télécharger ou visualiser une pièce justificative du dossier KYC bailleur
         Route::get('/kyc/documents/{id}', [LandlordKycController::class, 'downloadDocument'])->whereUuid('id')->name('api.landlord.kyc.download');
 
         // Actions réservées au bailleur certifié avec badge actif
@@ -575,10 +601,15 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/visits/{id}/answer', [LandlordVisitController::class, 'answer'])->whereUuid('id')->name('api.landlord.visits.answer');
 
         // Délégations émises par le bailleur
+        // Lister les mandats de délégation de gestion immobilière émis par le bailleur
         Route::get('/delegations', [LandlordDelegationController::class, 'index'])->name('api.landlord.delegations.index');
+        // Révoquer ou annuler une délégation de gestion confiée à un agent
         Route::delete('/delegations/{id}', [LandlordDelegationController::class, 'destroy'])->whereUuid('id')->name('api.landlord.delegations.destroy');
+        // Relancer un agent immobilier invité pour une délégation en attente
         Route::post('/delegations/{id}/remind', [LandlordDelegationController::class, 'remind'])->whereUuid('id')->name('api.landlord.delegations.remind');
+        // Modifier les permissions ou les modalités d'une délégation active
         Route::put('/delegations/{id}', [LandlordDelegationController::class, 'update'])->whereUuid('id')->name('api.landlord.delegations.update');
+        // Réactiver une délégation précédemment suspendue ou expirée
         Route::post('/delegations/{id}/reinstate', [LandlordDelegationController::class, 'reinstate'])->whereUuid('id')->name('api.landlord.delegations.reinstate');
 
         // Analytique immobilière chronologique sur 30 jours (BL-19 / Étape 10)
@@ -590,8 +621,11 @@ Route::middleware('auth:api')->group(function () {
     // --------------------------------------------------------------------------
     Route::prefix('agent')->group(function () {
         // Invitations reçues par l'agent
+        // Lister les invitations de délégation reçues par l'agent immobilier
         Route::get('/invitations', [AgentInvitationController::class, 'index'])->name('api.agent.invitations.index');
+        // Accepter une invitation de mandat de délégation de gestion immobilière
         Route::post('/invitations/{id}/accept', [AgentInvitationController::class, 'accept'])->whereUuid('id')->name('api.agent.invitations.accept');
+        // Refuser une proposition de mandat de délégation immobilière
         Route::post('/invitations/{id}/reject', [AgentInvitationController::class, 'reject'])->whereUuid('id')->name('api.agent.invitations.reject');
 
         // Actions réservées à l'agent avec badge actif
@@ -627,7 +661,9 @@ Route::middleware('auth:api')->group(function () {
         Route::put('/privacy', [PrivacyController::class, 'update']);
 
         // Réglages des notifications (ST-17)
+        // Consulter les préférences de notification push, email et SMS de l'utilisateur
         Route::get('/notifications', [NotificationSettingsController::class, 'show'])->name('api.settings.notifications.show');
+        // Mettre à jour les préférences de notification
         Route::put('/notifications', [NotificationSettingsController::class, 'update'])->name('api.settings.notifications.update');
 
         // Bouton d'urgence : Sécuriser le compte (déconnecter autres appareils)
@@ -641,17 +677,25 @@ Route::middleware('auth:api')->group(function () {
 
         // Double Authentification TOTP (ST-09 / ST-10)
         Route::prefix('2fa')->group(function () {
+            // Générer une clé secrète et un QR Code pour la configuration de l'application TOTP
             Route::post('/totp/setup', [TwoFactorTotpController::class, 'setup'])->name('api.settings.2fa.totp.setup');
+            // Valider le premier code TOTP pour activer l'authentification à deux facteurs
             Route::post('/totp/verify', [TwoFactorTotpController::class, 'verify'])->name('api.settings.2fa.totp.verify');
+            // Désactiver l'authentification à deux facteurs (TOTP/SMS) après confirmation du mot de passe
             Route::post('/disable', [TwoFactorTotpController::class, 'disable'])->name('api.settings.2fa.disable');
 
             // Double Authentification SMS
+            // Envoyer un code de validation SMS pour configurer la 2FA par SMS
             Route::post('/sms/send', [TwoFactorSmsController::class, 'send'])->name('api.settings.2fa.sms.send');
+            // Valider le code SMS et activer la 2FA par SMS
             Route::post('/sms/verify', [TwoFactorSmsController::class, 'verify'])->name('api.settings.2fa.sms.verify');
 
             // Codes de secours à usage unique (ST-10)
+            // Consulter la liste des codes de secours 2FA actifs (ou leur statut d'utilisation)
             Route::get('/backup-codes', [BackupCodeController::class, 'index'])->name('api.settings.2fa.backup-codes.index');
+            // Générer un nouveau jeu de codes de secours 2FA
             Route::post('/backup-codes', [BackupCodeController::class, 'regenerate'])->name('api.settings.2fa.backup-codes.generate');
+            // Régénérer et invalider les anciens codes de secours 2FA
             Route::post('/backup-codes/regenerate', [BackupCodeController::class, 'regenerate'])->name('api.settings.2fa.backup-codes.regenerate');
         });
 
@@ -714,15 +758,21 @@ Route::middleware('auth:api')->group(function () {
         // ----------------------------------------------------------------------
         // Moyens de paiement enregistrés (Étape 10)
         // ----------------------------------------------------------------------
+        // Lister les moyens de paiement enregistrés (Mobile Money, cartes)
         Route::get('/methods', [SavedPaymentMethodController::class, 'index'])->name('api.payments.methods.index');
+        // Enregistrer un nouveau moyen de paiement par défaut ou secondaire
         Route::post('/methods', [SavedPaymentMethodController::class, 'store'])->name('api.payments.methods.store');
+        // Définir un moyen de paiement comme mode de règlement par défaut
         Route::patch('/methods/{id}/default', [SavedPaymentMethodController::class, 'setDefault'])->name('api.payments.methods.default');
+        // Supprimer un moyen de paiement enregistré
         Route::delete('/methods/{id}', [SavedPaymentMethodController::class, 'destroy'])->name('api.payments.methods.destroy');
 
         // ----------------------------------------------------------------------
         // Déclaration d'incidents de double débit (Étape 10)
         // ----------------------------------------------------------------------
+        // Déclarer une réclamation pour incident de double débit sur une transaction
         Route::post('/double-charge-claims', [DoubleChargeClaimController::class, 'store'])->name('api.payments.double-charge-claims.store');
+        // Lister mes réclamations d'incidents de double débit et leur état de traitement
         Route::get('/double-charge-claims/mine', [DoubleChargeClaimController::class, 'mine'])->name('api.payments.double-charge-claims.mine');
 
         // Obtenir le statut en temps réel d'un paiement (polling 120s / reprise réseau)
@@ -738,17 +788,25 @@ Route::middleware('auth:api')->group(function () {
     // --------------------------------------------------------------------------
     // SQUARE — CR1 (Création, Médias, Carrousel, Recherche, Feed & Actions SQ-15)
     // --------------------------------------------------------------------------
+    // Alias racine pour consulter le fil d'actualité Square
     Route::get('/square/feed', [PostFeedController::class, 'index'])->name('api.square.feed.alias');
+    // Alias racine pour afficher une publication Square spécifique
     Route::get('/posts/{post}', [PostController::class, 'show'])->name('api.posts.show.alias');
+    // Alias racine pour lister les mentions « J'aime » d'une publication
     Route::get('/posts/{post}/likes', [PostLikeController::class, 'likers'])->name('api.posts.likes.alias');
+    // Alias racine pour lister les commentaires d'une publication
     Route::get('/posts/{post}/comments', [PostCommentController::class, 'index'])->name('api.posts.comments.index.alias');
+    // Alias racine pour ajouter un commentaire sur une publication
     Route::post('/posts/{post}/comments', [PostCommentController::class, 'store'])->name('api.posts.comments.store.alias');
+    // Alias racine pour épingler un commentaire en tête d'une publication
     Route::post('/posts/{post}/pin-comment', [PostCommentController::class, 'pin'])->name('api.posts.pin_comment.alias');
+    // Alias racine pour lister les réponses d'un commentaire
     Route::get('/comments/{comment}/replies', [PostCommentController::class, 'replies'])->name('api.comments.replies.alias');
 
     Route::prefix('square-cr1')->group(function () {
         // Fil Square paginé (CR-11 et flux découverte, abonnés, voisinage)
         Route::get('/square/feed', [PostFeedController::class, 'index'])->name('api.square.feed');
+        // Alias pour le fil Square
         Route::get('/feed', [PostFeedController::class, 'index']);
 
         // Créer une nouvelle publication avec texte, médias, tags, lieu et options (CR-01 à CR-12)
@@ -782,6 +840,7 @@ Route::middleware('auth:api')->group(function () {
         Route::delete('/posts/{post}/like', [PostLikeController::class, 'destroy'])->name('api.posts.unlike');
         // Lister les personnes ayant aimé une publication (SQ-14)
         Route::get('/posts/{post}/likers', [PostLikeController::class, 'likers'])->name('api.posts.likers');
+        // Alias pour lister les mentions j'aime d'une publication
         Route::get('/posts/{post}/likes', [PostLikeController::class, 'likers'])->name('api.posts.likes');
 
         // Partages des publications (SQ - Interactions)
@@ -821,6 +880,7 @@ Route::middleware('auth:api')->group(function () {
 
         // Rechercher des hashtags par correspondance textuelle et volume (CR-07)
         Route::get('/search/hashtags', [HashtagSearchController::class, 'trending']);
+        // Obtenir les hashtags du moment et en tendance (CR-07)
         Route::get('/search/hashtags/trending', [HashtagSearchController::class, 'trending'])->name('api.search.hashtags.trending');
 
         // Rechercher des lieux contextuels réels issus de la base géographique BANGO (CR-09)
@@ -831,17 +891,25 @@ Route::middleware('auth:api')->group(function () {
     // MODULE RC — RECHERCHE GLOBALE ET DÉCOUVERTE (Posts, Hashtags, Tendances)
     // --------------------------------------------------------------------------
     Route::prefix('search')->group(function () {
+        // Rechercher des publications Square par mot-clé ou texte intégral
         Route::get('/posts', [PostSearchController::class, 'index'])->name('api.search.posts');
+        // Rechercher et explorer des hashtags par préfixe ou volume
         Route::get('/hashtags', [HashtagSearchController::class, 'index'])->name('api.search.hashtags');
+        // Consulter les détails et publications associées à un hashtag
         Route::get('/hashtags/{name}', [HashtagSearchController::class, 'show'])->name('api.search.hashtags.show');
+        // S'abonner aux publications d'un hashtag
         Route::post('/hashtags/{name}/follow', [HashtagSearchController::class, 'follow'])->name('api.search.hashtags.follow');
+        // Se désabonner d'un hashtag
         Route::delete('/hashtags/{name}/follow', [HashtagSearchController::class, 'unfollow'])->name('api.search.hashtags.unfollow');
     });
 
     // Page d'un hashtag et abonnements (Point 48)
     Route::prefix('hashtags')->group(function () {
+        // Consulter le fil et les détails d'un hashtag spécifique
         Route::get('/{name}', [HashtagSearchController::class, 'show'])->name('api.hashtags.show');
+        // S'abonner aux publications portant ce hashtag
         Route::post('/{name}/follow', [HashtagSearchController::class, 'follow'])->name('api.hashtags.follow');
+        // Se désabonner du hashtag
         Route::delete('/{name}/follow', [HashtagSearchController::class, 'unfollow'])->name('api.hashtags.unfollow');
     });
 
@@ -959,7 +1027,9 @@ Route::middleware('auth:api')->group(function () {
         Route::put('/close-list', [CloseListController::class, 'update'])->name('api.stories.close_list.update');
 
         // Réglages des Stories
+        // Consulter les paramètres de confidentialité et d'archivage des Stories
         Route::get('/settings', [StoryController::class, 'settings'])->name('api.stories.settings.show');
+        // Mettre à jour les réglages des Stories (réponses autorisées, sauvegarde auto)
         Route::put('/settings', [StoryController::class, 'updateSettings'])->name('api.stories.settings.update');
 
         // Créer et publier une nouvelle Story avec médias, stickers et audio
@@ -975,13 +1045,19 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/{id}/slides', [StoryController::class, 'slides'])->whereUuid('id')->name('api.stories.slides');
 
         // Liker / Déliker une Story
+        // Ajouter une mention « J'aime » sur une Story
         Route::post('/{id}/like', [StoryController::class, 'like'])->whereUuid('id')->name('api.stories.like');
+        // Retirer son « J'aime » d'une Story
         Route::delete('/{id}/like', [StoryController::class, 'unlike'])->whereUuid('id')->name('api.stories.unlike');
 
         // Interactions stickers
+        // Répondre à un sticker interactif (question, quiz) dans une Story
         Route::post('/stickers/{stickerId}/answer', [StoryController::class, 'answerSticker'])->whereUuid('stickerId')->name('api.stories.stickers.answer');
+        // Activer un rappel pour un événement promu via un sticker compte à rebours
         Route::post('/stickers/{stickerId}/remind', [StoryController::class, 'remindSticker'])->whereUuid('stickerId')->name('api.stories.stickers.remind');
+        // Répondre à un sticker positionné sur une slide spécifique
         Route::post('/{slideId}/stickers/{stickerId}/answer', [StoryController::class, 'answerSticker'])->whereUuid('slideId')->whereUuid('stickerId');
+        // Activer un rappel pour un sticker compte à rebours sur une slide
         Route::post('/{slideId}/stickers/{stickerId}/remind', [StoryController::class, 'remindSticker'])->whereUuid('slideId')->whereUuid('stickerId');
 
         // Export vidéo d'une Story
@@ -1009,7 +1085,9 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/{id}/report', [StoryController::class, 'report'])->whereUuid('id')->name('api.stories.report');
     });
 
+    // Alias pour consulter les réglages de Story
     Route::get('/story-settings', [StoryController::class, 'settings']);
+    // Alias pour mettre à jour les réglages de Story
     Route::put('/story-settings', [StoryController::class, 'updateSettings']);
 
     // --------------------------------------------------------------------------
@@ -1034,43 +1112,67 @@ Route::middleware('auth:api')->group(function () {
     // --------------------------------------------------------------------------
     Route::prefix('messages')->group(function () {
         // Conversations & Fils de discussion
+        // Lister les conversations et fils de discussion actifs de l'utilisateur
         Route::get('/threads', [MessageThreadController::class, 'index'])->name('api.messages.threads.index');
+        // Démarrer une nouvelle conversation privée ou directe
         Route::post('/threads', [MessageThreadController::class, 'store'])->name('api.messages.threads.store');
+        // Consulter les informations et métadonnées d'une conversation
         Route::get('/threads/{id}', [MessageThreadController::class, 'show'])->name('api.messages.threads.show');
+        // Marquer tous les messages d'un fil de discussion comme lus
         Route::match(['post', 'put'], '/threads/{id}/read', [MessageThreadController::class, 'markAsRead'])->name('api.messages.threads.read');
 
         // Boîte des demandes de messages provenant d'inconnus (MS-05)
+        // Lister les demandes de messages en attente (contacts non suivis)
         Route::get('/requests', [MessageRequestController::class, 'index'])->name('api.messages.requests.index');
+        // Accepter une demande de message et transférer dans la boîte de réception principale
         Route::post('/requests/{id}/accept', [MessageRequestController::class, 'accept'])->name('api.messages.requests.accept');
+        // Refuser et supprimer une demande de message
         Route::post('/requests/{id}/reject', [MessageRequestController::class, 'reject'])->name('api.messages.requests.reject');
 
         // Messages d'un fil
+        // Récupérer l'historique paginé des messages d'une conversation
         Route::get('/threads/{id}/messages', [MessageController::class, 'index'])->name('api.messages.messages.index');
+        // Envoyer un nouveau message texte, média ou lien dans une conversation
         Route::post('/threads/{id}/messages', [MessageController::class, 'store'])->name('api.messages.messages.store');
+        // Supprimer / rétracter un message envoyé (délai imparti)
         Route::post('/threads/{id}/messages/{messageId}/retract', [MessageController::class, 'retract'])->name('api.messages.messages.retract');
+        // Supprimer définitivement un message d'une conversation (verbe DELETE)
         Route::delete('/threads/{id}/messages/{messageId}', [MessageController::class, 'retract'])->name('api.messages.messages.destroy');
 
         // Notes vocales
+        // Téléverser et envoyer un message vocal audio dans une conversation
         Route::post('/threads/{id}/voice', [VoiceMessageController::class, 'store'])->name('api.messages.voice.store');
 
         // Réactions aux messages
+        // Ajouter ou modifier une réaction emoji sur un message
         Route::post('/messages/{id}/reactions', [MessageController::class, 'react'])->name('api.messages.reactions.store');
+        // Retirer sa réaction emoji sur un message
         Route::delete('/messages/{id}/reactions', [MessageController::class, 'removeReaction'])->name('api.messages.reactions.destroy');
 
         // Indicateur « en train d'écrire » (typing)
+        // Émettre un signal « en train d'écrire » vers les participants de la conversation
         Route::post('/threads/{id}/typing', [MessageThreadController::class, 'setTyping'])->name('api.messages.threads.typing.set');
+        // Consulter l'état de saisie en temps réel dans une conversation
         Route::get('/threads/{id}/typing', [MessageThreadController::class, 'getTyping'])->name('api.messages.threads.typing.get');
 
         // Sourdine (mute) & Archive
+        // Mettre une conversation en sourdine (désactiver les notifications)
         Route::post('/threads/{id}/mute', [MessageThreadController::class, 'mute'])->name('api.messages.threads.mute');
+        // Réactiver les notifications d'une conversation
         Route::post('/threads/{id}/unmute', [MessageThreadController::class, 'unmute'])->name('api.messages.threads.unmute');
+        // Archiver une conversation pour la masquer de la boîte de réception
         Route::post('/threads/{id}/archive', [MessageThreadController::class, 'archive'])->name('api.messages.threads.archive');
+        // Désarchiver une conversation
         Route::post('/threads/{id}/unarchive', [MessageThreadController::class, 'unarchive'])->name('api.messages.threads.unarchive');
 
         // Conversations de groupe
+        // Créer un groupe de discussion avec nom, avatar et membres initiaux
         Route::post('/groups', [MessageGroupController::class, 'store'])->name('api.messages.groups.store');
+        // Mettre à jour les paramètres ou le nom d'un groupe de discussion
         Route::put('/groups/{id}', [MessageGroupController::class, 'update'])->name('api.messages.groups.update');
+        // Ajouter de nouveaux membres dans un groupe de discussion
         Route::post('/groups/{id}/members', [MessageGroupController::class, 'addMembers'])->name('api.messages.groups.members.add');
+        // Retirer un membre d'un groupe de discussion (ou quitter le groupe)
         Route::delete('/groups/{id}/members/{userId}', [MessageGroupController::class, 'removeMember'])->name('api.messages.groups.members.remove');
     });
 
@@ -1082,22 +1184,35 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/boostable', [BoostableContentController::class, 'index'])->name('api.boost.boostable');
 
         // Estimation de portée
+        // Calculer l'estimation d'audience et de portée selon le budget et le ciblage
         Route::post('/estimate', [BoostEstimateController::class, 'estimate'])->name('api.boost.estimate');
 
         // Portefeuille de Crédits BANGO
+        // Consulter le solde de crédits BANGO et le statut du portefeuille publicitaire
         Route::get('/wallet', [CreditWalletController::class, 'show'])->name('api.boost.wallet.show');
+        // Historique des rechargements et débits de crédits publicitaires
         Route::get('/wallet/transactions', [CreditWalletController::class, 'transactions'])->name('api.boost.wallet.transactions');
+        // Recharger le portefeuille de crédits BANGO
         Route::post('/wallet/deposit', [CreditWalletController::class, 'deposit'])->name('api.boost.wallet.deposit');
 
         // Campagnes
+        // Lister les campagnes de boost et sponsorisation de l'utilisateur
         Route::get('/campaigns', [CampaignController::class, 'index'])->name('api.boost.campaigns.index');
+        // Créer une nouvelle campagne de boost (ciblage, budget, durée)
         Route::post('/campaigns', [CampaignController::class, 'store'])->name('api.boost.campaigns.store');
+        // Consulter les performances et métriques détaillées d'une campagne de boost
         Route::get('/campaigns/{id}', [CampaignController::class, 'show'])->whereUuid('id')->name('api.boost.campaigns.show');
+        // Allouer des crédits ou financer une campagne de boost
         Route::post('/campaigns/{id}/fund', [CampaignController::class, 'fund'])->whereUuid('id')->name('api.boost.campaigns.fund');
+        // Mettre en pause une campagne active
         Route::post('/campaigns/{id}/pause', [CampaignController::class, 'pause'])->whereUuid('id')->name('api.boost.campaigns.pause');
+        // Reprendre la diffusion d'une campagne en pause
         Route::post('/campaigns/{id}/resume', [CampaignController::class, 'resume'])->whereUuid('id')->name('api.boost.campaigns.resume');
+        // Annuler définitivement une campagne de boost et libérer les crédits résiduels
         Route::post('/campaigns/{id}/cancel', [CampaignController::class, 'cancel'])->whereUuid('id')->name('api.boost.campaigns.cancel');
+        // Enregistrer une impression publicitaire pour le décompte d'audience
         Route::post('/campaigns/{id}/impression', [CampaignController::class, 'trackImpression'])->whereUuid('id')->name('api.boost.campaigns.impression');
+        // Enregistrer un clic publicitaire sur le contenu boosté
         Route::post('/campaigns/{id}/click', [CampaignController::class, 'trackClick'])->whereUuid('id')->name('api.boost.campaigns.click');
     });
 
@@ -1105,8 +1220,11 @@ Route::middleware('auth:api')->group(function () {
     // CB - CRÉDIT BANGO (Portefeuille, Achat via PAY, Historique & Traçabilité)
     // --------------------------------------------------------------------------
     Route::prefix('credits')->group(function () {
+        // Consulter le solde du portefeuille de Crédits BANGO
         Route::get('/wallet', [App\Http\Controllers\Credits\CreditWalletController::class, 'show'])->name('api.credits.wallet.show');
+        // Acheter un pack de Crédits BANGO via paiement mobile money ou carte
         Route::post('/purchases', [CreditPurchaseController::class, 'store'])->name('api.credits.purchases.store');
+        // Historique des transactions et mouvements de Crédits BANGO
         Route::get('/transactions', [CreditTransactionController::class, 'index'])->name('api.credits.transactions.index');
     });
 
@@ -1128,22 +1246,35 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/{page}/switch-context', [PageController::class, 'switchContext'])->name('api.pages.switch_context');
         // Boîte de réception dédiée de la Page (MS-19)
         Route::get('/{page}/inbox', [PageController::class, 'inbox'])->name('api.pages.inbox');
+        // Assigner une conversation de la page à un collaborateur spécifique
         Route::post('/{page}/inbox-assignment', [PageController::class, 'assignInbox'])->name('api.pages.inbox_assignment');
+        // Basculer la visibilité publique d'une page professionnelle
         Route::post('/{page}/visibility', [PageController::class, 'toggleVisibility'])->name('api.pages.visibility');
+        // Suivre une page professionnelle pour recevoir ses actualités
         Route::post('/{page}/follow', [PageController::class, 'follow'])->name('api.pages.follow');
+        // Ne plus suivre une page professionnelle
         Route::delete('/{page}/follow', [PageController::class, 'unfollow'])->name('api.pages.unfollow');
 
         // Membres & RBAC (PG-03)
+        // Lister les membres et gestionnaires associés à une page professionnelle
         Route::get('/{page}/members', [PageMemberController::class, 'index'])->name('api.pages.members.index');
+        // Inviter un nouveau collaborateur avec un rôle défini (admin, éditeur, modérateur)
         Route::post('/{page}/members/invite', [PageMemberController::class, 'invite'])->name('api.pages.members.invite');
+        // Modifier le rôle et les permissions d'un membre de la page
         Route::put('/{page}/members/{member}/role', [PageMemberController::class, 'updateRole'])->name('api.pages.members.update_role');
+        // Révoquer un collaborateur de la page professionnelle
         Route::delete('/{page}/members/{member}', [PageMemberController::class, 'revoke'])->name('api.pages.members.revoke');
+        // Quitter l'équipe d'une page professionnelle
         Route::post('/{page}/leave', [PageMemberController::class, 'leave'])->name('api.pages.leave');
 
         // Dossiers de certification entreprise (PG-05 & PG-07)
+        // Consulter l'état de la demande de certification de la page entreprise
         Route::get('/{page}/certification', [PageCertificationController::class, 'show'])->name('api.pages.certification.show');
+        // Historique des audits et demandes de certification de la page
         Route::get('/{page}/certification/history', [PageCertificationController::class, 'history'])->name('api.pages.certification.history');
+        // Déposer un dossier de certification avec documents d'entreprise
         Route::post('/{page}/certification', [PageCertificationController::class, 'store'])->name('api.pages.certification.store');
+        // Régler les frais de traitement du dossier de certification entreprise
         Route::post('/{page}/certification/payment', [PageCertificationController::class, 'initiatePayment'])->name('api.pages.certification.payment');
     });
 
@@ -1151,22 +1282,32 @@ Route::middleware('auth:api')->group(function () {
     Route::get('/me/pages', [PageController::class, 'myPages'])->name('api.me.pages');
 
     // Réponse aux invitations de membres
+    // Accepter l'invitation à rejoindre l'équipe d'une page professionnelle
     Route::post('/page-members/{member}/accept', [PageMemberController::class, 'accept'])->name('api.page_members.accept');
+    // Décliner l'invitation à rejoindre une page professionnelle
     Route::post('/page-members/{member}/decline', [PageMemberController::class, 'decline'])->name('api.page_members.decline');
 
     // Corrections et téléchargement de documents de certification
+    // Soumettre à nouveau des pièces justificatives corrigées pour la certification
     Route::post('/pages/certifications/{certification}/resubmit', [PageCertificationController::class, 'resubmit'])->name('api.pages.certifications.resubmit');
+    // Télécharger un document justificatif du dossier de certification
     Route::get('/pages/certifications/{certification}/documents/{key}', [PageCertificationController::class, 'downloadDocument'])->name('api.pages.certifications.documents.download');
 
     // --------------------------------------------------------------------------
     // MODULE 21 : NOTIF — NOTIFICATIONS IN-APP & DEVICE TOKENS PUSH
     // --------------------------------------------------------------------------
     Route::prefix('notifications')->group(function () {
+        // Récupérer la liste paginée des notifications de l'utilisateur
         Route::get('/', [NotificationController::class, 'index'])->name('api.notifications.index');
+        // Marquer l'ensemble des notifications comme lues
         Route::post('/read', [NotificationController::class, 'markAllAsRead'])->name('api.notifications.mark_all_read');
+        // Alias pour marquer toutes les notifications comme lues
         Route::post('/mark-all-read', [NotificationController::class, 'markAllAsRead'])->name('api.notifications.mark_all_read_alias');
+        // Marquer une notification spécifique comme lue
         Route::post('/{id}/read', [NotificationController::class, 'markAsRead'])->name('api.notifications.mark_read');
+        // Enregistrer ou mettre à jour un jeton push FCM/APNS pour cet appareil
         Route::post('/device-token', [DeviceTokenController::class, 'store'])->name('api.notifications.device_token.store');
+        // Supprimer le jeton push lors de la déconnexion de l'appareil
         Route::delete('/device-token', [DeviceTokenController::class, 'destroy'])->name('api.notifications.device_token.destroy');
     });
 
@@ -1174,12 +1315,16 @@ Route::middleware('auth:api')->group(function () {
     // MODULE 18 : SUP — SIGNALEMENTS UNIVERSELS & RECOURS DE MODÉRATION
     // --------------------------------------------------------------------------
     Route::prefix('reports')->group(function () {
+        // Signaler un contenu (post, reel, story, commentaire, profil, annonce) pour modération
         Route::post('/', [ReportController::class, 'store'])->name('api.reports.store');
+        // Consulter l'historique et le suivi de mes signalements
         Route::get('/mine', [ReportController::class, 'mine'])->name('api.reports.mine');
     });
 
     Route::prefix('moderation/appeals')->group(function () {
+        // Déposer un recours contre une décision ou sanction de modération
         Route::post('/', [ModerationAppealController::class, 'store'])->name('api.moderation.appeals.store');
+        // Consulter la liste de mes recours de modération et leur statut
         Route::get('/', [ModerationAppealController::class, 'mine'])->name('api.moderation.appeals.mine');
     });
 
@@ -1187,34 +1332,51 @@ Route::middleware('auth:api')->group(function () {
     // MODULE 18 : SUP — BILLETTERIE DE SUPPORT CLIENT
     // --------------------------------------------------------------------------
     Route::prefix('support/tickets')->group(function () {
+        // Créer un nouveau ticket de support d'assistance client
         Route::post('/', [SupportTicketController::class, 'store'])->name('api.support.tickets.store');
+        // Lister l'historique de mes tickets de support client
         Route::get('/mine', [SupportTicketController::class, 'mine'])->name('api.support.tickets.mine');
+        // Consulter le fil d'un ticket de support et les réponses de l'assistance
         Route::get('/{id}', [SupportTicketController::class, 'show'])->name('api.support.tickets.show');
+        // Répondre ou ajouter un message/pièce jointe dans un ticket de support
         Route::post('/{id}/messages', [SupportTicketController::class, 'reply'])->name('api.support.tickets.reply');
+        // Évaluer la qualité de la prise en charge d'un ticket résolu
         Route::post('/{id}/rate', [SupportTicketController::class, 'rate'])->name('api.support.tickets.rate');
+        // Rouvrir un ticket de support clôturé si le problème persiste
         Route::post('/{id}/reopen', [SupportTicketController::class, 'reopen'])->name('api.support.tickets.reopen');
+        // Télécharger une pièce jointe rattachée à un ticket de support
         Route::get('/{ticketId}/attachments/{attachmentId}', [SupportTicketController::class, 'downloadAttachment'])
             ->name('api.support.tickets.attachments.download');
     });
 
+    // Consulter les sanctions disciplinaires ou avertissements actifs sur mon compte
     Route::get('/me/sanctions', [SupportTicketController::class, 'mySanctions'])->name('api.me.sanctions');
+    // Alias pour consulter ses sanctions de modération
     Route::get('/support/sanctions/mine', [SupportTicketController::class, 'mySanctions'])->name('api.support.sanctions.mine');
+    // Soumettre une réclamation formelle d'atteinte aux droits d'auteur (DMCA)
     Route::post('/support/copyright-claims', [CopyrightClaimController::class, 'store'])->name('api.support.copyright-claims.store');
+    // Signaler une atteinte aux droits de marque ou droits voisins
     Route::post('/support/rights-infringements', [CopyrightClaimController::class, 'store'])->name('api.support.rights-infringements.store');
 
     // --------------------------------------------------------------------------
     // MODULE 19 : SY — SYNCHRONISATION HORS LIGNE ET RÉSILIENCE
     // --------------------------------------------------------------------------
+    // Synchroniser en masse les actions effectuées hors ligne (queue locale mobile)
     Route::post('/sync/flush', [OfflineSyncController::class, 'flush'])->name('api.sync.flush');
 
     // --------------------------------------------------------------------------
     // MODULE 19 : SY — TÉLÉVERSEMENT REPRENABLE PAR MORCEAUX (PROTOCOLE TUS v1.0.0)
     // --------------------------------------------------------------------------
     Route::prefix('uploads/tus')->group(function () {
+        // Créer une nouvelle session de téléversement reprenable TUS
         Route::post('/', [TusUploadController::class, 'create'])->name('api.uploads.tus.create');
+        // Vérifier l'offset actuel et l'avancement d'un téléversement TUS
         Route::match(['head', 'get'], '/{id}', [TusUploadController::class, 'head'])->name('api.uploads.tus.head');
+        // Envoyer un morceau (chunk binaire) vers le téléversement TUS actif
         Route::patch('/{id}', [TusUploadController::class, 'patch'])->name('api.uploads.tus.patch');
+        // Interrompre et purger une session de téléversement TUS
         Route::delete('/{id}', [TusUploadController::class, 'delete'])->name('api.uploads.tus.delete');
+        // Finaliser et valider l'intégrité du fichier téléversé via TUS
         Route::post('/{id}/finalize', [TusUploadController::class, 'finalize'])->name('api.uploads.tus.finalize');
     });
 
@@ -1222,12 +1384,17 @@ Route::middleware('auth:api')->group(function () {
     // MODULE 3 : LG — LÉGAL, RGPD & EXPORT DES DONNÉES PERSONNELLES
     // --------------------------------------------------------------------------
     Route::prefix('user/data-export')->group(function () {
+        // Demander un export complet de ses données personnelles (conformité RGPD / LG-15)
         Route::post('/', [DataExportController::class, 'requestExport'])->name('api.user.data_export.request');
+        // Consulter le statut de préparation de l'archive de données personnelles
         Route::get('/status', [DataExportController::class, 'status'])->name('api.user.data_export.status');
+        // Télécharger l'archive ZIP chiffrée contenant les données personnelles
         Route::get('/download/{id}', [DataExportController::class, 'download'])->name('api.user.data_export.download');
+        // Annuler une demande d'export de données en cours
         Route::post('/{id}/cancel', [DataExportController::class, 'cancel'])->name('api.user.data_export.cancel');
     });
 
+    // Alias pour annuler une demande d'export de données personnelles
     Route::post('/settings/export/{id}/cancel', [DataExportController::class, 'cancel'])->name('api.settings.export.cancel');
 
     // Acceptation des conditions générales d'utilisation (LG-07)
@@ -1260,14 +1427,21 @@ Route::middleware('auth:api')->group(function () {
 // ==========================================================================
 // MODULE 0 : SOCLE DE SÉCURITÉ, 2FA & COQUE GLOBALE (BANGO-ADMIN ÉTAPE 1)
 // ==========================================================================
+// Point d'entrée des routes du back-office d'administration (BANGO-ADMIN)
 Route::prefix('admin')->name('api.admin.')->group(base_path('routes/admin.php'));
+// Point d'entrée versionné (v1) du back-office d'administration
 Route::prefix('admin/v1')->name('api.admin.v1.')->group(base_path('routes/admin.php'));
 
 // Alias routes pour l'onboarding collaborateur (sans le préfixe /admin)
 Route::prefix('auth/invitations')->group(function () {
+    // Valider le jeton d'invitation d'un administrateur ou collaborateur
     Route::get('/{token}', [AdminInvitationController::class, 'show']);
+    // Accepter l'invitation et initialiser l'onboarding collaborateur
     Route::post('/{token}/accept', [AdminInvitationController::class, 'accept']);
+    // Définir le mot de passe du compte administrateur invité
     Route::post('/{token}/password', [AdminInvitationController::class, 'password']);
+    // Configurer la double authentification (2FA TOTP obligatoire) pour l'administrateur
     Route::post('/{token}/totp', [AdminInvitationController::class, 'totp']);
+    // Finaliser l'onboarding et activer le compte administrateur
     Route::post('/{token}/complete', [AdminInvitationController::class, 'complete']);
 });
