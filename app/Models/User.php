@@ -57,6 +57,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Facades\Hash;
 use Laravel\Passport\HasApiTokens;
 
 class User extends Authenticatable
@@ -818,5 +819,22 @@ class User extends Authenticatable
     public function getUsernameAttribute(): ?string
     {
         return $this->handle;
+    }
+
+    /**
+     * Valide le mot de passe pour le Password Grant OAuth2 Passport.
+     * Empêche l'émission de tokens directs pour les comptes ayant la 2FA activée.
+     */
+    public function validateForPassportPasswordGrant(string $password): bool
+    {
+        if (! Hash::check($password, $this->password)) {
+            return false;
+        }
+
+        if (! empty($this->two_factor_method) && $this->two_factor_method !== 'off') {
+            return false;
+        }
+
+        return true;
     }
 }

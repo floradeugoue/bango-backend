@@ -74,12 +74,31 @@ class SigninController extends Controller
 
         // 2FA check
         if (! empty($user->two_factor_method) && $user->two_factor_method !== 'off') {
-            $channel = $user->two_factor_method === 'email' ? OtpChannel::Email : OtpChannel::Sms;
-            $destination = $user->two_factor_method === 'email' ? $user->email : $user->phone;
+            $method = $user->two_factor_method;
+            $isApp = in_array($method, ['app', 'totp'], true);
+            $isEmail = $method === 'email';
+
+            if ($isApp) {
+                $channel = 'app';
+                $destination = $user->email ?: 'authenticator-app';
+            } elseif ($isEmail) {
+                $channel = 'email';
+                $destination = $user->email;
+            } else {
+                $channel = 'sms';
+                $destination = $user->phone;
+
+                if (empty($destination)) {
+                    $destination = $user->email;
+                    $channel = 'email';
+                }
+            }
 
             if (empty($destination)) {
-                $channel = OtpChannel::Email;
-                $destination = $user->email;
+                return response()->json([
+                    'kind' => 'configuration-error',
+                    'message' => 'Aucune destination valide configurée pour la double authentification.',
+                ], 422);
             }
 
             $challengeId = Str::random(40);
@@ -88,7 +107,7 @@ class SigninController extends Controller
                 'persistent' => $request->boolean('persistent'),
                 'device_name' => $deviceName,
                 'destination' => $destination,
-                'channel' => $channel->value,
+                'channel' => $channel,
             ], now()->addMinutes(10));
 
             Cache::put('2fa.challenge.ip.'.$request->ip(), $challengeId, now()->addMinutes(10));
@@ -99,8 +118,19 @@ class SigninController extends Controller
                 Cache::put('2fa.challenge.id.'.$user->phone, $challengeId, now()->addMinutes(10));
             }
 
-            $otpService = app(OtpService::class);
-            $otpService->sendOtp($destination, $channel, 'second_factor');
+            // Envoi de l'OTP uniquement pour les canaux SMS et Email
+            if (in_array($channel, ['sms', 'email'], true)) {
+                $otpChannel = $channel === 'email' ? OtpChannel::Email : OtpChannel::Sms;
+                $otpService = app(OtpService::class);
+                $otpResult = $otpService->sendOtp($destination, $otpChannel, 'second_factor');
+
+                if (is_array($otpResult)) {
+                    Cache::forget('2fa.challenge.'.$challengeId);
+                    Cache::forget('2fa.challenge.ip.'.$request->ip());
+
+                    return response()->json($otpResult['data'], $otpResult['status']);
+                }
+            }
 
             return response()->json([
                 'kind' => 'second-factor',
@@ -130,9 +160,15 @@ class SigninController extends Controller
         ], 200);
     }
 
-    private function maskDestination(string $target, OtpChannel $channel): string
+    private function maskDestination(string $target, OtpChannel|string $channel): string
     {
-        if ($channel === OtpChannel::Email) {
+        $channelVal = $channel instanceof OtpChannel ? $channel->value : $channel;
+
+        if (in_array($channelVal, ['app', 'totp'], true)) {
+            return 'Application d\'authentification';
+        }
+
+        if ($channelVal === 'email') {
             $parts = explode('@', $target);
             $name = $parts[0];
             $domain = $parts[1] ?? '';
