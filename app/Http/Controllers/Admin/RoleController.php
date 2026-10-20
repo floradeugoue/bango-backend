@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Admin\AdminAuditLog;
 use App\Models\Auth\Role;
 use App\Models\User;
+use App\Services\Admin\Audit\AdminRoleManagementService;
 use Illuminate\Http\Request;
 
 /**
@@ -104,6 +105,8 @@ class RoleController extends Controller
             'slug' => 'sometimes|required|string|max:255|unique:roles,slug,'.$role->id,
             'description' => 'nullable|string',
             'is_active' => 'boolean',
+            'permissions' => 'nullable|array',
+            'permissions.*' => 'string',
         ]);
 
         // Protection 1 : Le slug d'un rôle système ne peut JAMAIS être modifié
@@ -124,7 +127,7 @@ class RoleController extends Controller
             ], 403);
         }
 
-        $oldAttributes = $role->only(['name', 'slug', 'description', 'is_active']);
+        $oldAttributes = $role->only(['name', 'slug', 'description', 'is_active', 'permissions']);
         $role->update($validated);
 
         $operator = $request->user();
@@ -255,6 +258,32 @@ class RoleController extends Controller
         }
 
         $previousRoleSlug = $user->role?->slug ?? 'aucun';
+
+        // Point 19 : Soumettre les modifications de rôles sensibles au principe des 4 yeux (AdminApproval)
+        $isSensitiveChange = in_array($newRole->slug, ['admin', 'direction', 'moderation', 'finance', 'verification', 'support'], true)
+            || in_array($previousRoleSlug, ['admin', 'direction', 'moderation', 'finance', 'verification', 'support'], true);
+
+        // Si validation à 4 yeux requise (par défaut pour les rôles opérateurs, ou si paramètre demandé)
+        if ($isSensitiveChange && ! ($request->has('require_approval') && ! $request->boolean('require_approval') && $operator->isAdmin())) {
+            $reason = (string) ($request->input('reason') ?: "Demande d'attribution du rôle {$newRole->name} ({$newRole->slug})");
+            $roleManagementService = app(AdminRoleManagementService::class);
+
+            $approval = $roleManagementService->createRoleChangeRequest(
+                targetUser: $user,
+                roleSlug: $newRole->slug,
+                action: 'assign',
+                reason: $reason,
+                requester: $operator
+            );
+
+            return response()->json([
+                'success' => true,
+                'requires_approval' => true,
+                'message' => "Cette action sensible a été soumise au principe de double approbation à 4 yeux (demande #{$approval->id}).",
+                'approval' => $approval,
+            ], 202);
+        }
+
         $user->update(['role_id' => $newRole->id]);
         $user->load('role');
 

@@ -30,6 +30,16 @@ class GeoSeeder extends Seeder
             ['name' => 'Euro', 'symbol' => '€']
         );
 
+        $ghs = Currency::firstOrCreate(
+            ['code' => 'GHS'],
+            ['name' => 'Ghanaian Cedi', 'symbol' => 'GH₵']
+        );
+
+        $ngn = Currency::firstOrCreate(
+            ['code' => 'NGN'],
+            ['name' => 'Nigerian Naira', 'symbol' => '₦']
+        );
+
         // 2. Countries
         $cameroun = Country::updateOrCreate(
             ['code' => 'CM'],
@@ -91,6 +101,30 @@ class GeoSeeder extends Seeder
             ]
         );
 
+        $ghana = Country::updateOrCreate(
+            ['code' => 'GH'],
+            [
+                'name' => 'Ghana',
+                'name_en' => 'Ghana',
+                'iso2' => 'GH',
+                'iso3' => 'GHA',
+                'phone_code' => '+233',
+                'currency_id' => $ghs->id,
+            ]
+        );
+
+        $nigeria = Country::updateOrCreate(
+            ['code' => 'NG'],
+            [
+                'name' => 'Nigéria',
+                'name_en' => 'Nigeria',
+                'iso2' => 'NG',
+                'iso3' => 'NGA',
+                'phone_code' => '+234',
+                'currency_id' => $ngn->id,
+            ]
+        );
+
         // 3. Cities
         $douala = City::firstOrCreate(
             ['slug' => 'douala'],
@@ -122,29 +156,53 @@ class GeoSeeder extends Seeder
             ['name' => 'Paris', 'country_id' => $france->id]
         );
 
+        $accra = City::firstOrCreate(
+            ['slug' => 'accra'],
+            ['name' => 'Accra', 'country_id' => $ghana->id]
+        );
+
+        $kumasi = City::firstOrCreate(
+            ['slug' => 'kumasi'],
+            ['name' => 'Kumasi', 'country_id' => $ghana->id]
+        );
+
+        $lagos = City::firstOrCreate(
+            ['slug' => 'lagos'],
+            ['name' => 'Lagos', 'country_id' => $nigeria->id]
+        );
+
+        $abuja = City::firstOrCreate(
+            ['slug' => 'abuja'],
+            ['name' => 'Abuja', 'country_id' => $nigeria->id]
+        );
+
         // 4. Neighbourhoods
-        $quartiersDouala = ['Bonapriso', 'Akwa', 'Bonanjo', 'Deido', 'Makepe'];
-        foreach ($quartiersDouala as $q) {
-            Neighbourhood::firstOrCreate(
-                ['slug' => Str::slug($q)],
-                ['name' => $q, 'city_id' => $douala->id]
-            );
-        }
+        $citiesAndQuartiers = [
+            [$douala, ['Bonapriso', 'Akwa', 'Bonanjo', 'Deido', 'Makepe', 'Kotto', 'Bali']],
+            [$yaounde, ['Bastos', 'Biyem-Assi', 'Mokolo', 'Omnisports', 'Santa Barbara', 'Emana']],
+            [$abidjan, ['Cocody', 'Plateau', 'Marcory', 'Yopougon', 'Deux Plateaux', 'Riviera', 'Treichville']],
+            [$dakar, ['Almadies', 'Dakar Plateau', 'Ngor', 'Mermoz', 'Ouakam', 'Fann', 'Point E']],
+            [$libreville, ['Louis', 'Batterie IV', 'Sablière', 'Akanda', 'Glass', 'Oloumi']],
+            [$paris, ['8e Arrondissement', '16e Arrondissement', 'Le Marais', 'Montmartre', 'Saint-Germain']],
+            [$accra, ['Osu', 'East Legon', 'Cantonments', 'Airport Residential', 'Labone', 'Dzorwulu']],
+            [$kumasi, ['Adum', 'Bantama', 'Nhyiaeso', 'Asokwa']],
+            [$lagos, ['Victoria Island', 'Lekki', 'Ikoyi', 'Ikeja', 'Surulere', 'Yaba']],
+            [$abuja, ['Maitama', 'Asokoro', 'Wuse', 'Garki', 'Jabi', 'Guzape']],
+        ];
 
-        $quartiersYaounde = ['Bastos', 'Biyem-Assi', 'Mokolo'];
-        foreach ($quartiersYaounde as $q) {
-            Neighbourhood::firstOrCreate(
-                ['slug' => Str::slug($q)],
-                ['name' => $q, 'city_id' => $yaounde->id]
-            );
-        }
+        foreach ($citiesAndQuartiers as [$cityModel, $quartiers]) {
+            foreach ($quartiers as $q) {
+                $baseSlug = Str::slug($q);
+                $existing = Neighbourhood::where('slug', $baseSlug)->first();
+                $slug = ($existing && $existing->city_id !== $cityModel->id)
+                    ? Str::slug($cityModel->slug.'-'.$q)
+                    : $baseSlug;
 
-        $quartiersAbidjan = ['Cocody', 'Plateau', 'Marcory', 'Yopougon'];
-        foreach ($quartiersAbidjan as $q) {
-            Neighbourhood::firstOrCreate(
-                ['slug' => Str::slug($q)],
-                ['name' => $q, 'city_id' => $abidjan->id]
-            );
+                Neighbourhood::firstOrCreate(
+                    ['slug' => $slug],
+                    ['name' => $q, 'city_id' => $cityModel->id]
+                );
+            }
         }
 
         // 5. Operators
@@ -171,6 +229,26 @@ class GeoSeeder extends Seeder
         Operator::firstOrCreate(
             ['code' => 'orange_sn'],
             ['name' => 'Orange Sénégal', 'country_id' => $senegal->id, 'logo_url' => 'https://example.com/orange.png']
+        );
+
+        Operator::firstOrCreate(
+            ['code' => 'mtn_gh'],
+            ['name' => 'MTN Ghana', 'country_id' => $ghana->id, 'logo_url' => 'https://example.com/mtn.png']
+        );
+
+        Operator::firstOrCreate(
+            ['code' => 'telecel_gh'],
+            ['name' => 'Telecel Ghana', 'country_id' => $ghana->id, 'logo_url' => 'https://example.com/telecel.png']
+        );
+
+        Operator::firstOrCreate(
+            ['code' => 'mtn_ng'],
+            ['name' => 'MTN Nigeria', 'country_id' => $nigeria->id, 'logo_url' => 'https://example.com/mtn.png']
+        );
+
+        Operator::firstOrCreate(
+            ['code' => 'airtel_ng'],
+            ['name' => 'Airtel Nigeria', 'country_id' => $nigeria->id, 'logo_url' => 'https://example.com/airtel.png']
         );
     }
 }

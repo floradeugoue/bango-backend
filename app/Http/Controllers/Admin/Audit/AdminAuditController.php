@@ -30,6 +30,14 @@ class AdminAuditController extends Controller
         $chainStatus = $this->auditService->verifyChain(100);
 
         return response()->json([
+            // Contract format: Page<T>
+            'items' => $logs->items(),
+            'page' => $logs->currentPage(),
+            'perPage' => $logs->perPage(),
+            'total' => $logs->total(),
+            'pageCount' => $logs->lastPage(),
+
+            // Legacy keys for backward compatibility
             'success' => true,
             'chain_status' => $chainStatus,
             'data' => $logs->items(),

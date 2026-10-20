@@ -21,7 +21,7 @@ class UpdatePropertySlotsRequest extends FormRequest
             'slots' => ['nullable', 'array'],
             'slots.*.start_at' => ['required_with:slots', 'date'],
             'slots.*.end_at' => ['required_with:slots', 'date', 'after:slots.*.start_at'],
-            'slots.*.capacity' => ['nullable', 'integer', 'min:1', 'max:20'],
+            'slots.*.capacity' => ['nullable', 'integer', 'min:1', 'max:50'],
             'days' => ['nullable', 'array'],
             'days.*.day' => ['required_with:days', 'integer', 'between:0,6'],
             'days.*.from' => ['required_with:days', 'string'],
@@ -29,6 +29,9 @@ class UpdatePropertySlotsRequest extends FormRequest
             'days.*.closed' => ['nullable', 'boolean'],
             'slot_duration_minutes' => ['nullable', 'integer', 'min:15', 'max:120'],
             'horizon_days' => ['nullable', 'integer', 'min:1', 'max:30'],
+            'grouped' => ['nullable', 'boolean'],
+            'group_size' => ['nullable', 'integer', 'min:1', 'max:50'],
+            'minimum_hours' => ['nullable', 'integer', 'min:0', 'max:72'],
         ];
     }
 

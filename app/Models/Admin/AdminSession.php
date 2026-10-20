@@ -27,6 +27,7 @@ class AdminSession extends Model
         'last_activity_at',
         'expires_at',
         'revoked_at',
+        'allowed_countries',
     ];
 
     /**
@@ -39,6 +40,7 @@ class AdminSession extends Model
             'last_activity_at' => 'datetime',
             'expires_at' => 'datetime',
             'revoked_at' => 'datetime',
+            'allowed_countries' => 'array',
         ];
     }
 

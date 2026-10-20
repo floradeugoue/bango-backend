@@ -43,6 +43,7 @@ class ReelCommentResource extends JsonResource
             'id' => (string) $this->id,
             'reel_id' => (string) $this->reel_id,
             'parent_id' => $this->parent_id ? (string) $this->parent_id : null,
+            'answer_to_id' => $this->parent_id ? (int) $this->parent_id : null,
             'body' => $this->body,
             'likes_count' => (int) $this->likes_count,
             'dislikes_count' => (int) $this->dislikes_count,
@@ -53,7 +54,9 @@ class ReelCommentResource extends JsonResource
             'disliked' => $userReaction === ReelReactionType::Dislike->value,
             'author' => [
                 'id' => $author?->id,
-                'name' => $author?->name ?? 'Anonyme',
+                'name' => $author?->display_name ?? $author?->name ?? 'Anonyme',
+                'displayName' => $author?->display_name ?? $author?->name ?? 'Anonyme',
+                'display_name' => $author?->display_name ?? $author?->name ?? 'Anonyme',
                 'handle' => '@'.($author?->handle ?? 'user'),
                 'avatar_url' => $author?->avatar_url,
                 'verified' => (bool) ($author?->is_verified ?? false),

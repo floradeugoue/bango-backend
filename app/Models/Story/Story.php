@@ -31,6 +31,7 @@ class Story extends Model
         'views_count',
         'poll_votes_count',
         'replies_count',
+        'likes_count',
         'metadata',
     ];
 
@@ -49,6 +50,7 @@ class Story extends Model
             'views_count' => 'integer',
             'poll_votes_count' => 'integer',
             'replies_count' => 'integer',
+            'likes_count' => 'integer',
             'metadata' => 'array',
         ];
     }
@@ -56,6 +58,11 @@ class Story extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function likes(): HasMany
+    {
+        return $this->hasMany(StoryLike::class);
     }
 
     public function slides(): HasMany

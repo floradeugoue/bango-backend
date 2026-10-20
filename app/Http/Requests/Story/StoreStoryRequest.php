@@ -31,6 +31,13 @@ class StoreStoryRequest extends FormRequest
 
             'file' => ['nullable', 'file', 'mimes:jpeg,jpg,png,webp,mp4,mov,webm,3gp,m4v', 'max:51200'],
             'media' => ['nullable', 'file', 'mimes:jpeg,jpg,png,webp,mp4,mov,webm,3gp,m4v', 'max:51200'],
+            'thumbnail' => ['nullable', 'file', 'mimes:jpeg,jpg,png,webp', 'max:10240'],
+            'thumbnail_url' => ['nullable', 'string', 'max:2048'],
+            'background' => ['nullable'],
+            'drawings' => ['nullable'],
+            'drawing' => ['nullable'],
+            'framing' => ['nullable'],
+            'crop' => ['nullable'],
 
             'stickers' => ['nullable', 'array'],
             'stickers.*.type' => ['required_with:stickers', 'string', Rule::in(StoryStickerType::values())],
@@ -44,6 +51,12 @@ class StoreStoryRequest extends FormRequest
             'slides.*.caption' => ['nullable', 'string', 'max:1000'],
             'slides.*.filter' => ['nullable', 'string', 'max:64'],
             'slides.*.duration' => ['nullable', 'integer', 'min:1', 'max:30'],
+            'slides.*.background' => ['nullable'],
+            'slides.*.drawings' => ['nullable'],
+            'slides.*.framing' => ['nullable'],
+            'slides.*.crop' => ['nullable'],
+            'slides.*.thumbnail' => ['nullable', 'file', 'mimes:jpeg,jpg,png,webp', 'max:10240'],
+            'slides.*.thumbnail_url' => ['nullable', 'string', 'max:2048'],
         ];
     }
 }

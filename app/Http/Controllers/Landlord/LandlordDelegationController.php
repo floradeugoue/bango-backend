@@ -66,4 +66,52 @@ class LandlordDelegationController extends Controller
 
         return (new DelegationResource($revoked))->response();
     }
+
+    /**
+     * Relance un agent pour une invitation en attente.
+     * POST /api/landlord/delegations/{id}/remind
+     */
+    public function remind(Request $request, string $id): JsonResponse
+    {
+        /** @var Delegation $delegation */
+        $delegation = Delegation::findOrFail($id);
+
+        $reminded = $this->delegationService->remindInvitation($delegation, $request->user());
+
+        return (new DelegationResource($reminded))->response();
+    }
+
+    /**
+     * Modifie les capacités ou l'expiration d'une délégation.
+     * PUT /api/landlord/delegations/{id}
+     */
+    public function update(Request $request, string $id): JsonResponse
+    {
+        /** @var Delegation $delegation */
+        $delegation = Delegation::findOrFail($id);
+
+        $validated = $request->validate([
+            'capabilities' => ['sometimes', 'array'],
+            'capabilities.*' => ['string', 'in:visits,reply,edit'],
+            'expires_at' => ['nullable', 'date'],
+        ]);
+
+        $updated = $this->delegationService->updateDelegation($delegation, $request->user(), $validated);
+
+        return (new DelegationResource($updated))->response();
+    }
+
+    /**
+     * Rétablit un mandat révoqué ou expiré.
+     * POST /api/landlord/delegations/{id}/reinstate
+     */
+    public function reinstate(Request $request, string $id): JsonResponse
+    {
+        /** @var Delegation $delegation */
+        $delegation = Delegation::findOrFail($id);
+
+        $reinstated = $this->delegationService->reinstateDelegation($delegation, $request->user());
+
+        return (new DelegationResource($reinstated))->response();
+    }
 }

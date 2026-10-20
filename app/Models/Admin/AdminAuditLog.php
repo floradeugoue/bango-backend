@@ -20,6 +20,20 @@ class AdminAuditLog extends Model
 
     public const GENESIS_PREV_HASH = '0000000000000000000000000000000000000000000000000000000000000000';
 
+    protected static function booted(): void
+    {
+        static::updating(function (AdminAuditLog $log) {
+            // Seule l'attribution initiale du hash sur une ligne nouvellement insérée est tolérée
+            if ($log->getOriginal('hash') !== null) {
+                throw new \DomainException("Les lignes du journal d'audit sont strictement immuables et ne peuvent pas être modifiées.");
+            }
+        });
+
+        static::deleting(function (AdminAuditLog $log) {
+            throw new \DomainException("Les lignes du journal d'audit sont strictement immuables et ne peuvent pas être supprimées.");
+        });
+    }
+
     protected $fillable = [
         'user_id',
         'event',

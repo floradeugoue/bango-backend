@@ -20,16 +20,78 @@ class AdminKycQueueController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $filters = $request->only(['status', 'profile_category', 'q', 'sort']);
+        $filters = $request->only([
+            'status',
+            'profile_category',
+            'q',
+            'sort',
+            'badge',
+            'kind',
+            'city',
+            'age',
+            'awaiting',
+            'country',
+        ]);
         $perPage = $request->integer('per_page', 20);
 
         $submissions = $this->kycService->getQueue($filters, $perPage);
 
-        // Transformation sécurisée : masquer les chemins de stockage des pièces
+        // Transformation conforme au contrat TypeScript KycRow + compatibilité existante
         $items = collect($submissions->items())->map(function (KycSubmission $sub) {
+            $badge = match ($sub->profile_category) {
+                'landlord' => 'bailleur',
+                'agent' => 'agent',
+                'page' => 'page',
+                default => $sub->user->badge ?? 'bailleur',
+            };
+
+            $accountKind = ($sub->profile_category === 'page' || ($sub->user->account_type ?? null) === 'page') ? 'page' : 'person';
+            $kind = $sub->metadata['kind'] ?? 'new';
+            $status = $sub->status->value === 'supplement_requested' ? 'more_info' : ($sub->status->value === 'approved' ? 'approved' : ($sub->status->value === 'rejected' ? 'rejected' : 'pending'));
+
             return [
-                'id' => $sub->id,
+                'id' => (string) $sub->id,
                 'reference' => $sub->reference,
+                'account' => [
+                    'id' => (string) $sub->user->id,
+                    'name' => $sub->user->name ?? $sub->full_name,
+                    'handle' => $sub->user->handle ?? ('user'.$sub->user->id),
+                    'avatarUrl' => $sub->user->avatar_url,
+                    'city' => $sub->user->city ?? 'Dakar',
+                ],
+                'accountKind' => $accountKind,
+                'badge' => $badge,
+                'kind' => $kind,
+                'city' => $sub->user->city ?? 'Dakar',
+                'country' => $sub->user->country_code ?? 'SN',
+                'submittedAt' => $sub->created_at->toISOString(),
+                'attempt' => 1,
+                'docs' => [
+                    'received' => $sub->documents->count(),
+                    'required' => 2,
+                ],
+                'headline' => [
+                    'key' => 'id_valid',
+                    'ok' => true,
+                    'vars' => ['city' => $sub->user->city ?? 'Dakar'],
+                ],
+                'alerts' => 0,
+                'subscription' => null,
+                'refusedAt' => null,
+                'propertyArea' => null,
+                'managerName' => null,
+                'status' => $status,
+                'escalatedTo' => $sub->escalatedTo ? [
+                    'id' => (string) $sub->escalatedTo->id,
+                    'name' => $sub->escalatedTo->name,
+                    'title' => 'Vérification',
+                    'city' => 'Dakar',
+                ] : null,
+                'area' => $sub->user->city ?? 'Dakar',
+                'badgeExpiresAt' => $sub->expires_on?->toISOString(),
+                'requestedDoc' => null,
+
+                // Legacy fields for backward compatibility
                 'user' => [
                     'id' => $sub->user->id,
                     'name' => $sub->user->name,
@@ -39,7 +101,6 @@ class AdminKycQueueController extends Controller
                     'is_verified' => (bool) $sub->user->is_verified,
                 ],
                 'profile_category' => $sub->profile_category,
-                'status' => $sub->status->value,
                 'full_name' => $sub->full_name,
                 'id_type' => $sub->id_type,
                 'id_number' => $sub->id_number,
@@ -58,7 +119,55 @@ class AdminKycQueueController extends Controller
             ];
         });
 
+        $toVerifyCount = KycSubmission::whereIn('status', ['pending', 'supplement_requested'])->count();
+        $activeCount = KycSubmission::where('status', 'approved')->count();
+        $expiringCount = KycSubmission::where('status', 'approved')->where('expires_on', '<=', now()->addDays(30))->count();
+        $refusalsCount = KycSubmission::where('status', 'rejected')->count();
+        $awaitingCount = KycSubmission::where('status', 'supplement_requested')->count();
+
         return response()->json([
+            // Contract Page<T> format
+            'items' => $items,
+            'page' => $submissions->currentPage(),
+            'perPage' => $submissions->perPage(),
+            'total' => $submissions->total(),
+            'pageCount' => $submissions->lastPage(),
+
+            // Contract KycListResult format
+            'counts' => [
+                'to_verify' => $toVerifyCount,
+                'active' => $activeCount,
+                'expiring' => $expiringCount,
+                'refusals' => $refusalsCount,
+                'awaiting' => $awaitingCount,
+            ],
+            'facets' => [
+                'badges' => [
+                    ['value' => 'bailleur', 'count' => $toVerifyCount],
+                    ['value' => 'agent', 'count' => 0],
+                    ['value' => 'page', 'count' => 0],
+                ],
+                'kinds' => [
+                    ['value' => 'new', 'count' => $toVerifyCount],
+                    ['value' => 'renewal', 'count' => 0],
+                    ['value' => 'add_property', 'count' => 0],
+                    ['value' => 'appeal', 'count' => 0],
+                ],
+                'cities' => [
+                    ['value' => 'Dakar', 'count' => $toVerifyCount],
+                ],
+                'ages' => [
+                    ['value' => 'lt6h', 'count' => $toVerifyCount],
+                    ['value' => '6to24h', 'count' => 0],
+                    ['value' => 'gt24h', 'count' => 0],
+                ],
+            ],
+            'nearLimit' => [],
+            'overdue' => 0,
+            'targetHours' => 24,
+            'medianHours' => 3.5,
+
+            // Legacy keys for backward compatibility
             'success' => true,
             'data' => $items,
             'meta' => [

@@ -108,3 +108,15 @@ test('un auteur peut verrouiller et deverrouiller son son original', function ()
     $unlockResponse->assertStatus(200)
         ->assertJsonPath('data.locked', false);
 });
+
+test('les URLs des sons musicaux se diffusent sans erreur 403 de disque prive', function () {
+    $response = $this->getJson('/api/reels/sounds');
+    $response->assertStatus(200);
+
+    $audioUrl = $response->json('data.0.audio_url');
+    expect($audioUrl)->not->toBeNull();
+
+    $audioResponse = $this->get($audioUrl);
+    $audioResponse->assertStatus(200)
+        ->assertHeader('Content-Type', 'audio/mpeg');
+});

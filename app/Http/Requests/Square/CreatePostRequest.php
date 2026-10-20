@@ -80,7 +80,48 @@ class CreatePostRequest extends FormRequest
             if (empty(trim((string) $body)) && empty($media)) {
                 $validator->errors()->add('body', 'Une publication doit contenir au moins un texte ou au moins un média.');
             }
+
+            foreach ($media as $index => $item) {
+                $url = trim((string) ($item['url'] ?? ''));
+                if (! empty($url) && ! $this->isAllowedMediaUrl($url)) {
+                    $validator->errors()->add("media.{$index}.url", 'L\'URL du média doit provenir du service de téléversement BANGO (media/upload).');
+                }
+            }
         });
+    }
+
+    protected function isAllowedMediaUrl(string $url): bool
+    {
+        // Chemins relatifs autorisés issus de notre stockage local
+        if (str_starts_with($url, '/storage/') || str_starts_with($url, 'storage/') || str_starts_with($url, '/square/') || str_starts_with($url, 'square/')) {
+            return true;
+        }
+
+        $host = parse_url($url, PHP_URL_HOST);
+        if (! $host) {
+            return false;
+        }
+
+        $allowedHosts = [
+            parse_url(config('app.url'), PHP_URL_HOST),
+            'storage.bango.cm',
+            'bango.cm',
+            'localhost',
+            '127.0.0.1',
+        ];
+
+        $s3Endpoint = config('filesystems.disks.s3.endpoint');
+        if ($s3Endpoint) {
+            $allowedHosts[] = parse_url($s3Endpoint, PHP_URL_HOST);
+        }
+
+        foreach ($allowedHosts as $allowedHost) {
+            if ($allowedHost && ($host === $allowedHost || str_ends_with($host, '.'.$allowedHost) || str_contains($host, 'bango'))) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

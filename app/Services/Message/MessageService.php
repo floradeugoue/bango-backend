@@ -33,7 +33,7 @@ class MessageService
 
         return $conversation->messages()
             ->with(['sender:id,name,handle,avatar_url', 'replyTo'])
-            ->orderBy('created_at', 'asc')
+            ->orderBy('created_at', 'desc')
             ->paginate($perPage);
     }
 
@@ -47,6 +47,14 @@ class MessageService
         // 1. Vérification de l'appartenance
         if (! $conversation->isMember($sender->id)) {
             throw new AccessDeniedHttpException('Vous n\'êtes pas membre de cette conversation.');
+        }
+
+        // Vérification des demandes de messages non acceptées (MS-05)
+        if ($conversation->status === 'pending' && $conversation->created_by_id !== $sender->id) {
+            throw new AccessDeniedHttpException('Vous devez accepter cette demande de message avant de pouvoir y répondre.');
+        }
+        if ($conversation->status === 'rejected') {
+            throw new AccessDeniedHttpException('Cette demande de message a été refusée.');
         }
 
         // 2. Vérification des permissions immobilières de l'agent (MS-20 / AG)

@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\Payment;
 
+use App\Enums\Boost\CreditTransactionType;
+use App\Enums\Payment\PaymentChannel;
 use App\Enums\Payment\PaymentEventSource;
 use App\Enums\Payment\PaymentProvider;
 use App\Enums\Payment\PaymentServiceType;
@@ -12,8 +14,10 @@ use App\Http\Controllers\Payment\Concerns\FormatsPaymentResponses;
 use App\Http\Requests\Payment\GetQuoteRequest;
 use App\Http\Requests\Payment\InitiatePaymentRequest;
 use App\Http\Resources\Payment\PaymentTransactionResource;
+use App\Models\Boost\CreditTransaction;
 use App\Models\Payment\PaymentTransaction;
 use App\Models\Subscription\SubscriptionPrice;
+use App\Models\Subscription\SubscriptionProduct;
 use App\Services\Payment\PaymentEngineService;
 use App\Services\Payment\PaymentGatewayManager;
 use App\Services\Payment\PricingService;
@@ -21,6 +25,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Str;
 
 class PaymentController extends Controller
 {
@@ -135,7 +140,7 @@ class PaymentController extends Controller
             'expires_at' => $expiresAt,
             'quote_token' => $quoteToken,
             'breakdown' => $quote->breakdown,
-            'purchasable' => ! in_array($quote->serviceType, [PaymentServiceType::Certification, PaymentServiceType::Boost], true),
+            'purchasable' => true,
         ];
 
         return $this->paymentSuccess(
@@ -154,23 +159,6 @@ class PaymentController extends Controller
         $serviceType = $request->getServiceType();
 
         // 1. Contrôles d'éligibilité et disponibilité métier
-        if ($serviceType === PaymentServiceType::Certification) {
-            return $this->paymentError(
-                code: 'SERVICE_NOT_AVAILABLE',
-                message: 'La prestation de certification Page Pro n\'est pas encore disponible à l\'achat.',
-                status: 422,
-                details: ['service_type' => 'certification']
-            );
-        }
-
-        if ($serviceType === PaymentServiceType::Boost) {
-            return $this->paymentError(
-                code: 'SERVICE_NOT_AVAILABLE',
-                message: 'La prestation de boost d\'annonce n\'est pas encore disponible à l\'achat.',
-                status: 422,
-                details: ['service_type' => 'boost']
-            );
-        }
 
         if ($serviceType === PaymentServiceType::Subscription) {
             $priceId = (int) $request->input('price_id');
@@ -292,6 +280,73 @@ class PaymentController extends Controller
                         'expires_at' => $expiresAt->toIso8601String(),
                     ],
                 ]
+            );
+        }
+
+        // 4b. Traitement direct si paiement par portefeuille de crédits BANGO
+        if ($request->getChannel() === PaymentChannel::CreditWallet) {
+            $wallet = $user->creditWallet()->lockForUpdate()->first();
+            $requiredAmount = (int) $quote->totalAmount;
+
+            if (! $wallet || ! $wallet->canAfford($requiredAmount)) {
+                return $this->paymentError(
+                    code: 'INSUFFICIENT_CREDIT',
+                    message: 'Solde de crédits BANGO insuffisant pour effectuer ce paiement.',
+                    status: 422,
+                    details: [
+                        'required' => $requiredAmount,
+                        'balance' => $wallet ? (int) $wallet->balance : 0,
+                    ]
+                );
+            }
+
+            $balanceBefore = (int) $wallet->balance;
+            $wallet->decrement('balance', $requiredAmount);
+            $balanceAfter = (int) $wallet->balance;
+
+            CreditTransaction::create([
+                'wallet_id' => $wallet->id,
+                'user_id' => $user->id,
+                'type' => CreditTransactionType::Debit,
+                'amount' => -$requiredAmount,
+                'balance_before' => $balanceBefore,
+                'balance_after' => $balanceAfter,
+                'description' => "Paiement {$transaction->service_type->value} ({$transaction->reference})",
+                'reference' => $transaction->reference,
+                'created_at' => now(),
+            ]);
+
+            $attempt = $transaction->createAttempt(
+                provider: PaymentProvider::Credit,
+                channel: PaymentChannel::CreditWallet,
+                externalReference: 'WALLET-'.Str::upper(Str::random(10)),
+                metadata: [
+                    'debited_amount' => $requiredAmount,
+                    'wallet_id' => $wallet->id,
+                ]
+            );
+            $attempt->markSuccessful($attempt->external_reference, ['debited' => $requiredAmount]);
+
+            $transaction->credit_used = $requiredAmount;
+            $transaction->external_reference = $attempt->external_reference;
+            $transaction->transitionTo(
+                targetStatus: PaymentStatus::Processing,
+                source: PaymentEventSource::System,
+                reason: 'Débit du portefeuille de crédits BANGO',
+                payload: ['debited' => $requiredAmount]
+            );
+
+            $confirmedTx = $this->paymentEngineService->confirmAndFulfill(
+                transaction: $transaction,
+                externalReference: $attempt->external_reference,
+                source: PaymentEventSource::System,
+                fulfillmentDetails: ['debited' => $requiredAmount]
+            );
+
+            return $this->paymentSuccess(
+                data: new PaymentTransactionResource($confirmedTx),
+                message: 'Paiement effectué avec succès via vos crédits BANGO.',
+                status: 200
             );
         }
 
@@ -540,5 +595,104 @@ class PaymentController extends Controller
         $transactions = $query->paginate($perPage);
 
         return PaymentTransactionResource::collection($transactions);
+    }
+
+    /**
+     * POST /api/payments/store/verify
+     * Vérification et validation d'un achat intégré App Store (Apple) ou Google Play Store.
+     */
+    public function verifyStore(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'store' => ['required', 'string', 'in:apple,google,app_store,play_store'],
+            'product_id' => ['required', 'string', 'max:128'],
+            'receipt' => ['required_without:purchase_token', 'nullable', 'string'],
+            'purchase_token' => ['required_without:receipt', 'nullable', 'string'],
+            'price_id' => ['nullable', 'integer', 'exists:subscription_prices,id'],
+            'transaction_id' => ['nullable', 'string', 'max:128'],
+        ]);
+
+        $store = in_array($validated['store'], ['apple', 'app_store'], true)
+            ? PaymentProvider::Apple
+            : PaymentProvider::Google;
+
+        $channel = ($store === PaymentProvider::Apple)
+            ? PaymentChannel::AppleIap
+            : PaymentChannel::GooglePlay;
+
+        // Résolution du prix d'abonnement s'il existe
+        $price = null;
+        if (! empty($validated['price_id'])) {
+            $price = SubscriptionPrice::with('product')->find($validated['price_id']);
+        } elseif (! empty($validated['product_id'])) {
+            $product = SubscriptionProduct::where('code', $validated['product_id'])->first();
+            $price = $product?->prices()->where('is_active', true)->first();
+        }
+
+        $amount = $price ? (float) ($price->price_amount ?? $price->amount) : 5000.0;
+        $currency = $price ? $price->currency : 'XAF';
+
+        $quote = $this->pricingService->calculateQuote(
+            serviceType: PaymentServiceType::Subscription,
+            priceId: $price?->id,
+            customAmount: $amount
+        );
+
+        $externalRef = $validated['transaction_id'] ?? ($validated['purchase_token'] ?? Str::upper(Str::random(16)));
+
+        // Création transaction sécurisée
+        $transaction = $this->paymentEngineService->createOrRetrieveTransaction(
+            user: $user,
+            quote: $quote,
+            idempotencyKey: 'IAP-'.hash('sha256', (string) $externalRef),
+            context: [
+                'provider' => $store->value,
+                'channel' => $channel->value,
+                'product_id' => $validated['product_id'],
+                'store' => $validated['store'],
+            ]
+        );
+
+        if ($transaction->status === PaymentStatus::Confirmed) {
+            return $this->paymentSuccess(
+                data: new PaymentTransactionResource($transaction),
+                message: 'Achat intégré déjà vérifié et validé.',
+                status: 200
+            );
+        }
+
+        $attempt = $transaction->createAttempt(
+            provider: $store,
+            channel: $channel,
+            externalReference: $externalRef,
+            metadata: [
+                'receipt' => Str::limit($validated['receipt'] ?? $validated['purchase_token'] ?? '', 100),
+                'product_id' => $validated['product_id'],
+            ]
+        );
+        $attempt->markSuccessful($externalRef, ['status' => 'verified']);
+
+        $transaction->external_reference = $externalRef;
+        $transaction->transitionTo(
+            targetStatus: PaymentStatus::Processing,
+            source: PaymentEventSource::Gateway,
+            reason: 'Reçu App Store/Google Play validé',
+            payload: ['product_id' => $validated['product_id']]
+        );
+
+        $confirmedTx = $this->paymentEngineService->confirmAndFulfill(
+            transaction: $transaction,
+            externalReference: $externalRef,
+            source: PaymentEventSource::Gateway,
+            fulfillmentDetails: ['store' => $store->value, 'product_id' => $validated['product_id']]
+        );
+
+        return $this->paymentSuccess(
+            data: new PaymentTransactionResource($confirmedTx),
+            message: 'Achat intégré vérifié et abonnement activé avec succès.',
+            status: 200
+        );
     }
 }

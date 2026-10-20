@@ -11,10 +11,10 @@ use App\Services\Auth\BackupCodeService;
 use App\Services\Auth\TotpService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\RateLimiter;
-use Symfony\Component\HttpFoundation\Cookie;
 
 class AdminAuthService
 {
@@ -103,7 +103,13 @@ class AdminAuthService
             ]);
 
             return response()->json([
+                'code' => 'invalid_credentials',
                 'message' => 'Identifiants invalides ou compte inactif.',
+                'fields' => ['email' => 'invalid_credentials'],
+                'meta' => [
+                    'attemptsLeft' => max(0, 5 - RateLimiter::attempts($throttleKey)),
+                    'lastFailureAt' => now()->toIso8601String(),
+                ],
             ], 401);
         }
 
@@ -112,16 +118,24 @@ class AdminAuthService
             AdminAuditLog::logEvent('auth.login.locked', $user, $request->ip(), $request->userAgent());
 
             return response()->json([
-                'message' => 'Ce compte est temporairement verrouillé suite à plusieurs tentatives 2FA infructueuses.',
                 'code' => 'account_locked',
+                'message' => 'Ce compte est temporairement verrouillé suite à plusieurs tentatives 2FA infructueuses.',
+                'fields' => [],
+                'meta' => [
+                    'email' => $user->email,
+                    'lockedUntil' => $user->locked_until?->toIso8601String(),
+                    'maxAttempts' => 5,
+                ],
                 'locked_until' => $user->locked_until?->toIso8601String(),
             ], 423);
         }
 
         if ($user->trashed() || ($user->status ?? null) === 'deleted') {
             return response()->json([
-                'message' => 'Ce compte opérateur a été désactivé.',
                 'code' => 'ACCOUNT_DELETED',
+                'message' => 'Ce compte opérateur a été désactivé.',
+                'fields' => [],
+                'meta' => [],
             ], 403);
         }
 
@@ -129,8 +143,10 @@ class AdminAuthService
             AdminAuditLog::logEvent('auth.login.blocked_account', $user, $request->ip(), $request->userAgent());
 
             return response()->json([
-                'message' => 'Ce compte opérateur est bloqué.',
                 'code' => 'ACCOUNT_BLOCKED',
+                'message' => 'Ce compte opérateur est bloqué.',
+                'fields' => [],
+                'meta' => [],
             ], 403);
         }
 
@@ -138,8 +154,12 @@ class AdminAuthService
             AdminAuditLog::logEvent('auth.login.blocked_suspended', $user, $request->ip(), $request->userAgent());
 
             return response()->json([
-                'message' => 'Ce compte opérateur est temporairement suspendu.',
                 'code' => 'ACCOUNT_SUSPENDED',
+                'message' => 'Ce compte opérateur est temporairement suspendu.',
+                'fields' => [],
+                'meta' => [
+                    'suspension_reason' => $user->suspension_reason,
+                ],
                 'suspension_reason' => $user->suspension_reason,
             ], 403);
         }
@@ -148,7 +168,10 @@ class AdminAuthService
             AdminAuditLog::logEvent('auth.login.unauthorized_role', $user, $request->ip(), $request->userAgent());
 
             return response()->json([
+                'code' => 'forbidden',
                 'message' => 'Accès refusé. Privilèges opérateur du back-office requis.',
+                'fields' => [],
+                'meta' => [],
             ], 403);
         }
 
@@ -174,9 +197,17 @@ class AdminAuthService
         ]);
 
         return response()->json([
+            'next' => 'otp',
+            'challengeId' => $challengeToken,
+            'challenge_token' => $challengeToken,
+            'operator' => [
+                'email' => $user->email,
+                'title' => $user->role?->name ?? 'Opérateur',
+                'city' => $user->city ?? 'Dakar',
+                'avatarUrl' => $user->avatar_url,
+            ],
             'challenge_required' => true,
             'challenge_type' => 'totp',
-            'challenge_token' => $challengeToken,
             'expires_in' => 600,
             'message' => 'Identifiants validés. Veuillez saisir votre code d\'authentification à deux facteurs.',
         ], 200);
@@ -192,25 +223,35 @@ class AdminAuthService
 
         if ($challenge && $challenge->user && $challenge->user->isLocked()) {
             return response()->json([
-                'message' => 'Compte verrouillé suite à 5 tentatives 2FA infructueuses.',
                 'code' => 'account_locked',
+                'message' => 'Compte verrouillé suite à 5 tentatives 2FA infructueuses.',
+                'fields' => [],
+                'meta' => [
+                    'email' => $challenge->user->email,
+                    'lockedUntil' => $challenge->user->locked_until?->toIso8601String(),
+                    'maxAttempts' => 5,
+                ],
                 'locked_until' => $challenge->user->locked_until?->toIso8601String(),
             ], 423);
         }
 
         if (! $challenge || ! $challenge->isValid()) {
             return response()->json([
+                'code' => 'otp_expired',
                 'message' => 'Le challenge 2FA est invalide, expiré ou a dépassé le nombre maximal de tentatives.',
-                'code' => 'CHALLENGE_INVALID',
-            ], 400);
+                'fields' => ['code' => 'otp_expired'],
+                'meta' => [],
+            ], 401);
         }
 
         $user = $challenge->user;
 
         if ($user->isBlocked() || $user->trashed() || ($user->status ?? null) === 'deleted') {
             return response()->json([
+                'code' => 'forbidden',
                 'message' => 'Ce compte opérateur n\'est plus autorisé à se connecter.',
-                'code' => 'ACCOUNT_BLOCKED',
+                'fields' => [],
+                'meta' => [],
             ], 403);
         }
 
@@ -239,25 +280,35 @@ class AdminAuthService
 
         if ($challenge && $challenge->user && $challenge->user->isLocked()) {
             return response()->json([
-                'message' => 'Compte verrouillé suite à 5 tentatives 2FA infructueuses.',
                 'code' => 'account_locked',
+                'message' => 'Compte verrouillé suite à 5 tentatives 2FA infructueuses.',
+                'fields' => [],
+                'meta' => [
+                    'email' => $challenge->user->email,
+                    'lockedUntil' => $challenge->user->locked_until?->toIso8601String(),
+                    'maxAttempts' => 5,
+                ],
                 'locked_until' => $challenge->user->locked_until?->toIso8601String(),
             ], 423);
         }
 
         if (! $challenge || ! $challenge->isValid()) {
             return response()->json([
+                'code' => 'recovery_key_invalid',
                 'message' => 'Le challenge 2FA est invalide ou expiré.',
-                'code' => 'CHALLENGE_INVALID',
-            ], 400);
+                'fields' => ['key' => 'recovery_key_invalid'],
+                'meta' => [],
+            ], 401);
         }
 
         $user = $challenge->user;
 
         if ($user->isBlocked() || $user->trashed() || ($user->status ?? null) === 'deleted') {
             return response()->json([
+                'code' => 'forbidden',
                 'message' => 'Ce compte opérateur n\'est plus autorisé à se connecter.',
-                'code' => 'ACCOUNT_BLOCKED',
+                'fields' => [],
+                'meta' => [],
             ], 403);
         }
 
@@ -265,7 +316,14 @@ class AdminAuthService
         $consumed = $this->backupCodeService->verifyAndConsume($user, $recoveryCode);
 
         if (! $consumed) {
-            return $this->handleFailed2faAttempt($user, $challenge, $request, 'auth.recovery.failed');
+            AdminAuditLog::logEvent('auth.recovery.failed', $user, $request->ip(), $request->userAgent());
+
+            return response()->json([
+                'code' => 'recovery_key_invalid',
+                'message' => 'Clé de secours invalide ou déjà utilisée.',
+                'fields' => ['key' => 'recovery_key_invalid'],
+                'meta' => [],
+            ], 401);
         }
 
         // Invalidation atomique du challenge et réinitialisation du compteur de verrouillage
@@ -302,8 +360,19 @@ class AdminAuthService
             ]);
 
             return response()->json([
-                'message' => 'Compte verrouillé suite à 5 tentatives 2FA infructueuses.',
                 'code' => 'account_locked',
+                'message' => 'Compte verrouillé suite à 5 tentatives 2FA infructueuses.',
+                'fields' => [],
+                'meta' => [
+                    'email' => $user->email,
+                    'device' => $request->userAgent() ?? 'Inconnu',
+                    'incidentRef' => 'INC-'.strtoupper(bin2hex(random_bytes(3))),
+                    'lockedAt' => now()->toIso8601String(),
+                    'failedAttempts' => $totalFailed,
+                    'maxAttempts' => 5,
+                    'notifiedTo' => $user->email,
+                    'lockedUntil' => $user->locked_until?->toIso8601String(),
+                ],
                 'locked_until' => $user->locked_until?->toIso8601String(),
             ], 423);
         }
@@ -317,9 +386,15 @@ class AdminAuthService
         ]);
 
         return response()->json([
+            'code' => 'otp_invalid',
             'message' => "Code de vérification 2FA invalide. Tentatives restantes : {$remaining}.",
+            'fields' => ['code' => 'otp_invalid'],
+            'meta' => [
+                'attemptsLeft' => $remaining,
+                'failedAt' => now()->toIso8601String(),
+            ],
             'remaining_attempts' => $remaining,
-        ], 422);
+        ], 401);
     }
 
     /**
@@ -356,33 +431,29 @@ class AdminAuthService
             ]
         );
 
-        // 4. Configuration des cookies
-        $isSecure = config('session.secure', false) || app()->environment('production');
-
-        // Cookie HttpOnly de session (valeur RAW transmise au navigateur, jamais le hash)
+        // 4. Configuration des cookies (Point 27 : Secure systématiquement, y compris hors production, SameSite=Strict)
         $sessionCookie = cookie(
             name: 'bango_admin_session',
             value: $rawSessionId,
             minutes: 720, // 12h max
             path: '/',
             domain: config('session.domain'),
-            secure: $isSecure,
+            secure: true,
             httpOnly: true,
             raw: false,
-            sameSite: 'Lax'
+            sameSite: 'Strict'
         );
 
-        // Cookie CSRF accessible en lecture au frontend
         $csrfCookie = cookie(
             name: 'bango_admin_csrf',
             value: $csrfToken,
             minutes: 720,
             path: '/',
             domain: config('session.domain'),
-            secure: $isSecure,
+            secure: true,
             httpOnly: false,
             raw: false,
-            sameSite: 'Lax'
+            sameSite: 'Strict'
         );
 
         // 5. Journalisation de la connexion réussie
@@ -393,18 +464,26 @@ class AdminAuthService
         $permissions = $user->getEffectivePermissions();
 
         return response()->json([
-            'message' => 'Connexion administrative réussie.',
             'operator' => [
-                'id' => $user->id,
+                'id' => (string) $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
-                'role' => $user->role?->slug,
+                'role' => $user->role?->slug ?? 'direction',
+                'title' => $user->role?->name ?? 'Opérateur',
+                'city' => $user->city ?? 'Dakar',
+                'avatarUrl' => $user->avatar_url,
                 'status' => $user->status ?? 'active',
                 'permissions' => $permissions,
             ],
+            'permissions' => $permissions,
+            'expiresAt' => $session->expires_at->toIso8601String(),
+            'idleTimeoutMin' => 30,
+            'firstLogin' => empty($user->last_login_at),
+            'message' => 'Connexion administrative réussie.',
             'session' => [
                 'expires_in_seconds' => 1800, // 30 minutes inactivité glissante
                 'csrf_token' => $csrfToken,
+                'expiresAt' => $session->expires_at->toIso8601String(),
             ],
         ], 200)->withCookie($sessionCookie)->withCookie($csrfCookie);
     }
@@ -426,16 +505,18 @@ class AdminAuthService
         AdminAuditLog::logEvent('auth.session.touch', $session->user, $request->ip(), $request->userAgent());
 
         return response()->json([
-            'message' => 'Session prolongée avec succès.',
+            'expiresAt' => $session->expires_at->toIso8601String(),
             'expires_in_seconds' => 1800,
             'last_activity_at' => $session->last_activity_at->toIso8601String(),
+            'message' => 'Session prolongée avec succès.',
         ], 200);
     }
 
     /**
      * Déconnexion sécurisée : invalidation de session, révocation et expiration des cookies.
+     * Point 27 : Répond avec HTTP 204.
      */
-    public function logout(Request $request): JsonResponse
+    public function logout(Request $request): Response|JsonResponse
     {
         /** @var AdminSession|null $session */
         $session = $request->attributes->get('admin_session');
@@ -452,13 +533,13 @@ class AdminAuthService
             AdminAuditLog::logEvent('auth.logout', $session->user, $request->ip(), $request->userAgent());
         }
 
-        // Expiration immédiate des cookies
+        // Expiration immédiate des cookies avec SameSite=Strict et Secure
         $forgetSession = cookie()->forget('bango_admin_session', '/', config('session.domain'));
         $forgetCsrf = cookie()->forget('bango_admin_csrf', '/', config('session.domain'));
 
-        return response()->json([
-            'message' => 'Déconnexion effectuée avec succès.',
-        ], 200)->withCookie($forgetSession)->withCookie($forgetCsrf);
+        return response()->noContent(204)
+            ->withCookie($forgetSession)
+            ->withCookie($forgetCsrf);
     }
 
     /**

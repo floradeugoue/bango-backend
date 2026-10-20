@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Support;
 
+use App\Enums\Support\TicketStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Support\ReplySupportTicketRequest;
 use App\Http\Requests\Support\StoreSupportTicketRequest;
@@ -161,5 +162,107 @@ class SupportTicketController extends Controller
             $attachment->original_name,
             ['Content-Type' => $attachment->mime_type]
         );
+    }
+
+    /**
+     * Note un ticket résolu ou fermé par son propriétaire.
+     *
+     * POST /api/support/tickets/{id}/rate
+     */
+    public function rate(Request $request, int|string $id): JsonResponse
+    {
+        $ticket = SupportTicket::where(function ($query) use ($id) {
+            if (is_numeric($id)) {
+                $query->where('id', (int) $id)->orWhere('reference', (string) $id);
+            } else {
+                $query->where('reference', (string) $id);
+            }
+        })->firstOrFail();
+
+        Gate::authorize('view', $ticket);
+
+        if ((int) $ticket->user_id !== (int) $request->user()->id) {
+            return response()->json(['message' => 'Action non autorisée.'], 403);
+        }
+
+        $validated = $request->validate([
+            'rating' => ['required', 'integer', 'between:1,5'],
+            'rating_comment' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $ticket->update([
+            'rating' => $validated['rating'],
+            'rating_comment' => $validated['rating_comment'] ?? null,
+            'rated_at' => now(),
+        ]);
+
+        return response()->json([
+            'message' => 'Merci pour votre évaluation.',
+            'data' => new SupportTicketResource($ticket),
+        ]);
+    }
+
+    /**
+     * Réouvre un ticket fermé ou résolu.
+     *
+     * POST /api/support/tickets/{id}/reopen
+     */
+    public function reopen(Request $request, int|string $id): JsonResponse
+    {
+        $ticket = SupportTicket::where(function ($query) use ($id) {
+            if (is_numeric($id)) {
+                $query->where('id', (int) $id)->orWhere('reference', (string) $id);
+            } else {
+                $query->where('reference', (string) $id);
+            }
+        })->firstOrFail();
+
+        Gate::authorize('view', $ticket);
+
+        if ((int) $ticket->user_id !== (int) $request->user()->id) {
+            return response()->json(['message' => 'Action non autorisée.'], 403);
+        }
+
+        $validated = $request->validate([
+            'reason' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $ticket->update([
+            'status' => TicketStatus::Open,
+            'reopened_at' => now(),
+            'closed_at' => null,
+            'resolved_at' => null,
+        ]);
+
+        if (! empty($validated['reason'])) {
+            $this->supportTicketService->replyTicket(
+                $ticket,
+                $request->user(),
+                $validated['reason'],
+                [],
+                false
+            );
+        }
+
+        return response()->json([
+            'message' => 'Le ticket a été réouvert avec succès.',
+            'data' => new SupportTicketResource($ticket->fresh(['user', 'assignedAgent'])),
+        ]);
+    }
+
+    /**
+     * Liste des sanctions et avertissements reçus par le compte connecté.
+     *
+     * GET /api/me/sanctions
+     * GET /api/support/sanctions/mine
+     */
+    public function mySanctions(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $sanctions = $user->sanctions()->with('operator:id,name,email')->get();
+
+        return response()->json([
+            'data' => $sanctions,
+        ]);
     }
 }

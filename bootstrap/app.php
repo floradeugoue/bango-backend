@@ -47,8 +47,31 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
-            fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
+            fn (Request $request) => $request->is('api/*') || $request->is('admin/*') || $request->expectsJson(),
         );
+
+        $exceptions->render(function (ValidationException $e, Request $request) {
+            $isAdmin = $request->is('admin/*')
+                || $request->is('api/admin/*')
+                || $request->header('X-Requested-With') === 'bango-admin';
+
+            if (! $isAdmin) {
+                return null;
+            }
+
+            $fields = [];
+            foreach ($e->errors() as $field => $messages) {
+                $fields[$field] = $messages[0] ?? 'invalid';
+            }
+
+            return response()->json([
+                'code' => 'validation',
+                'message' => $e->getMessage(),
+                'fields' => (object) $fields,
+                'meta' => (object) [],
+                'errors' => $e->errors(),
+            ], 422);
+        });
 
         $exceptions->render(function (ResourceNotFoundException $e, Request $request) {
             return $e->render($request);

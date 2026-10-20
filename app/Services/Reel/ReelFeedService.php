@@ -22,7 +22,8 @@ class ReelFeedService
         ?User $user = null,
         string $scope = 'for_you',
         ?string $topic = null,
-        int $perPage = 10
+        int $perPage = 10,
+        ?int $authorId = null
     ): LengthAwarePaginator {
         $query = Reel::query()
             ->with([
@@ -30,6 +31,11 @@ class ReelFeedService
                 'sound',
             ])
             ->where('status', ReelStatus::Ready);
+
+        // Filtrage spécifique par créateur (profil / onglet Reels de l'auteur)
+        if ($authorId) {
+            $query->where('user_id', $authorId);
+        }
 
         // Si l'utilisateur est connecté, optimiser le chargement des états sociaux et des exclusions
         if ($user) {

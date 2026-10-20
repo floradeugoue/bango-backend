@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources\Message;
 
+use App\Enums\Message\ConversationType;
 use App\Models\Message\Conversation;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -34,12 +35,33 @@ class ConversationResource extends JsonResource
             }
         }
 
+        // Titre par défaut : pour les conversations directes sans titre explicite, utiliser le nom de l'interlocuteur
+        $title = $this->title;
+        $isMuted = false;
+        $isArchived = false;
+
+        if ($currentUserId) {
+            $currentMember = $this->members->firstWhere('user_id', $currentUserId);
+            $isMuted = (bool) ($currentMember?->is_muted);
+            $isArchived = in_array($currentUserId, $this->metadata['archived_by'] ?? [], true);
+
+            if (! $title && $this->type === ConversationType::Direct) {
+                $otherMember = $this->members->firstWhere('user_id', '!=', $currentUserId);
+                $otherUser = $otherMember?->user;
+                if ($otherUser) {
+                    $title = $otherUser->name ?: ($otherUser->handle ?: 'Utilisateur');
+                }
+            }
+        }
+
         return [
             'id' => (string) $this->id,
             'thread_id' => (string) $this->id,
             'type' => $this->type->value,
-            'title' => $this->title,
+            'title' => $title,
             'avatar_url' => $this->avatar_url,
+            'is_muted' => $isMuted,
+            'is_archived' => $isArchived,
             'listing_id' => $this->listing_id ? (string) $this->listing_id : null,
             'listing' => $this->whenLoaded('listing', function () {
                 if (! $this->listing) {

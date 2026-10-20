@@ -479,6 +479,36 @@ class User extends Authenticatable
     }
 
     /**
+     * Détermine si l'utilisateur a été actif au cours des 30 derniers jours.
+     */
+    public function isActiveLast30Days(): bool
+    {
+        $cutoff = now()->subDays(30);
+
+        if ($this->updated_at && $this->updated_at->gte($cutoff)) {
+            return true;
+        }
+
+        if ($this->relationLoaded('listings')) {
+            if ($this->listings->where('updated_at', '>=', $cutoff)->isNotEmpty()) {
+                return true;
+            }
+        } elseif ($this->listings()->where('updated_at', '>=', $cutoff)->exists()) {
+            return true;
+        }
+
+        if ($this->relationLoaded('delegationsAsAgent')) {
+            if ($this->delegationsAsAgent->where('updated_at', '>=', $cutoff)->isNotEmpty()) {
+                return true;
+            }
+        } elseif ($this->delegationsAsAgent()->where('updated_at', '>=', $cutoff)->exists()) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
      * Publications Square créées par cet utilisateur.
      */
     public function posts(): HasMany
@@ -780,5 +810,13 @@ class User extends Authenticatable
     public function deviceTokens(): HasMany
     {
         return $this->hasMany(DeviceToken::class);
+    }
+
+    /**
+     * Alias d'accès pour username retournant handle.
+     */
+    public function getUsernameAttribute(): ?string
+    {
+        return $this->handle;
     }
 }

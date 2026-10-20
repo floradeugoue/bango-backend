@@ -15,6 +15,7 @@ class DataExportRequest extends Model
     protected $fillable = [
         'user_id',
         'status',
+        'sections',
         'file_path',
         'disk',
         'file_size_bytes',
@@ -30,6 +31,7 @@ class DataExportRequest extends Model
     {
         return [
             'status' => DataExportStatus::class,
+            'sections' => 'array',
             'expires_at' => 'datetime',
             'completed_at' => 'datetime',
             'file_size_bytes' => 'integer',

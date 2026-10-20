@@ -79,6 +79,9 @@ class Listing extends Model
         'published_at',
         'taken_at',
         'rejection_reason',
+        'withdrawn_by_bango',
+        'withdrawn_by_bango_at',
+        'bango_withdrawal_reason',
         'draft_step',
         'draft_data',
         'video_metrics',
@@ -99,6 +102,8 @@ class Listing extends Model
             'mode' => ListingMode::class,
             'kind' => ListingKind::class,
             'status' => ListingStatus::class,
+            'withdrawn_by_bango' => 'boolean',
+            'withdrawn_by_bango_at' => 'datetime',
             'price' => 'decimal:2',
             'visit_fee' => 'decimal:2',
             'charges' => 'decimal:2',
@@ -126,6 +131,14 @@ class Listing extends Model
             'published_at' => 'datetime',
             'taken_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Détermine si l'annonce a été retirée par l'administration BANGO (verrou administratif).
+     */
+    public function isWithdrawnByBango(): bool
+    {
+        return (bool) $this->withdrawn_by_bango;
     }
 
     /**
@@ -235,6 +248,30 @@ class Listing extends Model
     public function delegations(): HasMany
     {
         return $this->hasMany(Delegation::class, 'listing_id');
+    }
+
+    /**
+     * Commentaires de l'annonce.
+     */
+    public function comments(): HasMany
+    {
+        return $this->hasMany(ListingComment::class, 'listing_id');
+    }
+
+    /**
+     * Accessor pour neighborhood (synonyme de neighbourhood).
+     */
+    public function getNeighborhoodAttribute(): ?string
+    {
+        return $this->attributes['neighbourhood'] ?? null;
+    }
+
+    /**
+     * Accessor pour cover_image_url.
+     */
+    public function getCoverImageUrlAttribute(): ?string
+    {
+        return $this->photos->first()?->url ?? $this->media->first()?->url;
     }
 
     /**
@@ -407,6 +444,33 @@ class Listing extends Model
             foreach ($filters['amenities'] as $amenity) {
                 $query->whereJsonContains('amenities', (string) $amenity);
             }
+        }
+
+        // 9b. Filtre meublé (furnished)
+        if (isset($filters['furnished']) && filter_var($filters['furnished'], FILTER_VALIDATE_BOOLEAN)) {
+            $query->where(function (Builder $q) {
+                $q->whereJsonContains('amenities', 'furnished')
+                    ->orWhereJsonContains('amenities', 'meuble')
+                    ->orWhere('kind', 'furnished');
+            });
+        }
+
+        // 9c. Filtre compteur individuel (individual_meter)
+        if (isset($filters['individual_meter']) && filter_var($filters['individual_meter'], FILTER_VALIDATE_BOOLEAN)) {
+            $query->where(function (Builder $q) {
+                $q->whereJsonContains('amenities', 'individual_meter')
+                    ->orWhereJsonContains('amenities', 'compteur_individuel')
+                    ->orWhereJsonContains('amenities', 'compteur');
+            });
+        }
+
+        // 9d. Filtre forage d'eau (water_borehole)
+        if (isset($filters['water_borehole']) && filter_var($filters['water_borehole'], FILTER_VALIDATE_BOOLEAN)) {
+            $query->where(function (Builder $q) {
+                $q->whereJsonContains('amenities', 'water_borehole')
+                    ->orWhereJsonContains('amenities', 'forage')
+                    ->orWhereJsonContains('amenities', 'forage_eau');
+            });
         }
 
         // 10. Emprise géographique (bounding box)

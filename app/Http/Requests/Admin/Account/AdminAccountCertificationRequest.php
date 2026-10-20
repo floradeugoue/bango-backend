@@ -17,7 +17,7 @@ class AdminAccountCertificationRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'type' => ['required', 'string', 'in:account,page'],
+            'type' => ['nullable', 'string', 'in:account,page'],
             'page_id' => ['required_if:type,page', 'nullable', 'integer', 'exists:pages,id'],
             'reason' => ['required', 'string', 'min:3', 'max:1000'],
         ];

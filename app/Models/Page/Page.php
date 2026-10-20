@@ -46,6 +46,9 @@ class Page extends Model
         'neighbourhood',
         'certification_status',
         'status',
+        'is_hidden',
+        'followers_count',
+        'inbox_assigned_to_id',
         'metadata',
     ];
 
@@ -58,6 +61,8 @@ class Page extends Model
             'sector' => PageSector::class,
             'certification_status' => PageCertificationStatus::class,
             'status' => PageStatus::class,
+            'is_hidden' => 'boolean',
+            'followers_count' => 'integer',
             'metadata' => 'array',
         ];
     }
@@ -152,13 +157,29 @@ class Page extends Model
         return $this->hasMany(Listing::class);
     }
 
+    /**
+     * Membre ou agent délégué affecté à la gestion de la boîte de réception.
+     */
+    public function inboxAssignee(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'inbox_assigned_to_id');
+    }
+
+    /**
+     * Abonnés de la Page Professionnelle.
+     */
+    public function followers(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'page_followers', 'page_id', 'user_id')->withTimestamps();
+    }
+
     // ==========================================
     // Scopes Eloquent
     // ==========================================
 
     public function scopePublic(Builder $query): Builder
     {
-        return $query->where('status', PageStatus::Active);
+        return $query->where('status', PageStatus::Active)->where('is_hidden', false);
     }
 
     public function scopeActive(Builder $query): Builder
@@ -185,6 +206,15 @@ class Page extends Model
     public function isCertified(): bool
     {
         return $this->certification_status === PageCertificationStatus::Approved;
+    }
+
+    public function isFollowedBy(User $user): bool
+    {
+        if ($this->relationLoaded('followers')) {
+            return $this->followers->contains('id', $user->id);
+        }
+
+        return $this->followers()->where('user_id', $user->id)->exists();
     }
 
     public function isActive(): bool

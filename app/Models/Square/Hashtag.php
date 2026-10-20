@@ -2,6 +2,7 @@
 
 namespace App\Models\Square;
 
+use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -16,6 +17,7 @@ class Hashtag extends Model
         'name',
         'normalized_name',
         'posts_count',
+        'followers_count',
     ];
 
     /**
@@ -25,6 +27,7 @@ class Hashtag extends Model
     {
         return [
             'posts_count' => 'integer',
+            'followers_count' => 'integer',
         ];
     }
 
@@ -34,6 +37,26 @@ class Hashtag extends Model
     public function posts(): BelongsToMany
     {
         return $this->belongsToMany(Post::class, 'post_hashtag')->withTimestamps();
+    }
+
+    /**
+     * Utilisateurs abonnés à ce hashtag.
+     */
+    public function followers(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'hashtag_followers')->withTimestamps();
+    }
+
+    /**
+     * Vérifie si un utilisateur est abonné à ce hashtag.
+     */
+    public function isFollowedBy(?User $user): bool
+    {
+        if (! $user) {
+            return false;
+        }
+
+        return $this->followers()->where('users.id', $user->id)->exists();
     }
 
     /**

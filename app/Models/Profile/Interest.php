@@ -22,4 +22,9 @@ class Interest extends Model
     {
         return $this->belongsToMany(User::class);
     }
+
+    public function getNameAttribute(): ?string
+    {
+        return $this->name_fr ?? $this->name_en ?? $this->id;
+    }
 }

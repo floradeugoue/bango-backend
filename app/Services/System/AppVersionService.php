@@ -2,6 +2,7 @@
 
 namespace App\Services\System;
 
+use App\Models\Admin\SystemConfiguration;
 use Illuminate\Support\Facades\Config;
 
 class AppVersionService
@@ -15,7 +16,10 @@ class AppVersionService
      *     latest_version: string,
      *     force_update: bool,
      *     store_url: string,
-     *     update_recommended?: bool
+     *     update_recommended?: bool,
+     *     maintenance_mode: bool,
+     *     is_maintenance: bool,
+     *     maintenance_message: string|null
      * }
      */
     public function check(string $platform, ?string $clientVersion = null): array
@@ -28,7 +32,33 @@ class AppVersionService
 
         $config = Config::get("system.versions.{$platform}", []);
 
-        $minVersion = (string) ($config['min_version'] ?? '1.0.0');
+        $dynamicMin = null;
+        $maintenanceMode = false;
+        $maintenanceMessage = null;
+
+        if (app()->isDownForMaintenance()) {
+            $maintenanceMode = true;
+            $maintenanceMessage = 'Plateforme en maintenance programmée.';
+        }
+
+        if (class_exists(SystemConfiguration::class)) {
+            try {
+                $dbMaintenance = (bool) SystemConfiguration::getValue('service.maintenance_mode', false);
+                if ($dbMaintenance) {
+                    $maintenanceMode = true;
+                    $maintenanceMessage = SystemConfiguration::getValue('service.maintenance_message', 'Plateforme en maintenance programmée.');
+                }
+
+                $dbMinVersion = SystemConfiguration::getValue("service.min_version_{$platform}");
+                if (! empty($dbMinVersion)) {
+                    $dynamicMin = (string) $dbMinVersion;
+                }
+            } catch (\Throwable) {
+                // Ignore DB error if table not yet migrated
+            }
+        }
+
+        $minVersion = (string) ($dynamicMin ?: ($config['min_version'] ?? '1.0.0'));
         $latestVersion = (string) ($config['latest_version'] ?? $minVersion);
         $storeUrl = (string) ($config['store_url'] ?? '');
 
@@ -54,6 +84,9 @@ class AppVersionService
             'force_update' => $forceUpdate,
             'store_url' => $storeUrl,
             'update_recommended' => $updateRecommended,
+            'maintenance_mode' => $maintenanceMode,
+            'is_maintenance' => $maintenanceMode,
+            'maintenance_message' => $maintenanceMessage,
         ];
     }
 

@@ -66,6 +66,14 @@ class AdminListingControlController extends Controller
         });
 
         return response()->json([
+            // Contract format: Page<T>
+            'items' => $items,
+            'page' => $listings->currentPage(),
+            'perPage' => $listings->perPage(),
+            'total' => $listings->total(),
+            'pageCount' => $listings->lastPage(),
+
+            // Legacy keys for backward compatibility
             'success' => true,
             'data' => $items,
             'meta' => [
@@ -312,6 +320,30 @@ class AdminListingControlController extends Controller
                 'id' => $updated->id,
                 'status' => $updated->status->value,
                 'published_at' => $updated->published_at?->toISOString(),
+            ],
+        ]);
+    }
+
+    /**
+     * B.6 ter. Levée du verrou de retrait BANGO sur une annonce.
+     */
+    public function liftWithdrawal(Request $request, string $ref): JsonResponse
+    {
+        $listing = $this->findListing($ref);
+
+        $updated = $this->listingService->liftBangoWithdrawal(
+            listing: $listing,
+            operator: $request->user(),
+            reason: $request->input('reason')
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Verrou de retrait BANGO levé avec succès.',
+            'data' => [
+                'id' => $updated->id,
+                'status' => $updated->status->value,
+                'withdrawn_by_bango' => (bool) $updated->withdrawn_by_bango,
             ],
         ]);
     }

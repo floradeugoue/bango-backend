@@ -19,6 +19,8 @@ class PeopleSearchResultResource extends JsonResource
             'avatar' => $this->avatar_url,
             'avatar_url' => $this->avatar_url,
             'verified' => (bool) ($this->is_verified ?? false),
+            'certified' => (bool) ($this->is_certified ?? false),
+            'is_certified' => (bool) ($this->is_certified ?? false),
             'badge' => $this->badge ?? 'none',
         ];
     }

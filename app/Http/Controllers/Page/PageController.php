@@ -166,4 +166,96 @@ class PageController extends Controller
 
         return ListingResource::collection($listings);
     }
+
+    /**
+     * Masque ou réaffiche une Page Professionnelle.
+     * POST /api/pages/{page}/visibility
+     */
+    public function toggleVisibility(Request $request, Page $page): JsonResponse
+    {
+        Gate::authorize('update', $page);
+
+        $hidden = $request->has('is_hidden')
+            ? $request->boolean('is_hidden')
+            : ! $page->is_hidden;
+
+        $page->is_hidden = $hidden;
+        $page->save();
+
+        return response()->json([
+            'message' => $page->is_hidden ? 'Page masquée avec succès.' : 'Page visible au public.',
+            'data' => new PageResource($page->fresh(['owner', 'activeMembers.user'])),
+        ]);
+    }
+
+    /**
+     * Attribue la gestion de la boîte de réception de la page à un membre spécifique.
+     * POST /api/pages/{page}/inbox-assignment
+     */
+    public function assignInbox(Request $request, Page $page): JsonResponse
+    {
+        Gate::authorize('update', $page);
+
+        $validated = $request->validate([
+            'user_id' => ['nullable', 'exists:users,id'],
+        ]);
+
+        $assigneeId = $validated['user_id'] ?? null;
+        if ($assigneeId) {
+            $isMember = $page->members()->where('user_id', $assigneeId)->where('status', 'accepted')->exists();
+            if (! $isMember && (int) $page->owner_id !== (int) $assigneeId) {
+                return response()->json([
+                    'message' => 'L\'utilisateur assigné doit être un membre accepté ou le propriétaire de la page.',
+                ], 422);
+            }
+        }
+
+        $page->inbox_assigned_to_id = $assigneeId;
+        $page->save();
+
+        return response()->json([
+            'message' => 'Attribution de la boîte de réception mise à jour.',
+            'data' => new PageResource($page->fresh(['owner', 'activeMembers.user', 'inboxAssignee'])),
+        ]);
+    }
+
+    /**
+     * S'abonner à une page professionnelle.
+     * POST /api/pages/{page}/follow
+     */
+    public function follow(Request $request, Page $page): JsonResponse
+    {
+        $user = $request->user();
+
+        if (! $page->followers()->where('user_id', $user->id)->exists()) {
+            $page->followers()->attach($user->id);
+            $page->increment('followers_count');
+        }
+
+        return response()->json([
+            'message' => 'Vous êtes désormais abonné à cette page.',
+            'is_following' => true,
+            'followers_count' => (int) $page->fresh()->followers_count,
+        ]);
+    }
+
+    /**
+     * Se désabonner d'une page professionnelle.
+     * DELETE /api/pages/{page}/follow
+     */
+    public function unfollow(Request $request, Page $page): JsonResponse
+    {
+        $user = $request->user();
+
+        if ($page->followers()->where('user_id', $user->id)->exists()) {
+            $page->followers()->detach($user->id);
+            $page->decrement('followers_count');
+        }
+
+        return response()->json([
+            'message' => 'Vous n\'êtes plus abonné à cette page.',
+            'is_following' => false,
+            'followers_count' => (int) $page->fresh()->followers_count,
+        ]);
+    }
 }

@@ -8,6 +8,8 @@ use App\Http\Requests\Support\StoreModerationAppealRequest;
 use App\Http\Resources\Support\ModerationAppealResource;
 use App\Models\Page\Page;
 use App\Models\Support\ModerationAppeal;
+use App\Models\Support\ModerationDecision;
+use App\Models\Support\Report;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -24,7 +26,85 @@ class ModerationAppealController extends Controller
         $user = $request->user();
         $validated = $request->validated();
 
-        // 1. Contrôle de légitimité de la contestation
+        $decision = null;
+        $sanctionOperatorId = null;
+
+        // 1. Si une décision de modération est spécifiée, lire la cible et le type depuis la décision vérifiée
+        if (! empty($validated['moderation_decision_id'])) {
+            /** @var ModerationDecision|null $decision */
+            $decision = ModerationDecision::with('report')->find($validated['moderation_decision_id']);
+            if (! $decision) {
+                return response()->json([
+                    'message' => 'Décision de modération introuvable.',
+                ], 404);
+            }
+
+            $report = $decision->report;
+            $isConcerned = false;
+            $sanctionType = null;
+            $sanctionReference = null;
+
+            if ($report) {
+                $reportableType = strtolower($report->reportable_type);
+                $reportableId = $report->reportable_id;
+
+                if (in_array($reportableType, ['user', 'users', 'app\models\user', 'account', 'profile'], true)) {
+                    if ((int) $reportableId === (int) $user->id) {
+                        $isConcerned = true;
+                        $sanctionType = 'account_suspension';
+                        $sanctionReference = (string) $user->id;
+                    }
+                } elseif (in_array($reportableType, ['page', 'pages', 'app\models\page\page'], true)) {
+                    $page = Page::find($reportableId);
+                    if ($page && ($page->user_id === $user->id || (method_exists($page, 'canUserPublish') && $page->canUserPublish($user)))) {
+                        $isConcerned = true;
+                        $sanctionType = 'page_suspension';
+                        $sanctionReference = (string) $page->id;
+                    }
+                } else {
+                    $targetClass = Report::resolveReportableClass($report->reportable_type);
+                    if ($targetClass && class_exists($targetClass)) {
+                        $content = $targetClass::find($reportableId) ?? (method_exists($targetClass, 'withTrashed') ? $targetClass::withTrashed()->find($reportableId) : null);
+                        $authorId = $content?->user_id ?? $content?->owner_id ?? null;
+                        if ($authorId && (int) $authorId === (int) $user->id) {
+                            $isConcerned = true;
+                            $sanctionType = 'content_removal';
+                            $sanctionReference = (string) ($report->reference ?? $report->id);
+                        }
+                    }
+                }
+            }
+
+            if (! $isConcerned && ! empty($decision->metadata['target_id'])) {
+                if (($decision->metadata['target_type'] ?? '') === 'User' && (int) $decision->metadata['target_id'] === (int) $user->id) {
+                    $isConcerned = true;
+                    $sanctionType = 'account_suspension';
+                    $sanctionReference = (string) $user->id;
+                }
+            }
+
+            if ($decision->action === 'suspend_author') {
+                $sanctionType = 'account_suspension';
+                $sanctionReference = (string) $user->id;
+                $isConcerned = true;
+            } elseif ($decision->action === 'warn_author') {
+                $sanctionType = 'warning';
+                $sanctionReference = (string) $user->id;
+                $isConcerned = true;
+            }
+
+            if (! $isConcerned) {
+                return response()->json([
+                    'message' => 'Cette décision de modération ne vous concerne pas.',
+                ], 403);
+            }
+
+            $validated['sanction_type'] = $sanctionType ?? $validated['sanction_type'] ?? 'account_suspension';
+            $validated['sanction_reference'] = $sanctionReference ?? $validated['sanction_reference'] ?? null;
+            $sanctionOperatorId = $decision->operator_id;
+        }
+
+        // 2. Contrôle de légitimité de la contestation
         if ($validated['sanction_type'] === 'account_suspension') {
             if ($user->status !== 'suspended' && ! $user->restricted_until) {
                 return response()->json([
@@ -52,11 +132,17 @@ class ModerationAppealController extends Controller
             }
         }
 
-        // 2. Prévention des recours en doublon
-        $existing = ModerationAppeal::where('user_id', $user->id)
-            ->where('sanction_type', $validated['sanction_type'])
-            ->where('status', AppealStatus::Pending->value)
-            ->first();
+        // 3. Prévention des recours en doublon
+        $duplicateQuery = ModerationAppeal::where('user_id', $user->id)
+            ->where('status', AppealStatus::Pending->value);
+
+        if ($decision) {
+            $duplicateQuery->where('moderation_decision_id', $decision->id);
+        } else {
+            $duplicateQuery->where('sanction_type', $validated['sanction_type']);
+        }
+
+        $existing = $duplicateQuery->first();
 
         if ($existing) {
             return response()->json([
@@ -65,9 +151,11 @@ class ModerationAppealController extends Controller
             ], 422);
         }
 
-        // 3. Enregistrement du recours (sans levée automatique de sanction)
+        // 4. Enregistrement du recours rattaché à la vraie sanction
         $appeal = ModerationAppeal::create([
             'user_id' => $user->id,
+            'moderation_decision_id' => $decision?->id,
+            'sanction_operator_id' => $sanctionOperatorId,
             'sanction_type' => $validated['sanction_type'],
             'sanction_reference' => $validated['sanction_reference'] ?? null,
             'reason' => $validated['reason'],

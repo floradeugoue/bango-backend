@@ -20,6 +20,7 @@ class StorePostCommentRequest extends FormRequest
             'body' => ['required', 'string', 'min:1', 'max:2200'],
             'parent_id' => ['nullable', 'integer'],
             'parentId' => ['nullable', 'integer'],
+            'answer_to_id' => ['nullable', 'integer'],
         ];
     }
 
@@ -30,7 +31,7 @@ class StorePostCommentRequest extends FormRequest
 
     public function parentId(): ?int
     {
-        $id = $this->input('parent_id') ?? $this->input('parentId');
+        $id = $this->input('answer_to_id') ?? $this->input('parent_id') ?? $this->input('parentId');
 
         return $id ? (int) $id : null;
     }

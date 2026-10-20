@@ -10,6 +10,7 @@ use App\Models\Square\Post;
 use App\Models\Square\PostMedia;
 use App\Models\Square\PostTag;
 use App\Models\User;
+use App\Services\Admin\AutomatedTextFilterService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
@@ -168,6 +169,10 @@ class PostCreationService
             // Extraction et liaison des hashtags (CR-07)
             if ($body) {
                 $this->hashtagService->syncPostHashtags($post, $body);
+
+                // Point 19 : Déclenchement du filtre textuel automatique
+                app(AutomatedTextFilterService::class)
+                    ->scanText($body, 'post', $post->id, $user);
             }
 
             return $post->load(['media.tags.user', 'hashtags', 'user']);

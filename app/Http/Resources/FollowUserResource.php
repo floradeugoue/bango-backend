@@ -22,6 +22,8 @@ class FollowUserResource extends JsonResource
             'avatarUrl' => $this->avatar_url,
             'badge' => $this->badge ?? 'none',
             'verified' => (bool) ($this->badge && $this->badge !== 'none' && ! $this->verification_lapsed),
+            'certified' => (bool) ($this->is_certified ?? false),
+            'is_certified' => (bool) ($this->is_certified ?? false),
             'place' => $place,
             'bio' => $this->bio ?? '',
             'isFollowing' => $currentUser ? $currentUser->isFollowing($this->resource) : false,

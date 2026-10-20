@@ -145,7 +145,7 @@ it('P3 - rejects 123456 fallback and requires real cryptographic TOTP', function
         'challenge_token' => $challengeToken,
         'code' => '123456',
     ]);
-    $fakeResponse->assertStatus(422);
+    $fakeResponse->assertStatus(401);
 
     // 2. Succès uniquement avec un vrai secret TOTP et code RFC 6238 calculé
     $totpService = app(TotpService::class);
@@ -251,6 +251,7 @@ it('P4 - forbids self-role modification and demoting the last active administrat
         ->withHeader('X-CSRF-TOKEN', $secondCsrf)
         ->patchJson("/api/admin/users/{$soleAdmin->id}/role", [
             'role_id' => $userRole->id,
+            'require_approval' => false,
         ]);
     $demoteFirst->assertStatus(200);
 

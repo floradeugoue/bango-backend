@@ -16,6 +16,7 @@ class ModerationAppeal extends Model
     protected $fillable = [
         'reference',
         'user_id',
+        'moderation_decision_id',
         'sanction_type',
         'sanction_reference',
         'sanction_operator_id',
@@ -54,6 +55,11 @@ class ModerationAppeal extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function decision(): BelongsTo
+    {
+        return $this->belongsTo(ModerationDecision::class, 'moderation_decision_id');
     }
 
     public function reviewer(): BelongsTo

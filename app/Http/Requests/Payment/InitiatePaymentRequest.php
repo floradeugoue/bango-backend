@@ -27,7 +27,7 @@ class InitiatePaymentRequest extends FormRequest
             'price_id' => ['nullable', 'integer', 'exists:subscription_prices,id'],
             'custom_amount' => ['nullable', 'numeric', 'min:100'],
             'amount' => ['nullable', 'numeric'], // Ne sera pas utilisé comme source de vérité, le serveur recalcule
-            'phone' => ['required', 'string', 'regex:/^[0-9+\s\-()]{8,25}$/'],
+            'phone' => ['nullable', 'required_unless:channel,credit_wallet', 'string', 'regex:/^[0-9+\s\-()]{8,25}$/'],
             'operator' => ['nullable', 'string', 'max:64'],
             'idempotency_key' => ['sometimes', 'string', 'max:128'],
             'key' => ['sometimes', 'string', 'max:128'],

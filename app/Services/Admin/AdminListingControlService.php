@@ -5,6 +5,7 @@ namespace App\Services\Admin;
 use App\Enums\Boost\CampaignStatus;
 use App\Enums\Listing\ListingStatus;
 use App\Enums\Visit\VisitReservationStatus;
+use App\Enums\Visit\VisitSlotStatus;
 use App\Events\Listing\ListingPublished;
 use App\Models\Listing\Listing;
 use App\Models\Listing\ListingAgentCertification;
@@ -13,7 +14,9 @@ use App\Models\Listing\ListingMerge;
 use App\Models\Listing\ListingReviewLog;
 use App\Models\User;
 use App\Models\Visit\VisitReservation;
+use App\Models\Visit\VisitSlot;
 use App\Notifications\Listing\ListingDecisionNotification;
+use App\Services\Payment\PaymentEngineService;
 use DomainException;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
@@ -25,6 +28,12 @@ use Illuminate\Validation\ValidationException;
 
 class AdminListingControlService
 {
+    public function __construct(
+        protected ?PaymentEngineService $paymentEngineService = null
+    ) {
+        $this->paymentEngineService = $paymentEngineService ?? app(PaymentEngineService::class);
+    }
+
     /**
      * Liste paginée des annonces pour le back-office avec filtres et facettes.
      *
@@ -33,6 +42,18 @@ class AdminListingControlService
     public function getListings(array $filters = [], int $perPage = 20): LengthAwarePaginator
     {
         $query = Listing::with(['owner', 'agent', 'page', 'photos', 'campaigns']);
+
+        // Filtrage selon les pays autorisés dans la session de l'opérateur (Point 20)
+        $adminSession = request()?->attributes?->get('admin_session');
+        if ($adminSession && ! empty($adminSession->allowed_countries)) {
+            $allowedCountries = (array) $adminSession->allowed_countries;
+            $query->whereHas('owner', function (Builder $oq) use ($allowedCountries) {
+                $oq->whereIn('country_code', $allowedCountries)
+                    ->orWhereHas('country', function (Builder $cq) use ($allowedCountries) {
+                        $cq->whereIn('code', $allowedCountries)->orWhereIn('iso2', $allowedCountries);
+                    });
+            });
+        }
 
         // 1. Statut de publication
         if (! empty($filters['status'])) {
@@ -282,10 +303,20 @@ class AdminListingControlService
             ? Listing::where('id', $secondaryId)->firstOrFail()
             : Listing::where('reference', $secondaryId)->firstOrFail();
 
+        // Point 18 : Réserver la fusion aux annonces d'un même propriétaire
+        if ((int) $primary->owner_id !== (int) $secondary->owner_id) {
+            throw ValidationException::withMessages([
+                'secondary_ref' => ['La fusion est strictement réservée aux annonces appartenant au même propriétaire.'],
+            ]);
+        }
+
         return DB::transaction(function () use ($primary, $secondary, $operator, $reason) {
-            // 1. Dépublication de l'annonce secondaire
+            // 1. Dépublication de l'annonce secondaire avec verrou BANGO (Point 17)
             $secondary->update([
                 'status' => ListingStatus::Draft,
+                'withdrawn_by_bango' => true,
+                'withdrawn_by_bango_at' => now(),
+                'bango_withdrawal_reason' => "Fusionnée avec l'annonce principale ref: {$primary->id}",
                 'rejection_reason' => "Fusionnée avec l'annonce principale ref: {$primary->id}",
             ]);
 
@@ -298,10 +329,8 @@ class AdminListingControlService
                 }
             }
 
-            // 2. Préservation des visites réservées : rattachement à l'annonce principale
-            VisitReservation::where('listing_id', $secondary->id)
-                ->whereIn('status', [VisitReservationStatus::Requested->value, VisitReservationStatus::Confirmed->value])
-                ->update(['listing_id' => $primary->id]);
+            // 2. Annulation et remboursement des visites confirmées / à venir de l'annonce secondaire (Point 18)
+            $this->cancelAndRefundUpcomingVisits($secondary, "Annonce fusionnée avec l'annonce principale {$primary->id}");
 
             // 3. Enregistrement dans la table d'audit des fusions
             ListingMerge::create([
@@ -371,6 +400,9 @@ class AdminListingControlService
                 $listing->update([
                     'status' => ListingStatus::Published,
                     'published_at' => $now,
+                    'withdrawn_by_bango' => false,
+                    'withdrawn_by_bango_at' => null,
+                    'bango_withdrawal_reason' => null,
                     'rejection_reason' => null,
                 ]);
 
@@ -395,6 +427,9 @@ class AdminListingControlService
             } elseif (in_array($decision, ['request_changes', 'draft'], true)) {
                 $listing->update([
                     'status' => ListingStatus::Draft,
+                    'withdrawn_by_bango' => true,
+                    'withdrawn_by_bango_at' => $now,
+                    'bango_withdrawal_reason' => $reason ?? 'Corrections requises avant republication',
                     'rejection_reason' => $reason ?? 'Corrections requises avant republication',
                 ]);
 
@@ -506,7 +541,7 @@ class AdminListingControlService
     }
 
     /**
-     * B.6. Dépublication / suspension d'une annonce.
+     * B.6. Dépublication / suspension d'une annonce (Point 17).
      */
     public function unpublish(Listing $listing, User $operator, ?string $reason = null): Listing
     {
@@ -517,6 +552,9 @@ class AdminListingControlService
 
             $listing->update([
                 'status' => ListingStatus::Draft,
+                'withdrawn_by_bango' => true,
+                'withdrawn_by_bango_at' => $now,
+                'bango_withdrawal_reason' => $reason ?? 'Dépubliée par l\'administration',
                 'rejection_reason' => $reason ?? 'Dépubliée par l\'administration',
             ]);
 
@@ -549,7 +587,7 @@ class AdminListingControlService
     }
 
     /**
-     * B.6 bis. Republication d'une annonce.
+     * B.6 bis. Republication d'une annonce (Point 17 : lève le verrou BANGO).
      */
     public function republish(Listing $listing, User $operator, ?string $reason = null): Listing
     {
@@ -561,6 +599,9 @@ class AdminListingControlService
             $listing->update([
                 'status' => ListingStatus::Published,
                 'published_at' => $now,
+                'withdrawn_by_bango' => false,
+                'withdrawn_by_bango_at' => null,
+                'bango_withdrawal_reason' => null,
                 'rejection_reason' => null,
             ]);
 
@@ -590,8 +631,34 @@ class AdminListingControlService
     }
 
     /**
+     * B.6 ter. Levée du verrou de retrait par BANGO sans changer le statut (Point 17).
+     */
+    public function liftBangoWithdrawal(Listing $listing, User $operator, ?string $reason = null): Listing
+    {
+        return DB::transaction(function () use ($listing, $operator, $reason) {
+            $listing->update([
+                'withdrawn_by_bango' => false,
+                'withdrawn_by_bango_at' => null,
+                'bango_withdrawal_reason' => null,
+            ]);
+
+            ListingReviewLog::create([
+                'listing_id' => $listing->id,
+                'operator_id' => $operator->id,
+                'action' => 'lift_bango_withdrawal',
+                'from_status' => $listing->status->value,
+                'to_status' => $listing->status->value,
+                'reason' => $reason ?? 'Levée du verrou de retrait administratif BANGO',
+                'created_at' => now(),
+            ]);
+
+            return $listing->fresh();
+        });
+    }
+
+    /**
      * B.7. Marquage d'un bien comme loué / occupé (taken).
-     * Interrompt immédiatement les campagnes de boost sans remboursement indu et annule les visites futures.
+     * Interrompt immédiatement les campagnes de boost sans remboursement indu et annule + rembourse les visites futures (Point 18).
      */
     public function markAsRented(Listing $listing, User $operator, ?string $reason = null): Listing
     {
@@ -611,14 +678,8 @@ class AdminListingControlService
                 ->where('status', CampaignStatus::Active->value)
                 ->update(['status' => CampaignStatus::Completed->value]);
 
-            // 3. Clôture des visites en attente
-            VisitReservation::where('listing_id', $listing->id)
-                ->where('status', VisitReservationStatus::Requested->value)
-                ->update([
-                    'status' => VisitReservationStatus::Cancelled->value,
-                    'cancellation_reason' => 'Le bien a été loué / retiré du marché',
-                    'cancelled_at' => $now,
-                ]);
+            // 3. Clôture, annulation et remboursement des visites confirmées / à venir (Point 18)
+            $this->cancelAndRefundUpcomingVisits($listing, 'Le bien a été loué / retiré du marché');
 
             // 4. Journalisation de l'audit
             ListingReviewLog::create([
@@ -633,6 +694,68 @@ class AdminListingControlService
 
             return $listing->fresh();
         });
+    }
+
+    /**
+     * Annule et rembourse les visites confirmées / à venir lorsque cela s'applique (Point 18).
+     */
+    public function cancelAndRefundUpcomingVisits(Listing $listing, string $reason): int
+    {
+        $now = now();
+        $visits = VisitReservation::with(['slot', 'paymentTransaction'])
+            ->where('listing_id', $listing->id)
+            ->whereIn('status', [
+                VisitReservationStatus::Requested->value,
+                VisitReservationStatus::Confirmed->value,
+                VisitReservationStatus::Proposed->value,
+                VisitReservationStatus::PendingPayment->value,
+            ])
+            ->where(function ($query) use ($now) {
+                $query->whereHas('slot', function ($sq) use ($now) {
+                    $sq->where('start_at', '>=', $now);
+                })->orWhereNull('slot_id');
+            })
+            ->get();
+
+        $count = 0;
+        foreach ($visits as $visit) {
+            $wasConfirmed = $visit->status === VisitReservationStatus::Confirmed;
+            if ($wasConfirmed && $visit->slot) {
+                $visit->slot->decrement('booked_count');
+            }
+
+            $visit->status = VisitReservationStatus::Cancelled;
+            $visit->cancelled_at = $now;
+            $visit->cancellation_reason = $reason;
+            $visit->lock_expires_at = null;
+
+            if ($wasConfirmed && $visit->fee_amount > 0 && $visit->paymentTransaction) {
+                try {
+                    $this->paymentEngineService->refundTransaction(
+                        transaction: $visit->paymentTransaction,
+                        reason: $reason,
+                        amount: (float) $visit->fee_amount,
+                        externalRefundReference: 'REFUND-AUTO-'.$visit->id
+                    );
+                    $visit->status = VisitReservationStatus::Refunded;
+                    $visit->refund_amount = $visit->fee_amount;
+                    $visit->refunded_at = $now;
+                    $visit->refund_channel = 'bango_credit';
+                } catch (\Throwable $e) {
+                    Log::warning("Échec du remboursement automatique de la visite {$visit->id} : {$e->getMessage()}");
+                }
+            }
+
+            $visit->save();
+            $count++;
+        }
+
+        // Fermer également les créneaux futurs pour empêcher toute nouvelle réservation
+        VisitSlot::where('listing_id', $listing->id)
+            ->where('start_at', '>', $now)
+            ->update(['status' => VisitSlotStatus::Closed->value]);
+
+        return $count;
     }
 
     /**

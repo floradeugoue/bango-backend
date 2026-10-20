@@ -92,7 +92,7 @@ test('un bailleur certifié peut créer une annonce valide et elle part en modé
         ->assertJsonPath('data.title', 'Superbe studio meublé Almadies')
         ->assertJsonPath('data.mode', ListingMode::Rent->value)
         ->assertJsonPath('data.kind', ListingKind::Studio->value)
-        ->assertJsonPath('data.status', ListingStatus::Review->value)
+        ->assertJsonPath('data.status', ListingStatus::Published->value)
         ->assertJsonPath('data.price', 150000)
         ->assertJsonPath('data.currency', 'XOF')
         ->assertJsonPath('data.city', 'Dakar')
@@ -101,7 +101,7 @@ test('un bailleur certifié peut créer une annonce valide et elle part en modé
     $this->assertDatabaseHas('listings', [
         'owner_id' => $this->landlord->id,
         'submission_key' => 'sub-key-123',
-        'status' => ListingStatus::Review->value,
+        'status' => ListingStatus::Published->value,
         'price' => 150000,
     ]);
 });

@@ -51,6 +51,8 @@ class PublicProfileResource extends JsonResource
             'badge' => $badge,
             'badges' => $badges,
             'verified' => (bool) ($this->badge && $this->badge !== 'none' && ! $this->verification_lapsed),
+            'certified' => (bool) ($this->is_certified ?? false),
+            'is_certified' => (bool) ($this->is_certified ?? false),
             'verificationLapsed' => (bool) ($this->verification_lapsed ?? false),
             'private' => (bool) ($this->is_private ?? false),
             'tone' => $tone,

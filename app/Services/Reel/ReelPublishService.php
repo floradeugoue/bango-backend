@@ -6,6 +6,7 @@ use App\Enums\Reel\ReelStatus;
 use App\Jobs\Reel\ProcessReelVideoJob;
 use App\Models\Reel\Reel;
 use App\Models\User;
+use App\Services\Admin\AutomatedTextFilterService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -98,10 +99,15 @@ class ReelPublishService
             $reel->subtitles_locale = $data['subtitles_locale'] ?? ($reel->subtitles_locale ?: 'fr');
             $reel->listing_id = $data['listing_id'] ?? $reel->listing_id;
 
-            // Transition atomique d'état vers 'processing'
             $reel->status = ReelStatus::Processing;
             $reel->error_message = null;
             $reel->save();
+
+            // Point 19 : Déclenchement du filtre textuel automatique sur la légende du Reel
+            if (! empty($reel->caption)) {
+                app(AutomatedTextFilterService::class)
+                    ->scanText($reel->caption, 'reel', $reel->id, $user);
+            }
 
             // Dispatch du job de traitement vidéo asynchrone
             ProcessReelVideoJob::dispatch($reel);

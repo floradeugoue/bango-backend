@@ -54,11 +54,6 @@ class CampaignEligibilityService
             return Response::deny('Cette Page Professionnelle est suspendue ou inactive. Le sponsoring est refusé.');
         }
 
-        // La Page Pro doit être certifiée (statut approved)
-        if (! $page->isCertified()) {
-            return Response::deny('La Page Professionnelle doit être certifiée pour pouvoir lancer des campagnes publicitaires.');
-        }
-
         // L'utilisateur doit être membre actif et autorisé (Owner ou Editor)
         if (! $page->canUserPublish($user)) {
             return Response::deny('Vous n\'avez pas les permissions suffisantes (Propriétaire ou Éditeur) sur cette Page Professionnelle.');
@@ -79,35 +74,18 @@ class CampaignEligibilityService
     }
 
     /**
-     * Vérifie l'éligibilité au boost d'un compte personnel (règles SUB, BADGE et KYC).
+     * Vérifie l'éligibilité au boost d'un compte personnel (règle produit : le boost cible du contenu).
      */
     public function checkPersonalEligibility(User $user, ?Model $content = null): Response
     {
-        // 1. Résolution des badges réels via le service officiel BANGO
-        $badgeStatus = $this->badgeResolutionService->resolveUserBadges($user);
-
-        // 2. Vérification des conditions SUB et KYC
-        // Un compte personnel DOIT posséder un badge professionnel actif (Bailleur ou Agent)
-        // soutenu par un abonnement valide ou en grâce, et un KYC certifié non caduc.
-        $hasActiveBadge = $badgeStatus['hasLandlord'] || $badgeStatus['hasAgent'];
-
-        if (! $hasActiveBadge) {
-            // Identifier précisément la cause du refus pour un message explicite
-            $hasSub = $user->hasActiveSubscription('landlord') || $user->hasActiveSubscription('agent');
-
-            if ($hasSub) {
-                if (! $user->is_verified) {
-                    return Response::deny('Votre abonnement est actif mais votre identité (KYC) n\'est pas encore validée. Le boost est bloqué.');
-                }
-                if ($badgeStatus['verificationLapsed']) {
-                    return Response::deny('Votre vérification d\'identité a expiré (statut caduc). Veuillez renouveler votre KYC pour booster vos contenus.');
-                }
-            }
-
-            return Response::deny('Le lancement de campagnes de boost est réservé aux professionnels certifiés disposant d\'un abonnement actif (Bailleur ou Agent) et d\'un badge vérifié.');
+        // Règle produit BANGO : Le boost cible un contenu (annonce, publication, reel),
+        // et n'est pas restreint aux seuls professionnels certifiés.
+        // Tout utilisateur actif et non suspendu peut promouvoir ses propres contenus.
+        if ($user->status === 'suspended') {
+            return Response::deny('Votre compte utilisateur est suspendu. Vous ne pouvez pas lancer de campagne.');
         }
 
-        // 3. Si un contenu est fourni, vérifier la propriété directe
+        // Si un contenu est fourni, vérifier la propriété directe
         if ($content !== null) {
             $contentUserId = (int) ($content->user_id ?? $content->owner_id ?? 0);
             if ($contentUserId !== (int) $user->id) {

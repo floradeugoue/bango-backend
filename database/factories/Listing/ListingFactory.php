@@ -44,7 +44,7 @@ class ListingFactory extends Factory
             'kind' => ListingKind::Flat,
             'status' => ListingStatus::Published,
             'price' => fake()->numberBetween(75000, 450000),
-            'currency' => 'XOF',
+            'currency' => 'XAF',
             'period' => 'month',
             'deposit_months' => 2,
             'advance_months' => 1,

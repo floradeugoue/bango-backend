@@ -44,7 +44,14 @@ class AdminSupportTicketOperationsController extends Controller
         $perPage = (int) $request->query('per_page', 20);
         $tickets = $this->supportService->getTickets($filters, $perPage);
 
-        return response()->json($tickets);
+        $data = $tickets->toArray();
+        $data['items'] = $tickets->items();
+        $data['page'] = $tickets->currentPage();
+        $data['perPage'] = $tickets->perPage();
+        $data['total'] = $tickets->total();
+        $data['pageCount'] = $tickets->lastPage();
+
+        return response()->json($data);
     }
 
     /**

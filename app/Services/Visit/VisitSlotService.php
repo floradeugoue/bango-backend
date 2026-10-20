@@ -53,7 +53,8 @@ class VisitSlotService
     public function getAvailableDays(Listing $listing, ?User $prospect = null, ?Carbon $now = null): array
     {
         $at = $now ? $now->copy() : now();
-        $earliestTime = $at->copy()->addHours(self::DEFAULT_MINIMUM_HOURS);
+        $minimumHours = (int) ($listing->attributes['minimum_hours'] ?? self::DEFAULT_MINIMUM_HOURS);
+        $earliestTime = $at->copy()->addHours($minimumHours);
         $endDate = $at->copy()->addDays(self::DAYS_SHOWN);
 
         // 1. Récupérer les créneaux explicites en base de données pour la période
@@ -269,6 +270,22 @@ class VisitSlotService
         return DB::transaction(function () use ($listing, $payload) {
             $createdSlots = [];
 
+            // Sauvegarder les règles de créneaux BL-08 sur l'annonce si spécifiées
+            $attrs = $listing->attributes ?? [];
+            if (isset($payload['minimum_hours'])) {
+                $attrs['minimum_hours'] = (int) $payload['minimum_hours'];
+            }
+            if (isset($payload['grouped'])) {
+                $attrs['grouped'] = (bool) $payload['grouped'];
+            }
+            if (isset($payload['group_size'])) {
+                $attrs['group_size'] = (int) $payload['group_size'];
+            }
+            $listing->attributes = $attrs;
+            $listing->save();
+
+            $defaultCapacity = ! empty($payload['grouped']) ? max(1, (int) ($payload['group_size'] ?? 5)) : 1;
+
             // 1. Mise à jour explicite par liste de créneaux
             if (! empty($payload['slots']) && is_array($payload['slots'])) {
                 $slotsInput = collect($payload['slots'])->sortBy('start_at')->values();
@@ -298,7 +315,7 @@ class VisitSlotService
                         }
                     }
 
-                    $capacity = (int) ($slotsInput[$i]['capacity'] ?? 1);
+                    $capacity = (int) ($slotsInput[$i]['capacity'] ?? $defaultCapacity);
 
                     $slot = VisitSlot::firstOrCreate(
                         [
@@ -367,7 +384,7 @@ class VisitSlotService
                                 [
                                     'owner_id' => $listing->owner_id,
                                     'agent_id' => $listing->agent_id,
-                                    'capacity' => 1,
+                                    'capacity' => $defaultCapacity,
                                     'booked_count' => 0,
                                     'status' => VisitSlotStatus::Open,
                                 ]

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin\Moderation;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\Moderation\UploadEvidenceRequest;
+use App\Models\Admin\AdminAuditLog;
 use App\Models\Support\ModerationEvidence;
 use App\Models\Support\Report;
 use Illuminate\Http\JsonResponse;
@@ -11,6 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class AdminModerationEvidenceController extends Controller
@@ -43,6 +45,25 @@ class AdminModerationEvidenceController extends Controller
         }
 
         $operator = $request->user();
+
+        // Point 21 : Journalisation d'audit chaînée de l'ouverture de pièce
+        if ($operator) {
+            AdminAuditLog::logChainedEvent(
+                event: 'moderation.evidence_opened',
+                operator: $operator,
+                targetType: 'ModerationEvidence',
+                targetId: (string) $evidence->id,
+                targetLabel: "Ouverture preuve {$evidence->file_name} du dossier {$report->reference}",
+                context: [
+                    'report_reference' => $report->reference,
+                    'report_id' => $report->id,
+                    'evidence_id' => $evidence->id,
+                    'file_name' => $evidence->file_name,
+                ],
+                ip: $request->ip(),
+                userAgent: $request->userAgent()
+            );
+        }
 
         // Journalisation de sécurité
         Log::info('Accès preuve de modération', [
@@ -84,6 +105,55 @@ class AdminModerationEvidenceController extends Controller
                 'opened_by' => $operator?->email,
                 'opened_at' => now()->toIso8601String(),
             ],
+        ]);
+    }
+
+    /**
+     * Point 19 : Lecture / streaming direct et sécurisé d'une preuve de modération.
+     *
+     * GET /api/admin/moderation/evidence/{id}/stream
+     */
+    public function stream(Request $request, int|string $id): Response
+    {
+        $evidence = ModerationEvidence::find($id);
+
+        if (! $evidence) {
+            throw new NotFoundHttpException("Fichier de preuve [{$id}] introuvable.");
+        }
+
+        $disk = Storage::disk('local');
+        $filePath = $evidence->file_path;
+
+        if (! $disk->exists($filePath)) {
+            if (Storage::disk('public')->exists($filePath)) {
+                $disk = Storage::disk('public');
+            } else {
+                throw new NotFoundHttpException('Le fichier de preuve physique est introuvable sur le stockage.');
+            }
+        }
+
+        $operator = $request->user();
+        if ($operator) {
+            AdminAuditLog::logChainedEvent(
+                event: 'moderation.evidence_streamed',
+                operator: $operator,
+                targetType: 'ModerationEvidence',
+                targetId: (string) $evidence->id,
+                targetLabel: "Lecture streaming de la preuve {$evidence->file_name}",
+                context: [
+                    'evidence_id' => $evidence->id,
+                    'file_name' => $evidence->file_name,
+                    'report_id' => $evidence->report_id,
+                ],
+                ip: $request->ip(),
+                userAgent: $request->userAgent()
+            );
+        }
+
+        return $disk->response($filePath, $evidence->file_name, [
+            'Content-Type' => $evidence->mime_type ?? 'application/octet-stream',
+            'Cache-Control' => 'no-store, no-cache, must-revalidate, private',
+            'X-Content-Type-Options' => 'nosniff',
         ]);
     }
 

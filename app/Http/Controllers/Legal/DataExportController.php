@@ -9,6 +9,7 @@ use App\Jobs\Legal\GenerateDataExportJob;
 use App\Models\Legal\DataExportRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class DataExportController extends Controller
@@ -34,9 +35,15 @@ class DataExportController extends Controller
             ], 422);
         }
 
+        $validated = $request->validate([
+            'sections' => ['nullable', 'array'],
+            'sections.*' => ['string'],
+        ]);
+
         $exportRequest = DataExportRequest::create([
             'user_id' => $user->id,
             'status' => DataExportStatus::Pending,
+            'sections' => $validated['sections'] ?? null,
             'disk' => 'local',
         ]);
 
@@ -114,5 +121,41 @@ class DataExportController extends Controller
         return response()->download($fullPath, 'bango_mes_donnees_'.$user->id.'.zip', [
             'Content-Type' => 'application/zip',
         ]);
+    }
+
+    /**
+     * Annule une demande d'export en attente ou en cours.
+     *
+     * POST /api/user/data-export/{id}/cancel
+     * POST /api/settings/export/{id}/cancel
+     */
+    public function cancel(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        $exportRequest = DataExportRequest::where('id', $id)->firstOrFail();
+
+        if ((int) $exportRequest->user_id !== (int) $user->id) {
+            return response()->json(['message' => 'Non autorisé.'], 403);
+        }
+
+        if ($exportRequest->status === DataExportStatus::Cancelled) {
+            return response()->json([
+                'message' => 'Cette demande d\'export est déjà annulée.',
+            ], 422);
+        }
+
+        if ($exportRequest->file_path && Storage::disk($exportRequest->disk)->exists($exportRequest->file_path)) {
+            Storage::disk($exportRequest->disk)->delete($exportRequest->file_path);
+        }
+
+        $exportRequest->update([
+            'status' => DataExportStatus::Cancelled,
+            'file_path' => null,
+        ]);
+
+        return response()->json([
+            'message' => 'Demande d\'export annulée avec succès.',
+            'export' => new DataExportRequestResource($exportRequest),
+        ], 200);
     }
 }

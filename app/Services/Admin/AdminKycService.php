@@ -4,6 +4,7 @@ namespace App\Services\Admin;
 
 use App\Enums\Admin\AdminPermission;
 use App\Enums\Kyc\KycStatus;
+use App\Models\Admin\AdminAuditLog;
 use App\Models\Kyc\KycSubmission;
 use App\Models\User;
 use App\Notifications\Kyc\KycDecisionNotification;
@@ -33,18 +34,102 @@ class AdminKycService
         $query = KycSubmission::with(['user.role', 'decidedBy', 'escalatedTo', 'documents'])
             ->select('kyc_submissions.*');
 
-        // 1. Filtre par statut
-        if (! empty($filters['status'])) {
-            $status = $filters['status'];
-            $query->where('status', $status);
+        // Filtrage selon les pays autorisés dans la session de l'opérateur (Point 20)
+        $adminSession = request()?->attributes?->get('admin_session');
+        if ($adminSession && ! empty($adminSession->allowed_countries)) {
+            $allowedCountries = (array) $adminSession->allowed_countries;
+            $query->whereHas('user', function (Builder $uq) use ($allowedCountries) {
+                $uq->whereIn('country_code', $allowedCountries)
+                    ->orWhereHas('country', function (Builder $cq) use ($allowedCountries) {
+                        $cq->whereIn('code', $allowedCountries)->orWhereIn('iso2', $allowedCountries);
+                    });
+            });
         }
 
-        // 2. Filtre par catégorie de profil (landlord, agent, page)
-        if (! empty($filters['profile_category'])) {
+        // 1. Filtre par pays (country query param)
+        if (! empty($filters['country'])) {
+            $countries = is_array($filters['country']) ? $filters['country'] : [$filters['country']];
+            $query->whereHas('user', function (Builder $uq) use ($countries) {
+                $uq->whereIn('country_code', $countries)
+                    ->orWhereHas('country', fn ($cq) => $cq->whereIn('code', $countries)->orWhereIn('iso2', $countries));
+            });
+        }
+
+        // 2. Filtre par badge (badge query param ou profile_category)
+        if (! empty($filters['badge'])) {
+            $badges = is_array($filters['badge']) ? $filters['badge'] : [$filters['badge']];
+            $categories = [];
+            foreach ($badges as $b) {
+                if ($b === 'bailleur' || $b === 'landlord') {
+                    $categories[] = 'landlord';
+                    $categories[] = 'bailleur';
+                } elseif ($b === 'agent') {
+                    $categories[] = 'agent';
+                } elseif ($b === 'page') {
+                    $categories[] = 'page';
+                } else {
+                    $categories[] = $b;
+                }
+            }
+            $query->where(function (Builder $bq) use ($categories, $badges) {
+                $bq->whereIn('profile_category', $categories)
+                    ->orWhereHas('user', fn ($uq) => $uq->whereIn('badge', $badges));
+            });
+        } elseif (! empty($filters['profile_category'])) {
             $query->where('profile_category', $filters['profile_category']);
         }
 
-        // 3. Recherche textuelle (référence, nom, email, téléphone, n° pièce)
+        // 3. Filtre par ville (city query param)
+        if (! empty($filters['city'])) {
+            $cities = is_array($filters['city']) ? $filters['city'] : [$filters['city']];
+            $query->whereHas('user', function (Builder $uq) use ($cities) {
+                $uq->whereIn('city', $cities);
+            });
+        }
+
+        // 4. Filtre par type / nature de demande (kind: new, renewal, add_property, appeal)
+        if (! empty($filters['kind'])) {
+            $kinds = is_array($filters['kind']) ? $filters['kind'] : [$filters['kind']];
+            $query->where(function (Builder $kq) use ($kinds) {
+                $kq->whereIn('metadata->kind', $kinds);
+                if (in_array('new', $kinds, true)) {
+                    $kq->orWhereNull('metadata->kind');
+                }
+            });
+        }
+
+        // 5. Filtre par ancienneté de la demande (age: lt6h, 6to24h, gt24h)
+        if (! empty($filters['age'])) {
+            $ages = is_array($filters['age']) ? $filters['age'] : [$filters['age']];
+            $query->where(function (Builder $aq) use ($ages) {
+                foreach ($ages as $a) {
+                    if ($a === 'lt6h') {
+                        $aq->orWhere('created_at', '>=', now()->subHours(6));
+                    } elseif ($a === '6to24h') {
+                        $aq->orWhere(function ($q) {
+                            $q->where('created_at', '<', now()->subHours(6))
+                                ->where('created_at', '>=', now()->subHours(24));
+                        });
+                    } elseif ($a === 'gt24h') {
+                        $aq->orWhere('created_at', '<', now()->subHours(24));
+                    }
+                }
+            });
+        }
+
+        // 6. Filtre par statut et awaiting
+        if (isset($filters['awaiting'])) {
+            $awaiting = filter_var($filters['awaiting'], FILTER_VALIDATE_BOOLEAN);
+            if ($awaiting) {
+                $query->whereIn('status', ['pending', 'supplement_requested']);
+            } else {
+                $query->where('status', 'pending');
+            }
+        } elseif (! empty($filters['status'])) {
+            $query->where('status', $filters['status']);
+        }
+
+        // 7. Recherche textuelle (q)
         if (! empty($filters['q'])) {
             $search = trim((string) $filters['q']);
             $query->where(function (Builder $q) use ($search) {
@@ -59,7 +144,7 @@ class AdminKycService
             });
         }
 
-        // 4. Tri et priorités : les demandes en attente les plus anciennes en premier
+        // 8. Tri et priorités : les demandes en attente les plus anciennes en premier
         $sort = $filters['sort'] ?? 'priority';
         if ($sort === 'priority') {
             $query->orderByRaw("CASE WHEN status = 'pending' THEN 1 WHEN status = 'supplement_requested' THEN 2 ELSE 3 END ASC")
@@ -155,6 +240,18 @@ class AdminKycService
         $query = KycSubmission::with(['user.role', 'decidedBy'])
             ->where('status', KycStatus::Rejected->value);
 
+        // Filtrage selon les pays autorisés dans la session de l'opérateur (Point 20)
+        $adminSession = request()?->attributes?->get('admin_session');
+        if ($adminSession && ! empty($adminSession->allowed_countries)) {
+            $allowedCountries = (array) $adminSession->allowed_countries;
+            $query->whereHas('user', function (Builder $uq) use ($allowedCountries) {
+                $uq->whereIn('country_code', $allowedCountries)
+                    ->orWhereHas('country', function (Builder $cq) use ($allowedCountries) {
+                        $cq->whereIn('code', $allowedCountries)->orWhereIn('iso2', $allowedCountries);
+                    });
+            });
+        }
+
         if (! empty($filters['q'])) {
             $search = trim((string) $filters['q']);
             $query->where(function (Builder $q) use ($search) {
@@ -239,6 +336,26 @@ class AdminKycService
             } else {
                 throw new DomainException("Décision '{$decision}' non reconnue.");
             }
+
+            // Point 21 : Journalisation d'audit chaînée de la décision KYC
+            AdminAuditLog::logChainedEvent(
+                event: 'kyc.decision_'.$decision,
+                operator: $operator,
+                targetType: 'KycSubmission',
+                targetId: (string) $submission->id,
+                targetLabel: "Décision KYC {$decision} sur dossier {$submission->reference} (utilisateur #{$user->id})",
+                context: [
+                    'submission_id' => $submission->id,
+                    'submission_reference' => $submission->reference,
+                    'user_id' => $user->id,
+                    'user_email' => $user->email,
+                    'decision' => $decision,
+                    'reason' => $reason,
+                    'status' => $submission->status->value,
+                ],
+                ip: request()?->ip(),
+                userAgent: request()?->userAgent()
+            );
 
             // Notification de la décision d'instruction à l'utilisateur
             try {

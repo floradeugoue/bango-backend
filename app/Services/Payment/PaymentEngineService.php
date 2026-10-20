@@ -8,6 +8,7 @@ use App\Enums\Payment\PaymentProvider;
 use App\Enums\Payment\PaymentServiceType;
 use App\Enums\Payment\PaymentStatus;
 use App\Exceptions\Payment\IdempotencyConflictException;
+use App\Models\Admin\AdminAuditLog;
 use App\Models\Boost\Campaign;
 use App\Models\Page\PageCertification;
 use App\Models\Payment\PaymentTransaction;
@@ -399,6 +400,27 @@ class PaymentEngineService
                     'reason' => $cleanReason,
                 ],
             ]);
+
+            // Point 21 : Journalisation d'audit chaînée pour les remboursements
+            AdminAuditLog::logChainedEvent(
+                event: 'finance.refund_processed',
+                operator: $adminUser,
+                targetType: 'PaymentTransaction',
+                targetId: (string) $lockedTx->id,
+                targetLabel: "Remboursement de {$refundAmount} {$lockedTx->currency} sur transaction #{$lockedTx->id} ({$cleanReason})",
+                context: [
+                    'transaction_id' => $lockedTx->id,
+                    'reference' => $lockedTx->reference,
+                    'user_id' => $lockedTx->user_id,
+                    'amount_refunded' => $refundAmount,
+                    'currency' => $lockedTx->currency,
+                    'reason' => $cleanReason,
+                    'external_reference' => $cleanExternalRef,
+                    'operator_id' => $adminId,
+                ],
+                ip: request()?->ip(),
+                userAgent: request()?->userAgent()
+            );
 
             return $lockedTx;
         });

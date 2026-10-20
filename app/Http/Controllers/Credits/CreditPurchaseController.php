@@ -139,8 +139,8 @@ class CreditPurchaseController extends Controller
         }
 
         $attempt->markFailed(
-            failureCode: $initiateResult->errorCode ?? 'GATEWAY_ERROR',
-            failureMessage: $initiateResult->errorMessage ?? 'Échec d\'initialisation du paiement.'
+            errorCode: $initiateResult->errorCode ?? 'GATEWAY_ERROR',
+            errorMessage: $initiateResult->errorMessage ?? 'Échec d\'initialisation du paiement.'
         );
 
         return $this->paymentError(

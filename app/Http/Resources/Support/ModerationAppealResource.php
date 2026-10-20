@@ -18,6 +18,8 @@ class ModerationAppealResource extends JsonResource
     {
         return [
             'id' => (int) $this->id,
+            'reference' => $this->reference,
+            'moderation_decision_id' => $this->moderation_decision_id,
             'sanction_type' => $this->sanction_type,
             'sanction_reference' => $this->sanction_reference,
             'reason' => $this->reason,

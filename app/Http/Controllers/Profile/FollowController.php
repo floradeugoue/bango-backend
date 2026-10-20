@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\FollowUserResource;
 use App\Models\Profile\FollowRequest;
 use App\Models\User;
+use App\Notifications\Social\SocialNotification;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -47,6 +48,8 @@ class FollowController extends Controller
                 ['status' => 'pending']
             );
 
+            $target->notify(new SocialNotification('follow_request', $actor));
+
             return response()->json([
                 'status' => 'requested',
             ], 200);
@@ -55,6 +58,8 @@ class FollowController extends Controller
         // Public account: directly follow
         FollowRequest::where('from_id', $actor->id)->where('to_id', $target->id)->delete();
         $actor->following()->syncWithoutDetaching([$target->id]);
+
+        $target->notify(new SocialNotification('follow', $actor));
 
         return response()->json([
             'status' => 'followed',

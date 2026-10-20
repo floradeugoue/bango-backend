@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\DB;
 
 class BackupCodeService
 {
-    public const CODE_COUNT = 10;
+    public const CODE_COUNT = 8;
 
     /**
      * Standard alphabet without confusing characters: no I, O, 0, or 1.

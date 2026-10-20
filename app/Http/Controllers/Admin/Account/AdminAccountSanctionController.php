@@ -167,7 +167,7 @@ class AdminAccountSanctionController extends Controller
         $result = $this->accountService->grantCertification(
             user: $user,
             operator: $operator,
-            type: $request->input('type'),
+            type: $request->input('type', 'account') ?? 'account',
             pageId: $request->input('page_id'),
             reason: $request->input('reason')
         );
@@ -192,7 +192,7 @@ class AdminAccountSanctionController extends Controller
         $result = $this->accountService->removeCertification(
             user: $user,
             operator: $operator,
-            type: $request->input('type'),
+            type: $request->input('type', 'account') ?? 'account',
             pageId: $request->input('page_id'),
             reason: $request->input('reason')
         );

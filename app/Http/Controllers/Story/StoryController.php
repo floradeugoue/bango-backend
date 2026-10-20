@@ -200,4 +200,106 @@ class StoryController extends Controller
             ],
         ], 201);
     }
+
+    /**
+     * Liker une Story.
+     */
+    public function like(string $id, Request $request): JsonResponse
+    {
+        $result = $this->storyService->likeStory($id, $request->user());
+
+        return response()->json([
+            'success' => true,
+            'data' => $result,
+        ]);
+    }
+
+    /**
+     * Retirer le like d'une Story.
+     */
+    public function unlike(string $id, Request $request): JsonResponse
+    {
+        $result = $this->storyService->unlikeStory($id, $request->user());
+
+        return response()->json([
+            'success' => true,
+            'data' => $result,
+        ]);
+    }
+
+    /**
+     * Récupérer les réglages Story de l'utilisateur.
+     */
+    public function settings(Request $request): JsonResponse
+    {
+        $settings = $this->storyService->getSettings($request->user());
+
+        return response()->json([
+            'success' => true,
+            'data' => $settings,
+        ]);
+    }
+
+    /**
+     * Mettre à jour les réglages Story de l'utilisateur.
+     */
+    public function updateSettings(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'allow_replies' => ['nullable', 'string', 'in:everyone,followers,off'],
+            'save_to_archive' => ['nullable', 'boolean'],
+            'save_to_gallery' => ['nullable', 'boolean'],
+            'allow_sharing' => ['nullable', 'boolean'],
+        ]);
+
+        $settings = $this->storyService->updateSettings($request->user(), $validated);
+
+        return response()->json([
+            'success' => true,
+            'data' => $settings,
+        ]);
+    }
+
+    /**
+     * Répondre à un sticker question.
+     */
+    public function answerSticker(string $stickerId, Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'answer' => ['required', 'string', 'max:500'],
+        ]);
+
+        $result = $this->storyService->answerSticker($stickerId, $request->user(), $validated['answer']);
+
+        return response()->json([
+            'success' => true,
+            'data' => $result,
+        ]);
+    }
+
+    /**
+     * Activer un rappel pour un compte à rebours.
+     */
+    public function remindSticker(string $stickerId, Request $request): JsonResponse
+    {
+        $result = $this->storyService->remindSticker($stickerId, $request->user());
+
+        return response()->json([
+            'success' => true,
+            'data' => $result,
+        ]);
+    }
+
+    /**
+     * Exporter une Story avec la bande son.
+     */
+    public function export(string $id, Request $request): JsonResponse
+    {
+        $result = $this->storyService->exportStory($id, $request->user());
+
+        return response()->json([
+            'success' => true,
+            'data' => $result,
+        ]);
+    }
 }

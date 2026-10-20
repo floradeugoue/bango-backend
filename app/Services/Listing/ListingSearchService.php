@@ -145,7 +145,7 @@ class ListingSearchService
     protected function formatListingPin(Listing $listing, ?User $viewer = null): array
     {
         $isSaved = $viewer ? $listing->isSavedBy($viewer) : false;
-        $priceFormatted = $this->formatPriceBadge((float) $listing->price, $listing->currency ?? 'XOF');
+        $priceFormatted = $this->formatPriceBadge((float) $listing->price, $listing->currency ?? 'XAF');
 
         return [
             'id' => $listing->id,

@@ -22,6 +22,8 @@ class DatabaseSeeder extends Seeder
             GeoSeeder::class,
             SubscriptionCatalogSeeder::class,
             SoundSeeder::class,
+            HelpArticleSeeder::class,
+            LegalDocumentSeeder::class,
         ]);
 
         if (app()->environment('local', 'testing')) {

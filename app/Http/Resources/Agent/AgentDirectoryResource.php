@@ -27,6 +27,8 @@ class AgentDirectoryResource extends JsonResource
             'neighbourhood' => $this->neighbourhood,
             'badge' => $this->badge ?? 'agent',
             'is_verified' => (bool) $this->is_verified,
+            'is_active_30d' => (bool) $this->isActiveLast30Days(),
+            'has_activity_30d' => (bool) $this->isActiveLast30Days(),
             'active_mandates_count' => (int) ($this->active_delegations_as_agent_count ?? $this->activeDelegationsAsAgent()->count()),
             'created_at' => $this->created_at?->toIso8601String(),
         ];

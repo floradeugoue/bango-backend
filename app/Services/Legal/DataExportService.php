@@ -142,7 +142,7 @@ class DataExportService
         return [
             'is_private' => (bool) $user->is_private,
             'privacy_settings' => $user->privacy_settings,
-            'interests' => $user->interests()->pluck('name')->all(),
+            'interests' => $user->interests()->get()->map(fn ($interest) => $interest->name_fr ?? $interest->name_en ?? $interest->id)->values()->all(),
         ];
     }
 
