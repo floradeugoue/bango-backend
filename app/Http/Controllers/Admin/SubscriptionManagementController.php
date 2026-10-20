@@ -88,6 +88,22 @@ class SubscriptionManagementController extends Controller
 
         $updated = $service->adminSuspend($subscription, $admin, $request->reason);
 
+        AdminAuditLog::logChainedEvent(
+            event: 'subscription.suspended',
+            operator: $admin,
+            targetType: 'Subscription',
+            targetId: (string) $subscription->id,
+            targetLabel: "Suspension abonnement #{$subscription->id} ({$subscription->badge_type}) pour user #{$subscription->user_id}",
+            context: [
+                'subscription_id' => $subscription->id,
+                'user_id' => $subscription->user_id,
+                'badge_type' => $subscription->badge_type,
+                'reason' => $request->reason,
+            ],
+            ip: $request->ip(),
+            userAgent: $request->userAgent()
+        );
+
         return response()->json([
             'success' => true,
             'message' => 'Abonnement suspendu administrativement.',
@@ -114,6 +130,22 @@ class SubscriptionManagementController extends Controller
         $admin = $request->user();
 
         $updated = $service->adminReactivate($subscription, $admin, $request->reason);
+
+        AdminAuditLog::logChainedEvent(
+            event: 'subscription.reactivated',
+            operator: $admin,
+            targetType: 'Subscription',
+            targetId: (string) $subscription->id,
+            targetLabel: "Réactivation abonnement #{$subscription->id} ({$subscription->badge_type}) pour user #{$subscription->user_id}",
+            context: [
+                'subscription_id' => $subscription->id,
+                'user_id' => $subscription->user_id,
+                'badge_type' => $subscription->badge_type,
+                'reason' => $request->reason,
+            ],
+            ip: $request->ip(),
+            userAgent: $request->userAgent()
+        );
 
         return response()->json([
             'success' => true,
@@ -143,6 +175,23 @@ class SubscriptionManagementController extends Controller
 
         $updated = $service->adminExtend($subscription, (int) $request->days, $admin, $request->reason);
 
+        AdminAuditLog::logChainedEvent(
+            event: 'subscription.extended',
+            operator: $admin,
+            targetType: 'Subscription',
+            targetId: (string) $subscription->id,
+            targetLabel: "Prolongation de {$request->days} jours abonnement #{$subscription->id} ({$subscription->badge_type})",
+            context: [
+                'subscription_id' => $subscription->id,
+                'user_id' => $subscription->user_id,
+                'badge_type' => $subscription->badge_type,
+                'days' => (int) $request->days,
+                'reason' => $request->reason,
+            ],
+            ip: $request->ip(),
+            userAgent: $request->userAgent()
+        );
+
         return response()->json([
             'success' => true,
             'message' => "Abonnement prolongé de {$request->days} jours.",
@@ -169,6 +218,22 @@ class SubscriptionManagementController extends Controller
         $admin = $request->user();
 
         $updated = $service->expireSubscription($subscription, "Révocation administrative : {$request->reason}");
+
+        AdminAuditLog::logChainedEvent(
+            event: 'subscription.revoked',
+            operator: $admin,
+            targetType: 'Subscription',
+            targetId: (string) $subscription->id,
+            targetLabel: "Révocation abonnement #{$subscription->id} ({$subscription->badge_type})",
+            context: [
+                'subscription_id' => $subscription->id,
+                'user_id' => $subscription->user_id,
+                'badge_type' => $subscription->badge_type,
+                'reason' => $request->reason,
+            ],
+            ip: $request->ip(),
+            userAgent: $request->userAgent()
+        );
 
         return response()->json([
             'success' => true,

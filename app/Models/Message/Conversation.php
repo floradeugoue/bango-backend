@@ -117,11 +117,11 @@ class Conversation extends Model
     }
 
     /**
-     * @return HasOne<Message, $this>
+     * @return HasOne<LatestMessage, $this>
      */
     public function latestMessage(): HasOne
     {
-        return $this->hasOne(Message::class, 'conversation_id')->latestOfMany('created_at');
+        return $this->hasOne(LatestMessage::class, 'conversation_id')->latestOfMany('created_at');
     }
 
     /**

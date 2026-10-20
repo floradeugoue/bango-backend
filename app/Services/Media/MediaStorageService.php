@@ -554,6 +554,10 @@ class MediaStorageService
             return '/'.$path;
         }
 
+        if (str_starts_with($path, '/sounds/')) {
+            return url($path);
+        }
+
         $disk = $disk ?? $this->getDisk();
 
         return Storage::disk($disk)->url($path);

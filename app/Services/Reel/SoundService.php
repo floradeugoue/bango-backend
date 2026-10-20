@@ -51,7 +51,7 @@ class SoundService
                 return Sound::create([
                     'id' => $id,
                     'title' => 'Son original',
-                    'artist' => $reel->user?->name ?? 'Utilisateur BANGO',
+                    'artist' => $reel->user?->display_name ?? $reel->user?->name ?? 'Utilisateur BANGO',
                     'genre' => 'afro',
                     'base_uses' => 0,
                     'uses_count' => 1,
@@ -162,7 +162,7 @@ class SoundService
             ['id' => $soundId],
             [
                 'title' => 'Son original',
-                'artist' => $user->name,
+                'artist' => $user->display_name ?? $user->name,
                 'genre' => 'afro',
                 'is_original' => true,
                 'original_reel_id' => $reel->id,

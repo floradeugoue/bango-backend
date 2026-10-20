@@ -73,6 +73,14 @@ class AdminListingVisitController extends Controller
         });
 
         return response()->json([
+            // Contract format: Page<T>
+            'items' => $items,
+            'page' => $reservations->currentPage(),
+            'perPage' => $reservations->perPage(),
+            'total' => $reservations->total(),
+            'pageCount' => $reservations->lastPage(),
+
+            // Legacy keys for backward compatibility
             'success' => true,
             'data' => $items,
             'meta' => [

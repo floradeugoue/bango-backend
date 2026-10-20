@@ -31,6 +31,7 @@ class EnsureAdminSession
 
         if (empty($rawCookie) || ! is_string($rawCookie)) {
             return response()->json([
+                'code' => 'session_expired',
                 'message' => 'Non authentifié. Session administrative requise.',
             ], 401);
         }
@@ -51,6 +52,7 @@ class EnsureAdminSession
 
         if (! $adminSession) {
             return response()->json([
+                'code' => 'session_expired',
                 'message' => 'Session administrative invalide ou introuvable.',
             ], 401);
         }
@@ -58,6 +60,7 @@ class EnsureAdminSession
         // 3. Vérification de la révocation
         if ($adminSession->isRevoked()) {
             return response()->json([
+                'code' => 'session_expired',
                 'message' => 'Session administrative révoquée.',
             ], 401);
         }
@@ -65,6 +68,7 @@ class EnsureAdminSession
         // 4. Vérification de l'expiration glissante (30 min) et de l'expiration absolue
         if ($adminSession->isExpired(30)) {
             return response()->json([
+                'code' => 'session_expired',
                 'message' => 'Session administrative expirée par inactivité.',
             ], 401);
         }
@@ -104,6 +108,7 @@ class EnsureAdminSession
         if (! $user->isInternalOperator()) {
             return response()->json([
                 'message' => 'Accès refusé. Privilèges opérateur requis.',
+                'code' => 'forbidden',
             ], 403);
         }
 
@@ -111,6 +116,7 @@ class EnsureAdminSession
         if (! $adminSession->two_factor_verified_at) {
             return response()->json([
                 'message' => 'Validation du second facteur (2FA) obligatoire.',
+                'code' => 'forbidden',
             ], 403);
         }
 
@@ -142,6 +148,19 @@ class EnsureAdminSession
             $cookieValid = empty($csrfCookie) || hash_equals($expectedToken, (string) $csrfCookie);
 
             if (! $headerValid || ! $cookieValid) {
+                $isContractClient = $request->header('X-Requested-With') === 'bango-admin'
+                    || str_starts_with($request->path(), 'admin/v1')
+                    || str_starts_with($request->path(), 'api/admin/v1');
+
+                if ($isContractClient) {
+                    return response()->json([
+                        'code' => 'forbidden',
+                        'message' => 'Jeton de protection CSRF invalide ou manquant.',
+                        'fields' => (object) [],
+                        'meta' => (object) [],
+                    ], 403);
+                }
+
                 return response()->json([
                     'message' => 'Jeton de protection CSRF invalide ou manquant.',
                     'code' => 'CSRF_MISMATCH',

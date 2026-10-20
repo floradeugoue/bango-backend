@@ -24,7 +24,7 @@ enum ListingStatus: string
      */
     public function isChoosableByOwner(): bool
     {
-        return in_array($this, [self::Published, self::Reserved, self::Taken], true);
+        return in_array($this, [self::Draft, self::Published, self::Reserved, self::Taken], true);
     }
 
     /**

@@ -16,6 +16,7 @@ use App\Services\Subscription\BadgeResolutionService;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
@@ -51,6 +52,10 @@ class DelegationService
             return false;
         }
 
+        if (in_array($user->badge, ['bailleur', 'landlord', 'double'], true)) {
+            return true;
+        }
+
         $badgeStatus = $this->badgeResolution->resolveUserBadges($user);
 
         return $badgeStatus['hasLandlord'];
@@ -75,6 +80,10 @@ class DelegationService
 
         if ($agent->verification_lapsed || ! $agent->is_verified) {
             return false;
+        }
+
+        if (in_array($agent->badge, ['agent', 'double'], true)) {
+            return true;
         }
 
         $badgeStatus = $this->badgeResolution->resolveUserBadges($agent);
@@ -332,6 +341,110 @@ class DelegationService
     }
 
     /**
+     * Relance un agent pour une invitation en attente.
+     */
+    public function remindInvitation(Delegation $delegation, User $landlord): Delegation
+    {
+        if ($delegation->bailleur_id !== $landlord->id && ! $landlord->isAdmin()) {
+            throw new AuthorizationException('Vous n\'êtes pas autorisé à relancer cette invitation.');
+        }
+
+        if ($delegation->status !== DelegationStatus::Pending) {
+            throw ValidationException::withMessages([
+                'delegation' => ['Seule une invitation en attente peut être relancée.'],
+            ]);
+        }
+
+        $meta = $delegation->metadata ?? [];
+        $meta['last_reminded_at'] = now()->toIso8601String();
+        $meta['remind_count'] = ($meta['remind_count'] ?? 0) + 1;
+        $delegation->metadata = $meta;
+        $delegation->save();
+
+        try {
+            $delegation->agent->notify(new AgentInvitationNotification($delegation));
+        } catch (\Throwable $e) {
+            Log::warning("Échec notification relance invitation: {$e->getMessage()}");
+        }
+
+        return $delegation->load(['bailleur', 'agent', 'listing']);
+    }
+
+    /**
+     * Modifie les capacités ou l'expiration d'une délégation active ou en attente.
+     *
+     * @param  array{capabilities?: array<string>, expires_at?: string|null}  $data
+     */
+    public function updateDelegation(Delegation $delegation, User $landlord, array $data): Delegation
+    {
+        if ($delegation->bailleur_id !== $landlord->id && ! $landlord->isAdmin()) {
+            throw new AuthorizationException('Vous n\'êtes pas autorisé à modifier cette délégation.');
+        }
+
+        if (! in_array($delegation->status, [DelegationStatus::Active, DelegationStatus::Pending], true)) {
+            throw ValidationException::withMessages([
+                'delegation' => ['Seule une délégation active ou en attente peut être modifiée.'],
+            ]);
+        }
+
+        if (isset($data['capabilities']) && is_array($data['capabilities'])) {
+            $valid = [DelegationCapability::Visits->value, DelegationCapability::Reply->value, DelegationCapability::Edit->value];
+            $caps = array_values(array_intersect($valid, $data['capabilities']));
+            if (empty($caps)) {
+                $caps = [DelegationCapability::Visits->value];
+            }
+            $delegation->capabilities = $caps;
+        }
+
+        if (array_key_exists('expires_at', $data)) {
+            $delegation->expires_at = $data['expires_at'] ? Carbon::parse($data['expires_at']) : null;
+        }
+
+        $delegation->save();
+
+        return $delegation->load(['bailleur', 'agent', 'listing']);
+    }
+
+    /**
+     * Rétablit un mandat révoqué ou expiré.
+     */
+    public function reinstateDelegation(Delegation $delegation, User $landlord): Delegation
+    {
+        if ($delegation->bailleur_id !== $landlord->id && ! $landlord->isAdmin()) {
+            throw new AuthorizationException('Vous n\'êtes pas autorisé à rétablir cette délégation.');
+        }
+
+        if (! in_array($delegation->status, [DelegationStatus::Revoked, DelegationStatus::Declined, DelegationStatus::Expired], true)) {
+            throw ValidationException::withMessages([
+                'delegation' => ['Cette délégation est déjà active ou en cours.'],
+            ]);
+        }
+
+        // Vérifier que l'agent a toujours le badge agent
+        if (! $this->hasActiveAgentBadge($delegation->agent)) {
+            throw ValidationException::withMessages([
+                'agent_id' => ['L\'agent ne dispose plus d\'un badge Agent actif et certifié.'],
+            ]);
+        }
+
+        $delegation->status = DelegationStatus::Active;
+        $delegation->revoked_at = null;
+        $delegation->revoked_by_id = null;
+        $meta = $delegation->metadata ?? [];
+        $meta['reinstated_at'] = now()->toIso8601String();
+        $delegation->metadata = $meta;
+        $delegation->save();
+
+        // Réassigner l'agent sur l'annonce si aucun agent n'est affecté
+        if ($delegation->listing && ! $delegation->listing->agent_id) {
+            $delegation->listing->agent_id = $delegation->agent_id;
+            $delegation->listing->save();
+        }
+
+        return $delegation->load(['bailleur', 'agent', 'listing']);
+    }
+
+    /**
      * Détermine si un agent peut exercer une capacité donnée sur un bien.
      */
     public function canAgentPerform(User $agent, Listing $listing, DelegationCapability|string $capability): bool
@@ -478,6 +591,15 @@ class DelegationService
                     ->orWhereRaw('LOWER(handle) LIKE ?', ["%{$term}%"])
                     ->orWhereRaw('LOWER(city) LIKE ?', ["%{$term}%"])
                     ->orWhereRaw('LOWER(neighbourhood) LIKE ?', ["%{$term}%"]);
+            });
+        }
+
+        if (! empty($filters['active_30d']) || ! empty($filters['has_activity_30d'])) {
+            $cutoff = now()->subDays(30);
+            $query->where(function (Builder $q) use ($cutoff) {
+                $q->where('updated_at', '>=', $cutoff)
+                    ->orWhereHas('listings', fn ($l) => $l->where('updated_at', '>=', $cutoff))
+                    ->orWhereHas('delegationsAsAgent', fn ($d) => $d->where('updated_at', '>=', $cutoff));
             });
         }
 

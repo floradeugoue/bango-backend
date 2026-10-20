@@ -92,4 +92,41 @@ class PostCommentController extends Controller
             'comment_id' => $comment->id,
         ]);
     }
+
+    /**
+     * POST /api/posts/{post}/pin-comment
+     * Épingle ou détache un commentaire sur une publication (réservé à l'auteur du post).
+     */
+    public function pin(Request $request, Post $post): JsonResponse
+    {
+        $user = $request->user();
+        if ((int) $post->user_id !== (int) $user->id) {
+            abort(403, 'Seul l\'auteur de la publication peut épingler un commentaire.');
+        }
+
+        $commentId = $request->input('comment_id') ?? $request->input('commentId');
+        if (! $commentId) {
+            return response()->json([
+                'message' => 'L\'identifiant du commentaire (comment_id) est requis.',
+                'errors' => ['comment_id' => ['Le champ comment_id est requis.']],
+            ], 422);
+        }
+
+        $comment = PostComment::where('post_id', $post->id)->findOrFail($commentId);
+
+        if ((int) $post->pinned_comment_id === (int) $comment->id) {
+            $post->update(['pinned_comment_id' => null]);
+            $isPinned = false;
+        } else {
+            $post->update(['pinned_comment_id' => $comment->id]);
+            $isPinned = true;
+        }
+
+        return response()->json([
+            'success' => true,
+            'is_pinned' => $isPinned,
+            'pinned_comment_id' => $post->pinned_comment_id,
+            'message' => $isPinned ? 'Commentaire épinglé avec succès.' : 'Commentaire détaché avec succès.',
+        ]);
+    }
 }

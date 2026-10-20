@@ -11,13 +11,24 @@ class AdminDeviceResendRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        if ($this->has('challengeId') && ! $this->has('challenge_token')) {
+            $this->merge(['challenge_token' => $this->input('challengeId')]);
+        }
+        if ($this->has('challenge_token') && ! $this->has('challengeId')) {
+            $this->merge(['challengeId' => $this->input('challenge_token')]);
+        }
+    }
+
     /**
      * @return array<string, array<string>>
      */
     public function rules(): array
     {
         return [
-            'challenge_token' => ['required', 'string', 'size:64'],
+            'challenge_token' => ['required_without:challengeId', 'nullable', 'string', 'size:64'],
+            'challengeId' => ['required_without:challenge_token', 'nullable', 'string', 'size:64'],
         ];
     }
 }

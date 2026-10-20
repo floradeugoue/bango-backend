@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin\Kyc;
 
 use App\Http\Controllers\Controller;
+use App\Models\Admin\AdminAuditLog;
 use App\Models\Kyc\KycDocument;
 use App\Models\Kyc\KycDocumentAccessLog;
 use App\Models\Kyc\KycSubmission;
@@ -39,6 +40,24 @@ class AdminKycDocumentController extends Controller
             'user_agent' => $request->userAgent(),
             'created_at' => now(),
         ]);
+
+        // Point 21 : Journalisation d'audit chaînée de l'ouverture de pièce KYC
+        AdminAuditLog::logChainedEvent(
+            event: 'kyc.document_opened',
+            operator: $request->user(),
+            targetType: 'KycDocument',
+            targetId: (string) $document->id,
+            targetLabel: "Ouverture pièce KYC {$document->kind?->value} ({$document->original_name}) du dossier {$submission->reference}",
+            context: [
+                'submission_id' => $submission->id,
+                'submission_reference' => $submission->reference,
+                'document_id' => $document->id,
+                'original_name' => $document->original_name,
+                'mime_type' => $document->mime_type,
+            ],
+            ip: $request->ip(),
+            userAgent: $request->userAgent()
+        );
 
         // 2. Si le client demande du JSON (ex: pour obtenir un aperçu ou token sécurisé temporaire)
         if ($request->wantsJson()) {

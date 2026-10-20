@@ -28,6 +28,7 @@ class PostCommentResource extends JsonResource
             'post_id' => (int) $this->post_id,
             'parentId' => $this->parent_id ? (int) $this->parent_id : null,
             'parent_id' => $this->parent_id ? (int) $this->parent_id : null,
+            'answer_to_id' => $this->parent_id ? (int) $this->parent_id : null,
             'body' => (string) $this->body,
 
             // Compteurs & réactions
@@ -46,6 +47,8 @@ class PostCommentResource extends JsonResource
             'mine' => $isMine,
             'isEdited' => (bool) $this->is_edited,
             'is_edited' => (bool) $this->is_edited,
+            'isPinned' => (bool) ($this->is_pinned ?? ((int) ($this->post?->pinned_comment_id ?? 0) === (int) $this->id)),
+            'is_pinned' => (bool) ($this->is_pinned ?? ((int) ($this->post?->pinned_comment_id ?? 0) === (int) $this->id)),
             'canDelete' => $currentUser ? Gate::forUser($currentUser)->allows('delete', $this->resource) : false,
 
             // Auteur du commentaire

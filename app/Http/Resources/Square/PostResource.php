@@ -81,6 +81,8 @@ class PostResource extends JsonResource
             'author_avatar' => $authorAvatar,
             'authorVerified' => $authorVerified,
             'author_verified' => $authorVerified,
+            'authorCertified' => $page ? $page->isCertified() : (bool) ($this->user?->is_certified ?? false),
+            'author_certified' => $page ? $page->isCertified() : (bool) ($this->user?->is_certified ?? false),
             'authorBadge' => $authorBadge,
             'author_badge' => $authorBadge,
             'authorMeta' => $authorMeta,
@@ -137,6 +139,11 @@ class PostResource extends JsonResource
             'edited' => (bool) $this->is_edited,
             'is_edited' => (bool) $this->is_edited,
             'is_archived' => (bool) $this->is_archived,
+            'pinned_comment_id' => $this->pinned_comment_id,
+            'pinnedCommentId' => $this->pinned_comment_id,
+            'pinned_comment' => $this->pinned_comment_id && $this->relationLoaded('pinnedComment') && $this->pinnedComment
+                ? new PostCommentResource($this->pinnedComment)
+                : null,
 
             // Horodatage
             'at' => $this->created_at?->toISOString(),

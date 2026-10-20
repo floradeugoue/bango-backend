@@ -83,4 +83,69 @@ class MessageController extends Controller
 
         return new MessageResource($retracted);
     }
+
+    /**
+     * Réagir à un message avec un émoji.
+     *
+     * POST /api/messages/{id}/reactions
+     */
+    public function react(string $id, Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'emoji' => ['required', 'string', 'max:16'],
+        ]);
+
+        /** @var Message $message */
+        $message = Message::query()->findOrFail($id);
+        Gate::authorize('view', $message->conversation);
+
+        $reactions = $message->metadata['reactions'] ?? [];
+        $user = $request->user();
+
+        // Enlever la réaction précédente de l'utilisateur s'il y en avait une
+        $filtered = array_values(array_filter($reactions, fn ($r) => ($r['user_id'] ?? null) !== $user->id));
+        $filtered[] = [
+            'user_id' => $user->id,
+            'user_name' => $user->name ?? $user->handle,
+            'emoji' => $validated['emoji'],
+            'created_at' => now()->toIso8601String(),
+        ];
+
+        $meta = $message->metadata ?? [];
+        $meta['reactions'] = $filtered;
+        $message->metadata = $meta;
+        $message->save();
+
+        return response()->json([
+            'success' => true,
+            'reactions' => $filtered,
+        ]);
+    }
+
+    /**
+     * Supprimer sa réaction à un message.
+     *
+     * DELETE /api/messages/{id}/reactions
+     */
+    public function removeReaction(string $id, Request $request): JsonResponse
+    {
+        /** @var Message $message */
+        $message = Message::query()->findOrFail($id);
+        Gate::authorize('view', $message->conversation);
+
+        $reactions = $message->metadata['reactions'] ?? [];
+        $user = $request->user();
+
+        $filtered = array_values(array_filter($reactions, fn ($r) => ($r['user_id'] ?? null) !== $user->id));
+
+        $meta = $message->metadata ?? [];
+        $meta['reactions'] = $filtered;
+        $message->metadata = $meta;
+        $message->save();
+
+        return response()->json([
+            'success' => true,
+            'reactions' => $filtered,
+        ]);
+    }
 }

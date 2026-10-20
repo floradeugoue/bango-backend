@@ -22,8 +22,9 @@ class ReelFeedController extends Controller
         $scope = $request->query('scope', 'for_you');
         $topic = $request->query('topic');
         $perPage = (int) $request->query('per_page', 10);
+        $authorId = $request->query('author_id') ? (int) $request->query('author_id') : null;
 
-        $reels = $this->feedService->getFeed($request->user(), $scope, $topic, $perPage);
+        $reels = $this->feedService->getFeed($request->user(), $scope, $topic, $perPage, $authorId);
 
         return ReelResource::collection($reels);
     }

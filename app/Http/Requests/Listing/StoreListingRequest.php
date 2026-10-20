@@ -54,6 +54,7 @@ class StoreListingRequest extends FormRequest
             'photo_rooms' => ['nullable', 'array'],
             'photo_rooms.*' => ['nullable', 'in:living,bedroom,kitchen,shower,outside'],
             'video' => ['nullable', 'string'],
+            'status' => ['nullable', 'string', 'in:draft,review,published'],
         ];
     }
 }

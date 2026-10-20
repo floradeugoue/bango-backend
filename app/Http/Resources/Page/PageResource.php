@@ -47,6 +47,14 @@ class PageResource extends JsonResource
             'is_certified' => $this->isCertified(),
             'badge' => $this->isCertified() ? 'page_certified' : 'none',
             'status' => $this->status->value,
+            'is_hidden' => (bool) $this->is_hidden,
+            'followers_count' => (int) ($this->followers_count ?? $this->followers()->count()),
+            'is_following' => $viewer ? $this->isFollowedBy($viewer) : false,
+            'inbox_assigned_to' => $this->inbox_assigned_to_id ? [
+                'id' => (int) $this->inbox_assigned_to_id,
+                'name' => $this->inboxAssignee?->name,
+                'handle' => $this->inboxAssignee?->handle,
+            ] : null,
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
         ];

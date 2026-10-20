@@ -41,6 +41,18 @@ class AdminAccountOperationsService
         $query = User::with(['role:id,name,slug', 'country:id,name', 'city:id,name'])
             ->withCount(['supportTickets', 'listings', 'posts', 'reels']);
 
+        // Point 20 : Filtrage selon les pays autorisés dans la session de l'opérateur
+        $adminSession = request()?->attributes?->get('admin_session');
+        if ($adminSession && ! empty($adminSession->allowed_countries)) {
+            $allowedCountries = (array) $adminSession->allowed_countries;
+            $query->where(function (Builder $uq) use ($allowedCountries) {
+                $uq->whereIn('country_code', $allowedCountries)
+                    ->orWhereHas('country', function (Builder $cq) use ($allowedCountries) {
+                        $cq->whereIn('code', $allowedCountries)->orWhereIn('iso2', $allowedCountries);
+                    });
+            });
+        }
+
         // Recherche par nom, display_name, email, phone, handle
         if (! empty($filters['search'])) {
             $search = trim((string) $filters['search']);

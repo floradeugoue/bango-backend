@@ -13,6 +13,7 @@ use App\Models\Listing\Listing;
 use App\Policies\ListingPolicy;
 use App\Services\Listing\ListingSearchService;
 use App\Services\Listing\ListingService;
+use App\Services\Subscription\BadgeResolutionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -84,16 +85,50 @@ class ListingController extends Controller
     public function store(StoreListingRequest $request): JsonResponse
     {
         $user = $request->user();
+        $validated = $request->validated();
+        $statusParam = $request->input('status');
+
+        if ($statusParam === 'draft') {
+            $listing = $this->listingService->saveDraft($user, $validated);
+
+            return (new ListingDetailResource($listing))
+                ->response()
+                ->setStatusCode(201);
+        }
+
+        // Décision produit : si l'utilisateur possède un badge actif (landlord, agent, double),
+        // publier directement (published), sinon envoyer en modération (review).
+        $badgeStatus = app(BadgeResolutionService::class)->resolveUserBadges($user);
+        $hasActiveBadge = in_array($user->badge, ['landlord', 'agent', 'double'], true)
+            || in_array($badgeStatus['badge'] ?? '', ['landlord', 'agent', 'double'], true);
+
+        $submitToReview = ! $hasActiveBadge;
 
         $listing = $this->listingService->createOrPublishListing(
             $user,
-            $request->validated(),
-            submitToReview: true
+            $validated,
+            submitToReview: $submitToReview
         );
 
         return (new ListingDetailResource($listing))
             ->response()
             ->setStatusCode(201);
+    }
+
+    /**
+     * Mes annonces immobilières (propriétaire / bailleur).
+     */
+    public function mine(Request $request): AnonymousResourceCollection
+    {
+        $user = $request->user();
+        $perPage = max(1, min(50, $request->integer('per_page', 15)));
+
+        $listings = Listing::where('owner_id', $user->id)
+            ->with(['owner', 'photos', 'videos', 'saves'])
+            ->latest('created_at')
+            ->paginate($perPage);
+
+        return ListingResource::collection($listings);
     }
 
     /**

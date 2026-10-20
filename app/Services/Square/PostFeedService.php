@@ -6,6 +6,7 @@ use App\Enums\Square\PostAudience;
 use App\Models\Profile\Follow;
 use App\Models\Square\Post;
 use App\Models\User;
+use App\Policies\PostPolicy;
 use App\Services\Boost\AdDeliveryService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
@@ -69,7 +70,33 @@ class PostFeedService
                 $query->where('is_archived', false);
             }
 
-            return $query->paginate($perPage);
+            // Filtrer l'audience selon la relation avec l'auteur
+            if (! $user || (int) $user->id !== $authorId) {
+                $isFollowing = $user && Follow::where('follower_id', $user->id)->where('following_id', $authorId)->exists();
+                $query->where(function (Builder $q) use ($user, $isFollowing) {
+                    $q->where('audience', PostAudience::Public->value);
+                    if ($isFollowing) {
+                        $q->orWhere('audience', PostAudience::Followers->value);
+                    }
+                    if ($user && ($user->neighbourhood || $user->city)) {
+                        $q->orWhere(function (Builder $loc) use ($user) {
+                            $loc->where('audience', PostAudience::Neighbourhood->value);
+                            if ($user->neighbourhood) {
+                                $loc->where('place_neighbourhood', $user->neighbourhood);
+                            }
+                            if ($user->city) {
+                                $loc->where('place_city', $user->city);
+                            }
+                        });
+                    }
+                });
+            }
+
+            $paginator = $query->paginate($perPage);
+            $policy = app(PostPolicy::class);
+            $paginator->setCollection($paginator->getCollection()->filter(fn ($post) => $policy->view($user, $post))->values());
+
+            return $paginator;
         }
 
         // Flux général : masquer les posts archivés
@@ -107,6 +134,10 @@ class PostFeedService
         }
 
         $paginator = $query->paginate($perPage);
+
+        // Appliquer PostPolicy sur chaque élément pour tous les onglets
+        $policy = app(PostPolicy::class);
+        $paginator->setCollection($paginator->getCollection()->filter(fn ($post) => $policy->view($user, $post))->values());
 
         // Injection publicitaire BO (onglets découverte ou neighbourhood, exclusion des profils auteurs)
         if (! $authorId && $tab !== 'following') {

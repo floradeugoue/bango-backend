@@ -3,6 +3,7 @@
 namespace App\Http\Resources\Story;
 
 use App\Models\Story\Story;
+use App\Models\Story\StoryLike;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -20,12 +21,15 @@ class StoryResource extends JsonResource
         /** @var User|null $user */
         $user = $request->user();
         $isMine = $user ? $this->user_id === $user->id : false;
-        $hasViewed = false;
-
+        $isLiked = false;
         if ($user) {
             $hasViewed = $this->relationLoaded('views')
                 ? $this->views->contains('viewer_id', $user->id)
                 : $this->hasViewedBy($user);
+
+            $isLiked = $this->relationLoaded('likes')
+                ? $this->likes->contains('user_id', $user->id)
+                : StoryLike::where('story_id', $this->id)->where('user_id', $user->id)->exists();
         }
 
         return [
@@ -44,6 +48,8 @@ class StoryResource extends JsonResource
             'status' => $this->status->value,
             'is_mine' => $isMine,
             'has_viewed' => $hasViewed,
+            'is_liked' => $isLiked,
+            'likes_count' => (int) $this->likes_count,
             'is_expired' => $this->isExpired(),
             'published_at' => $this->published_at?->toIso8601String(),
             'expires_at' => $this->expires_at?->toIso8601String(),
@@ -51,6 +57,7 @@ class StoryResource extends JsonResource
                 'views_count' => (int) $this->views_count,
                 'poll_votes_count' => (int) $this->poll_votes_count,
                 'replies_count' => (int) $this->replies_count,
+                'likes_count' => (int) $this->likes_count,
             ] : null,
             'slides' => StorySlideResource::collection($this->whenLoaded('slides')),
             'created_at' => $this->created_at?->toIso8601String(),

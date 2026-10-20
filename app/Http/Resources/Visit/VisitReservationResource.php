@@ -37,9 +37,11 @@ class VisitReservationResource extends JsonResource
                 'price' => (float) $listing->price,
                 'currency' => $listing->currency ?? 'XAF',
                 'city' => $listing->city,
-                'neighborhood' => $listing->neighborhood,
+                'neighborhood' => $listing->neighbourhood ?? $listing->neighborhood,
+                'neighbourhood' => $listing->neighbourhood ?? $listing->neighborhood,
                 'address' => $canAccessAddress ? $listing->address : null,
                 'cover_url' => $listing->cover_image_url,
+                'cover_image_url' => $listing->cover_image_url,
             ],
             'slot_id' => $this->slot_id,
             'slot' => $slot ? [

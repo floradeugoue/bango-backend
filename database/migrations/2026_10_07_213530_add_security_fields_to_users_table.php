@@ -10,7 +10,7 @@ return new class extends Migration
     {
         Schema::table('users', function (Blueprint $table) {
             $table->string('two_factor_method')->nullable();
-            $table->string('two_factor_secret')->nullable();
+            $table->text('two_factor_secret')->nullable();
             $table->jsonb('backup_codes')->nullable();
             $table->string('pending_email')->nullable();
             $table->string('pending_email_code')->nullable();

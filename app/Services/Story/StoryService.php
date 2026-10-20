@@ -2,6 +2,7 @@
 
 namespace App\Services\Story;
 
+use App\Enums\Message\MessageType;
 use App\Enums\Story\StoryAudience;
 use App\Enums\Story\StoryMediaType;
 use App\Enums\Story\StoryReplyType;
@@ -10,6 +11,7 @@ use App\Enums\Story\StoryStickerType;
 use App\Events\Story\StoryReplyCreated;
 use App\Models\Reel\Sound;
 use App\Models\Story\Story;
+use App\Models\Story\StoryLike;
 use App\Models\Story\StoryPollVote;
 use App\Models\Story\StoryReply;
 use App\Models\Story\StoryReport;
@@ -17,7 +19,10 @@ use App\Models\Story\StorySlide;
 use App\Models\Story\StorySticker;
 use App\Models\Story\StoryView;
 use App\Models\User;
+use App\Notifications\Social\SocialNotification;
 use App\Services\Media\MediaStorageService;
+use App\Services\Message\MessageService;
+use App\Services\Message\MessageThreadService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\QueryException;
@@ -25,6 +30,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Throwable;
@@ -130,13 +136,26 @@ class StoryService
                         $mediaInfo = $this->mediaStorageService->storeStoryMedia($slideFile, $user);
                         $storedPaths[] = $mediaInfo['path'];
 
+                        $slideThumbFile = $slideData['thumbnail'] ?? ($files['slides'][$index]['thumbnail'] ?? null);
+                        $slideThumbPath = $mediaInfo['path'];
+                        $slideThumbUrl = $mediaInfo['url'];
+                        if ($slideThumbFile instanceof UploadedFile) {
+                            $thumbInfo = $this->mediaStorageService->storeStoryMedia($slideThumbFile, $user);
+                            $storedPaths[] = $thumbInfo['path'];
+                            $slideThumbPath = $thumbInfo['path'];
+                            $slideThumbUrl = $thumbInfo['url'];
+                        } elseif (! empty($slideData['thumbnail_url'])) {
+                            $slideThumbPath = $slideData['thumbnail_url'];
+                            $slideThumbUrl = $slideData['thumbnail_url'];
+                        }
+
                         $slide = StorySlide::create([
                             'story_id' => $story->id,
                             'media_type' => $mediaInfo['type'] === 'video' ? StoryMediaType::Video : StoryMediaType::Image,
                             'media_path' => $mediaInfo['path'],
                             'media_url' => $mediaInfo['url'],
-                            'thumbnail_path' => $mediaInfo['path'],
-                            'thumbnail_url' => $mediaInfo['url'],
+                            'thumbnail_path' => $slideThumbPath,
+                            'thumbnail_url' => $slideThumbUrl,
                             'filter' => $slideData['filter'] ?? ($data['filter'] ?? null),
                             'caption' => $slideData['caption'] ?? null,
                             'duration' => $slideData['duration'] ?? ($mediaInfo['duration'] ?? ($mediaInfo['type'] === 'image' ? 5 : null)),
@@ -148,6 +167,9 @@ class StoryService
                                 'height' => $mediaInfo['height'],
                                 'mime_type' => $mediaInfo['mime_type'],
                                 'file_size' => $mediaInfo['file_size'],
+                                'background' => $slideData['background'] ?? ($data['background'] ?? null),
+                                'drawings' => $slideData['drawings'] ?? ($slideData['drawing'] ?? ($data['drawings'] ?? ($data['drawing'] ?? null))),
+                                'framing' => $slideData['framing'] ?? ($slideData['crop'] ?? ($data['framing'] ?? ($data['crop'] ?? null))),
                             ],
                         ]);
 
@@ -168,13 +190,26 @@ class StoryService
                     $mediaInfo = $this->mediaStorageService->storeStoryMedia($file, $user);
                     $storedPaths[] = $mediaInfo['path'];
 
+                    $thumbFile = $files['thumbnail'] ?? ($data['thumbnail'] ?? null);
+                    $thumbPath = $mediaInfo['path'];
+                    $thumbUrl = $mediaInfo['url'];
+                    if ($thumbFile instanceof UploadedFile) {
+                        $thumbInfo = $this->mediaStorageService->storeStoryMedia($thumbFile, $user);
+                        $storedPaths[] = $thumbInfo['path'];
+                        $thumbPath = $thumbInfo['path'];
+                        $thumbUrl = $thumbInfo['url'];
+                    } elseif (! empty($data['thumbnail_url'])) {
+                        $thumbPath = $data['thumbnail_url'];
+                        $thumbUrl = $data['thumbnail_url'];
+                    }
+
                     $slide = StorySlide::create([
                         'story_id' => $story->id,
                         'media_type' => $mediaInfo['type'] === 'video' ? StoryMediaType::Video : StoryMediaType::Image,
                         'media_path' => $mediaInfo['path'],
                         'media_url' => $mediaInfo['url'],
-                        'thumbnail_path' => $mediaInfo['path'],
-                        'thumbnail_url' => $mediaInfo['url'],
+                        'thumbnail_path' => $thumbPath,
+                        'thumbnail_url' => $thumbUrl,
                         'filter' => $data['filter'] ?? null,
                         'caption' => $data['caption'] ?? null,
                         'duration' => $data['duration'] ?? ($mediaInfo['duration'] ?? ($mediaInfo['type'] === 'image' ? 5 : null)),
@@ -186,6 +221,9 @@ class StoryService
                             'height' => $mediaInfo['height'],
                             'mime_type' => $mediaInfo['mime_type'],
                             'file_size' => $mediaInfo['file_size'],
+                            'background' => $data['background'] ?? null,
+                            'drawings' => $data['drawings'] ?? ($data['drawing'] ?? null),
+                            'framing' => $data['framing'] ?? ($data['crop'] ?? null),
                         ],
                     ]);
 
@@ -251,6 +289,28 @@ class StoryService
                 'rotation' => $rotation,
                 'data' => $payload,
             ]);
+
+            if ($type === StoryStickerType::Mention) {
+                $targetUserId = $payload['user_id'] ?? null;
+                $targetHandle = $payload['handle'] ?? ($payload['username'] ?? null);
+                $target = null;
+                if ($targetUserId) {
+                    $target = User::find($targetUserId);
+                } elseif ($targetHandle) {
+                    $cleanHandle = ltrim((string) $targetHandle, '@');
+                    $target = User::where('handle', $cleanHandle)->orWhere('name', $cleanHandle)->first();
+                }
+                if ($target && $target->id !== $slide->story?->user_id) {
+                    try {
+                        $target->notify(new SocialNotification('mention', $slide->story->user ?? auth()->user(), [
+                            'story_id' => (string) $slide->story_id,
+                            'slide_id' => (string) $slide->id,
+                        ]));
+                    } catch (Throwable $e) {
+                        Log::warning("Notification mention story ignorée : {$e->getMessage()}");
+                    }
+                }
+            }
         }
     }
 
@@ -307,6 +367,20 @@ class StoryService
                 'unviewed_count' => $unviewedCount,
                 'has_unviewed' => $unviewedCount > 0,
                 'latest_story_id' => (string) $latestStory->id,
+                'story_ids' => $stories->pluck('id')->map(fn ($sid) => (string) $sid)->values()->all(),
+                'stories' => $stories->map(function ($st) use ($user) {
+                    $first = $st->slides->first();
+
+                    return [
+                        'id' => (string) $st->id,
+                        'audience' => $st->audience->value,
+                        'published_at' => $st->published_at?->toIso8601String(),
+                        'expires_at' => $st->expires_at?->toIso8601String(),
+                        'is_viewed' => $st->views->contains('viewer_id', $user->id),
+                        'media_url' => $first?->media_url,
+                        'thumbnail_url' => $first?->thumbnail_url,
+                    ];
+                })->values()->all(),
                 'latest_published_at' => $latestStory->published_at?->toIso8601String(),
                 'latest_media_url' => $firstSlide?->media_url,
                 'latest_thumbnail_url' => $firstSlide?->thumbnail_url,
@@ -700,6 +774,24 @@ class StoryService
         // Dispatch de l'événement métier STRICTEMENT APRÈS le commit de la transaction
         StoryReplyCreated::dispatch($reply);
 
+        // Création du message dans la conversation privée (MS / Point 36)
+        try {
+            $threadService = app(MessageThreadService::class);
+            $conversation = $threadService->getOrCreateDirectConversation($user, $story->user_id);
+            $messageService = app(MessageService::class);
+            $messageService->sendMessage($conversation, $user, [
+                'type' => MessageType::StoryReply,
+                'body' => $type === StoryReplyType::Text ? $text : $reaction,
+                'metadata' => [
+                    'story_id' => (string) $story->id,
+                    'story_reply_id' => $reply->id,
+                    'preview' => $storyPreviewCard,
+                ],
+            ]);
+        } catch (Throwable $e) {
+            Log::warning('Échec de création du message pour la réponse story : '.$e->getMessage());
+        }
+
         return $reply;
     }
 
@@ -742,5 +834,162 @@ class StoryService
             'details' => $details,
             'status' => 'pending',
         ]);
+    }
+
+    public function likeStory(string $id, User $user): array
+    {
+        $story = $this->getStory($id, $user);
+
+        StoryLike::firstOrCreate([
+            'story_id' => $story->id,
+            'user_id' => $user->id,
+        ]);
+
+        $count = StoryLike::where('story_id', $story->id)->count();
+        $story->update(['likes_count' => $count]);
+
+        if ($story->user_id !== $user->id) {
+            try {
+                $story->user->notify(new SocialNotification('like', $user, [
+                    'story_id' => (string) $story->id,
+                ]));
+            } catch (Throwable $e) {
+                Log::warning("Notification like story échouée : {$e->getMessage()}");
+            }
+        }
+
+        return [
+            'is_liked' => true,
+            'likes_count' => $count,
+        ];
+    }
+
+    public function unlikeStory(string $id, User $user): array
+    {
+        $story = $this->getStory($id, $user);
+
+        StoryLike::where('story_id', $story->id)
+            ->where('user_id', $user->id)
+            ->delete();
+
+        $count = StoryLike::where('story_id', $story->id)->count();
+        $story->update(['likes_count' => $count]);
+
+        return [
+            'is_liked' => false,
+            'likes_count' => $count,
+        ];
+    }
+
+    public function answerSticker(string $stickerId, User $user, string $answer): array
+    {
+        $sticker = StorySticker::with(['slide.story.user'])->findOrFail($stickerId);
+        $story = $sticker->slide->story;
+
+        DB::table('story_sticker_answers')->insert([
+            'id' => (string) Str::uuid(),
+            'story_id' => $story->id,
+            'slide_id' => $sticker->story_slide_id ?? $sticker->slide->id,
+            'sticker_id' => $sticker->id,
+            'user_id' => $user->id,
+            'type' => 'question',
+            'answer' => $answer,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        if ($story->user_id !== $user->id) {
+            try {
+                $story->user->notify(new SocialNotification('story_question_answer', $user, [
+                    'story_id' => (string) $story->id,
+                    'sticker_id' => (string) $sticker->id,
+                    'text' => $answer,
+                ]));
+            } catch (Throwable $e) {
+                Log::warning("Notification question answer échouée : {$e->getMessage()}");
+            }
+        }
+
+        return [
+            'success' => true,
+            'message' => 'Réponse enregistrée avec succès.',
+        ];
+    }
+
+    public function remindSticker(string $stickerId, User $user): array
+    {
+        $sticker = StorySticker::with(['slide.story'])->findOrFail($stickerId);
+        $story = $sticker->slide->story;
+
+        DB::table('story_sticker_answers')->insert([
+            'id' => (string) Str::uuid(),
+            'story_id' => $story->id,
+            'slide_id' => $sticker->story_slide_id ?? $sticker->slide->id,
+            'sticker_id' => $sticker->id,
+            'user_id' => $user->id,
+            'type' => 'countdown_reminder',
+            'answer' => 'remind',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        try {
+            $user->notify(new SocialNotification('countdown_remind', $user, [
+                'story_id' => (string) $story->id,
+                'sticker_id' => (string) $sticker->id,
+            ]));
+        } catch (Throwable $e) {
+            Log::warning("Notification countdown reminder échouée : {$e->getMessage()}");
+        }
+
+        return [
+            'success' => true,
+            'message' => 'Rappel de compte à rebours activé.',
+        ];
+    }
+
+    public function getSettings(User $user): array
+    {
+        $privacy = $user->privacy_settings ?? [];
+
+        return $privacy['stories'] ?? [
+            'allow_replies' => 'everyone',
+            'save_to_archive' => true,
+            'save_to_gallery' => false,
+            'allow_sharing' => true,
+        ];
+    }
+
+    public function updateSettings(User $user, array $settings): array
+    {
+        $privacy = $user->privacy_settings ?? [];
+        $current = $privacy['stories'] ?? [
+            'allow_replies' => 'everyone',
+            'save_to_archive' => true,
+            'save_to_gallery' => false,
+            'allow_sharing' => true,
+        ];
+
+        $merged = array_merge($current, $settings);
+        $privacy['stories'] = $merged;
+
+        $user->update(['privacy_settings' => $privacy]);
+
+        return $merged;
+    }
+
+    public function exportStory(string $id, User $user): array
+    {
+        $story = $this->getStory($id, $user);
+        $firstSlide = $story->slides->first();
+
+        return [
+            'story_id' => (string) $story->id,
+            'media_url' => $firstSlide?->media_url,
+            'sound' => $firstSlide?->sound_metadata,
+            'export_url' => $firstSlide?->media_url,
+            'has_sound' => ! empty($firstSlide?->sound_metadata),
+            'status' => 'ready',
+        ];
     }
 }

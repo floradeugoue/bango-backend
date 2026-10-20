@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\FollowUserResource;
 use App\Models\Profile\FollowRequest;
 use App\Models\User;
+use App\Notifications\Social\SocialNotification;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -70,6 +71,8 @@ class FollowRequestController extends Controller
 
         // Add follow: sender follows authenticated user
         $sender->following()->syncWithoutDetaching([$user->id]);
+
+        $sender->notify(new SocialNotification('follow', $user));
 
         $followRequest->delete();
 

@@ -52,11 +52,11 @@ it('P1 - locks operator account for 30 minutes after 5 failed 2FA attempts acros
     $token1 = $loginResponse1->json('challenge_token');
 
     $this->postJson('/api/admin/auth/2fa/verify', ['challenge_token' => $token1, 'code' => '000001'])
-        ->assertStatus(422)
+        ->assertStatus(401)
         ->assertJsonPath('remaining_attempts', 4);
 
     $this->postJson('/api/admin/auth/2fa/verify', ['challenge_token' => $token1, 'code' => '000002'])
-        ->assertStatus(422)
+        ->assertStatus(401)
         ->assertJsonPath('remaining_attempts', 3);
 
     // L'attaquant relance /auth/login pour obtenir un nouveau challenge et contourner la limite du premier
@@ -70,11 +70,11 @@ it('P1 - locks operator account for 30 minutes after 5 failed 2FA attempts acros
 
     // Tentatives 3 et 4 sur le challenge 2
     $this->postJson('/api/admin/auth/2fa/verify', ['challenge_token' => $token2, 'code' => '000003'])
-        ->assertStatus(422)
+        ->assertStatus(401)
         ->assertJsonPath('remaining_attempts', 2);
 
     $this->postJson('/api/admin/auth/2fa/verify', ['challenge_token' => $token2, 'code' => '000004'])
-        ->assertStatus(422)
+        ->assertStatus(401)
         ->assertJsonPath('remaining_attempts', 1);
 
     // L'attaquant relance encore /auth/login pour tenter le 5ème code

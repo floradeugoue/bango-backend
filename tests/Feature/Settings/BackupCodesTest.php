@@ -150,7 +150,9 @@ test('it regenerates backup codes and invalidates all previous codes immediately
     $firstOldCode = $initialResult['plain'][0];
 
     // Regenerate
-    $regenResponse = $this->postJson('/api/settings/2fa/backup-codes/regenerate');
+    $regenResponse = $this->postJson('/api/settings/2fa/backup-codes/regenerate', [
+        'password' => 'password',
+    ]);
 
     $regenResponse->assertOk()
         ->assertJsonPath('count', 8)

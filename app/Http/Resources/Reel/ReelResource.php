@@ -60,17 +60,20 @@ class ReelResource extends JsonResource
         $disliked = $userReaction === ReelReactionType::Dislike->value;
 
         // Construction du libellé du son
+        $page = $this->page_id ? ($this->relationLoaded('page') ? $this->page : Page::find($this->page_id)) : null;
+        $authorDisplayName = $page ? $page->name : ($author?->display_name ?? $author?->name ?? 'Utilisateur');
+
         $soundLabel = 'Son original';
         $soundRemoved = false;
         if ($this->sound) {
             if ($this->sound->is_original) {
-                $soundLabel = "Son original · {$author?->name}";
+                $soundLabel = "Son original · {$authorDisplayName}";
             } else {
                 $soundLabel = "{$this->sound->artist} · {$this->sound->title}";
             }
             $soundRemoved = (bool) $this->sound->is_removed;
         } elseif ($this->sound_id && str_starts_with($this->sound_id, 'orig:')) {
-            $soundLabel = "Son original · {$author?->name}";
+            $soundLabel = "Son original · {$authorDisplayName}";
         }
 
         // Formatage de la date de publication
@@ -78,10 +81,10 @@ class ReelResource extends JsonResource
             ? $this->published_at->translatedFormat('d F Y')
             : ($this->created_at ? $this->created_at->translatedFormat('d F Y') : '');
 
-        // Author meta (ex: "Almadies · il y a 2 h")
-        $authorCity = $author?->city ?? 'Dakar';
+        // Author meta (ex: "Almadies · il y a 2 h" ou juste "il y a 2 h" si ville inconnue)
+        $authorCity = $author?->city ?: null;
         $timeAgo = $this->created_at?->diffForHumans() ?? '';
-        $authorMeta = trim("{$authorCity} · {$timeAgo}", ' ·');
+        $authorMeta = $authorCity ? trim("{$authorCity} · {$timeAgo}", ' ·') : $timeAgo;
 
         /** @var MediaStorageService $storage */
         $storage = app(MediaStorageService::class);
@@ -104,17 +107,21 @@ class ReelResource extends JsonResource
             }
         }
 
-        $page = $this->page_id ? ($this->relationLoaded('page') ? $this->page : Page::find($this->page_id)) : null;
-
-        $reelAuthorName = $page ? $page->name : ($author?->name ?? 'Anonyme');
+        $reelAuthorName = $page ? $page->name : ($author?->display_name ?? $author?->name ?? 'Anonyme');
         $reelAuthorVerified = $page ? $page->isCertified() : (bool) ($author?->is_verified ?? false);
+        $reelAuthorCertified = $page ? $page->isCertified() : (bool) ($author?->is_certified ?? false);
         $reelAuthorBadge = $page ? ($page->isCertified() ? 'page_certified' : 'none') : $author?->badge;
         $reelHandle = '@'.($page ? $page->handle : ($author?->handle ?? 'user'));
+        $authorAvatar = $page ? $page->logo_url : $author?->avatar_url;
 
         return [
             'id' => (string) $this->id,
             'authorId' => (string) $this->user_id,
             'author_id' => $this->user_id,
+            'authorAvatar' => $authorAvatar,
+            'author_avatar' => $authorAvatar,
+            'authorCity' => $authorCity,
+            'author_city' => $authorCity,
             'page_id' => $this->page_id ? (int) $this->page_id : null,
             'is_page_reel' => $page !== null,
             'page' => $page ? [
@@ -126,8 +133,12 @@ class ReelResource extends JsonResource
             ] : null,
             'authorName' => $reelAuthorName,
             'author_name' => $reelAuthorName,
+            'displayName' => $reelAuthorName,
+            'display_name' => $reelAuthorName,
             'authorVerified' => $reelAuthorVerified,
             'author_verified' => $reelAuthorVerified,
+            'authorCertified' => $reelAuthorCertified,
+            'author_certified' => $reelAuthorCertified,
             'authorBadge' => $reelAuthorBadge,
             'author_badge' => $reelAuthorBadge,
             'authorMeta' => $authorMeta,

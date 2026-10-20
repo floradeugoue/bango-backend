@@ -11,6 +11,19 @@ class AdminDeviceReportRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        if ($this->has('challengeId') && ! $this->has('challenge_token')) {
+            $this->merge(['challenge_token' => $this->input('challengeId')]);
+        }
+        if ($this->has('challenge_token') && ! $this->has('challengeId')) {
+            $this->merge(['challengeId' => $this->input('challenge_token')]);
+        }
+        if (! $this->has('reason')) {
+            $this->merge(['reason' => 'Appareil inconnu ou non reconnu']);
+        }
+    }
+
     /**
      * @return array<string, array<string>>
      */
@@ -18,8 +31,9 @@ class AdminDeviceReportRequest extends FormRequest
     {
         return [
             'challenge_token' => ['nullable', 'string', 'max:64'],
+            'challengeId' => ['nullable', 'string', 'max:64'],
             'device_hash' => ['nullable', 'string', 'max:64'],
-            'reason' => ['required', 'string', 'max:1000'],
+            'reason' => ['nullable', 'string', 'max:1000'],
         ];
     }
 }

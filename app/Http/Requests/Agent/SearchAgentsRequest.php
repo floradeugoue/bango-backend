@@ -21,6 +21,8 @@ class SearchAgentsRequest extends FormRequest
             'city' => ['nullable', 'string', 'max:100'],
             'neighbourhood' => ['nullable', 'string', 'max:100'],
             'q' => ['nullable', 'string', 'max:100'],
+            'active_30d' => ['nullable', 'boolean'],
+            'has_activity_30d' => ['nullable', 'boolean'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:50'],
         ];
     }

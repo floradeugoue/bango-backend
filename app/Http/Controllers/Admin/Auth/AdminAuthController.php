@@ -6,10 +6,13 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\Auth\Admin2FaRecoveryRequest;
 use App\Http\Requests\Admin\Auth\Admin2FaVerifyRequest;
 use App\Http\Requests\Admin\Auth\AdminLoginRequest;
+use App\Models\Admin\AdminChallenge;
 use App\Services\Admin\AdminAuthService;
 use App\Services\Admin\AdminPasswordPolicy;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
+use Symfony\Component\HttpFoundation\Response;
 
 class AdminAuthController extends Controller
 {
@@ -47,8 +50,10 @@ class AdminAuthController extends Controller
      */
     public function verify2fa(Admin2FaVerifyRequest $request): JsonResponse
     {
+        $challengeToken = (string) ($request->input('challengeId') ?? $request->input('challenge_token'));
+
         return $this->authService->verify2fa(
-            challengeToken: (string) $request->input('challenge_token'),
+            challengeToken: $challengeToken,
             code: (string) $request->input('code'),
             request: $request
         );
@@ -56,11 +61,34 @@ class AdminAuthController extends Controller
 
     /**
      * GET /auth/2fa/recovery
-     * Fournit les informations non sensibles sur le parcours de récupération.
+     * Fournit les informations non sensibles sur le parcours de récupération (RecoveryKeysInfo).
      */
     public function recoveryInfo(Request $request): JsonResponse
     {
+        $challengeToken = $request->query('challenge_id')
+            ?? $request->query('challengeId')
+            ?? $request->query('challenge_token');
+
+        $valid = 0;
+        $used = 0;
+        $notifiedTo = '';
+
+        if ($challengeToken) {
+            $challenge = AdminChallenge::with('user')->where('token', $challengeToken)->first();
+            if ($challenge && $challenge->user) {
+                $user = $challenge->user;
+                $backupCodes = $user->backup_codes ?? [];
+                $valid = is_array($backupCodes) ? count($backupCodes) : 0;
+                $used = max(0, 10 - $valid);
+                $parts = explode('@', $user->email);
+                $notifiedTo = Str::mask($parts[0], '*', 2, -1).'@'.($parts[1] ?? 'bango.app');
+            }
+        }
+
         return response()->json([
+            'valid' => $valid,
+            'used' => $used,
+            'notifiedTo' => $notifiedTo,
             'message' => 'Saisissez l\'un de vos codes de secours à usage unique générés lors de la configuration de votre compte.',
             'format' => 'XXXX-XXXX (8 caractères)',
             'anti_replay' => 'Chaque code est invalidé de manière atomique et définitive après usage.',
@@ -73,9 +101,12 @@ class AdminAuthController extends Controller
      */
     public function verifyRecovery(Admin2FaRecoveryRequest $request): JsonResponse
     {
+        $challengeToken = (string) ($request->input('challengeId') ?? $request->input('challenge_token'));
+        $recoveryCode = (string) ($request->input('key') ?? $request->input('recovery_code'));
+
         return $this->authService->verifyRecovery(
-            challengeToken: (string) $request->input('challenge_token'),
-            recoveryCode: (string) $request->input('recovery_code'),
+            challengeToken: $challengeToken,
+            recoveryCode: $recoveryCode,
             request: $request
         );
     }
@@ -128,7 +159,7 @@ class AdminAuthController extends Controller
      * POST /auth/logout
      * Invalide la session côté serveur et expire les cookies.
      */
-    public function logout(Request $request): JsonResponse
+    public function logout(Request $request): Response
     {
         return $this->authService->logout($request);
     }

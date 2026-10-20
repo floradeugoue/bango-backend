@@ -8,14 +8,13 @@ use App\Enums\Listing\ListingMode;
 use App\Enums\Listing\ListingPhotoRoom;
 use App\Enums\Listing\ListingStatus;
 use App\Enums\Visit\VisitReservationStatus;
-use App\Enums\Visit\VisitSlotStatus;
 use App\Events\Listing\ListingPublished;
 use App\Models\Delegation\Delegation;
 use App\Models\Listing\Listing;
 use App\Models\Listing\ListingMedia;
 use App\Models\Listing\ListingSave;
 use App\Models\User;
-use App\Models\Visit\VisitSlot;
+use App\Services\Admin\AdminListingControlService;
 use App\Services\Media\MediaStorageService;
 use App\Services\Subscription\BadgeResolutionService;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -366,7 +365,7 @@ class ListingService
             $listing->kind = $kind ?? ListingKind::Flat;
 
             $listing->price = (float) ($data['price'] ?? 0);
-            $listing->currency = (string) ($data['currency'] ?? 'XOF');
+            $listing->currency = (string) ($data['currency'] ?? 'XAF');
             $listing->period = ($listing->mode === ListingMode::Sale) ? null : 'month';
 
             $listing->deposit_months = (int) ($data['deposit_months'] ?? 0);
@@ -402,6 +401,12 @@ class ListingService
                 $listing->submitted_at = now();
                 $listing->review_due_at = now()->addMinutes(3); // CR-48 échéance persistante
             } else {
+                if ($listing->withdrawn_by_bango && ! $user->isAdmin()) {
+                    throw ValidationException::withMessages([
+                        'status' => ["Cette annonce a été retirée par l'administration de BANGO. Seul le back-office peut autoriser sa republication."],
+                    ]);
+                }
+
                 $listing->status = ListingStatus::Published;
                 $listing->published_at = now();
             }
@@ -484,6 +489,13 @@ class ListingService
             ]);
         }
 
+        // Point 17 : Verrou « retirée par BANGO » que seul le back-office peut lever
+        if ($newStatus === ListingStatus::Published && $listing->withdrawn_by_bango && ! $actor->isAdmin()) {
+            throw ValidationException::withMessages([
+                'status' => ["Cette annonce a été retirée par l'administration de BANGO. Seul le back-office est habilité à lever ce verrou."],
+            ]);
+        }
+
         if (! $listing->status->canTransitionTo($newStatus)) {
             throw ValidationException::withMessages([
                 'status' => ["Transition interdite depuis '{$listing->status->value}' vers '{$newStatus->value}'."],
@@ -507,11 +519,9 @@ class ListingService
             if ($newStatus === ListingStatus::Taken) {
                 $listing->taken_at = now();
 
-                // Fermer les créneaux futurs pour empêcher toute nouvelle réservation
-                VisitSlot::where('listing_id', $listing->id)
-                    ->where('status', VisitSlotStatus::Open->value)
-                    ->where('start_at', '>', now())
-                    ->update(['status' => VisitSlotStatus::Closed->value]);
+                // Point 18 : Clôture, annulation et remboursement des visites confirmées / à venir
+                app(AdminListingControlService::class)
+                    ->cancelAndRefundUpcomingVisits($listing, 'Le bien a été loué / retiré du marché');
             }
 
             if ($newStatus === ListingStatus::Rejected && $reason) {

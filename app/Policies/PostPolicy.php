@@ -14,6 +14,12 @@ class PostPolicy
      */
     public function view(?User $user, Post $post): bool
     {
+        // Une publication d'un auteur suspendu n'est plus accessible
+        $author = $post->relationLoaded('user') ? $post->user : User::find($post->user_id);
+        if ($author && ($author->status === 'suspended' || (method_exists($author, 'isSuspended') && $author->isSuspended()))) {
+            return false;
+        }
+
         // Un post archivé n'est visible que par son auteur
         if ($post->is_archived) {
             return $user !== null && (int) $post->user_id === (int) $user->id;
@@ -30,7 +36,7 @@ class PostPolicy
         }
 
         // Audience publique
-        if ($post->audience === PostAudience::Public) {
+        if ($post->audience === PostAudience::Public || $post->audience === 'public') {
             return true;
         }
 
@@ -40,14 +46,14 @@ class PostPolicy
         }
 
         // Audience 'followers'
-        if ($post->audience === PostAudience::Followers) {
+        if ($post->audience === PostAudience::Followers || $post->audience === 'followers') {
             return Follow::where('follower_id', $user->id)
                 ->where('following_id', $post->user_id)
                 ->exists();
         }
 
         // Audience 'neighbourhood'
-        if ($post->audience === PostAudience::Neighbourhood) {
+        if ($post->audience === PostAudience::Neighbourhood || $post->audience === 'neighbourhood') {
             if ($post->place_neighbourhood && $user->neighbourhood && $post->place_neighbourhood === $user->neighbourhood) {
                 return true;
             }

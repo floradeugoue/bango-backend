@@ -5,6 +5,7 @@ namespace App\Services\Square;
 use App\Models\Square\Post;
 use App\Models\Square\PostLike;
 use App\Models\User;
+use App\Notifications\Social\SocialNotification;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
@@ -32,6 +33,12 @@ class PostLikeService
 
             if ($like->wasRecentlyCreated) {
                 Post::where('id', $post->id)->increment('likes_count');
+                if ($post->user_id && $post->user_id !== $user->id) {
+                    $author = User::find($post->user_id);
+                    if ($author) {
+                        $author->notify(new SocialNotification('like', $user, ['post_id' => $post->id]));
+                    }
+                }
             }
 
             $currentCount = (int) Post::where('id', $post->id)->value('likes_count');

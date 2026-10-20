@@ -18,7 +18,9 @@ return new class extends Migration
 
             // Domaine métier / produit concerné
             $table->string('service_type', 32); // subscription, certification, boost, visit
-            $table->nullableMorphs('payable'); // Relations polymorphes futures
+            $table->string('payable_type', 128)->nullable();
+            $table->string('payable_id', 64)->nullable();
+            $table->index(['payable_type', 'payable_id']);
             $table->foreignId('product_id')->nullable()->constrained('subscription_products')->restrictOnDelete();
             $table->foreignId('price_id')->nullable()->constrained('subscription_prices')->restrictOnDelete();
             $table->foreignId('subscription_id')->nullable()->constrained('subscriptions')->restrictOnDelete();

@@ -2,6 +2,7 @@
 
 namespace App\Services\Admin;
 
+use App\Models\Admin\AdminAuditLog;
 use App\Models\Listing\Listing;
 use App\Models\User;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -39,6 +40,18 @@ class AdminListingExportService
     {
         $query = Listing::query();
 
+        // Point 20 : Filtrage selon les pays autorisés dans la session de l'opérateur
+        $adminSession = request()?->attributes?->get('admin_session');
+        if ($adminSession && ! empty($adminSession->allowed_countries)) {
+            $allowedCountries = (array) $adminSession->allowed_countries;
+            $query->whereHas('owner', function ($oq) use ($allowedCountries) {
+                $oq->whereIn('country_code', $allowedCountries)
+                    ->orWhereHas('country', function ($cq) use ($allowedCountries) {
+                        $cq->whereIn('code', $allowedCountries)->orWhereIn('iso2', $allowedCountries);
+                    });
+            });
+        }
+
         if (! empty($filters['status'])) {
             $query->where('status', $filters['status']);
         }
@@ -70,6 +83,18 @@ class AdminListingExportService
         $query = Listing::with(['owner'])
             ->orderByDesc('created_at');
 
+        // Point 20 : Filtrage selon les pays autorisés dans la session de l'opérateur
+        $adminSession = request()?->attributes?->get('admin_session');
+        if ($adminSession && ! empty($adminSession->allowed_countries)) {
+            $allowedCountries = (array) $adminSession->allowed_countries;
+            $query->whereHas('owner', function ($oq) use ($allowedCountries) {
+                $oq->whereIn('country_code', $allowedCountries)
+                    ->orWhereHas('country', function ($cq) use ($allowedCountries) {
+                        $cq->whereIn('code', $allowedCountries)->orWhereIn('iso2', $allowedCountries);
+                    });
+            });
+        }
+
         if (! empty($filters['status'])) {
             $query->where('status', $filters['status']);
         }
@@ -81,6 +106,22 @@ class AdminListingExportService
         }
 
         $filename = 'export_annonces_'.now()->format('Ymd_His').'.csv';
+
+        // Point 21 : Journalisation d'audit chaînée de l'export des annonces avec téléphones
+        AdminAuditLog::logChainedEvent(
+            event: 'listings.export_csv',
+            operator: $operator,
+            targetType: 'Listing',
+            targetId: null,
+            targetLabel: "Export CSV des annonces contenant les coordonnées des propriétaires ({$filename})",
+            context: [
+                'filters' => $filters,
+                'filename' => $filename,
+                'contains_owner_phone' => true,
+            ],
+            ip: request()?->ip(),
+            userAgent: request()?->userAgent()
+        );
 
         return response()->streamDownload(function () use ($query) {
             $output = fopen('php://output', 'w');

@@ -33,6 +33,14 @@ class AdminPaymentOperationsController extends Controller
         $paginator = $result['paginator'];
 
         return response()->json([
+            // Contract format: Page<T>
+            'items' => $paginator->items(),
+            'page' => $paginator->currentPage(),
+            'perPage' => $paginator->perPage(),
+            'total' => $paginator->total(),
+            'pageCount' => $paginator->lastPage(),
+
+            // Legacy keys for backward compatibility
             'success' => true,
             'data' => $paginator->items(),
             'meta' => [

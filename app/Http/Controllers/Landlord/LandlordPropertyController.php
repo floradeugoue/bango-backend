@@ -2,12 +2,14 @@
 
 namespace App\Http\Controllers\Landlord;
 
+use App\Enums\Delegation\DelegationStatus;
 use App\Enums\Listing\ListingStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Landlord\UpdateLandlordListingStatusRequest;
 use App\Http\Requests\Landlord\UpdatePropertySlotsRequest;
 use App\Http\Resources\Landlord\LandlordPropertyResource;
 use App\Http\Resources\Visit\VisitReservationResource;
+use App\Models\Delegation\Delegation;
 use App\Models\Listing\Listing;
 use App\Models\Visit\VisitReservation;
 use App\Services\Listing\ListingService;
@@ -90,7 +92,17 @@ class LandlordPropertyController extends Controller
     {
         $landlord = $request->user();
 
-        $query = VisitReservation::where('owner_id', $landlord->id)
+        $delegatedListingIds = Delegation::where('agent_id', $landlord->id)
+            ->where('status', DelegationStatus::Active->value)
+            ->get()
+            ->filter(fn (Delegation $d) => $d->isOperational() && $d->hasCapability('visits'))
+            ->pluck('listing_id');
+
+        $query = VisitReservation::where(function ($q) use ($landlord, $delegatedListingIds) {
+            $q->where('owner_id', $landlord->id)
+                ->orWhere('agent_id', $landlord->id)
+                ->orWhereIn('listing_id', $delegatedListingIds);
+        })
             ->with(['listing', 'slot', 'proposalSlot', 'prospect', 'paymentTransaction'])
             ->latest('created_at');
 

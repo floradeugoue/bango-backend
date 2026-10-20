@@ -7,6 +7,7 @@ use App\Models\Reel\Reel;
 use App\Models\Reel\ReelComment;
 use App\Models\Reel\ReelCommentReaction;
 use App\Models\User;
+use App\Services\Admin\AutomatedTextFilterService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -81,6 +82,10 @@ class ReelCommentService
             if ($parentId) {
                 ReelComment::where('id', $parentId)->increment('replies_count');
             }
+
+            // Point 19 : Déclenchement du filtre textuel automatique sur le commentaire du Reel
+            app(AutomatedTextFilterService::class)
+                ->scanText($comment->body, 'reel_comment', $comment->id, $user);
 
             return $comment->load('user');
         });

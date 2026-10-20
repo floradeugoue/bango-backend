@@ -52,6 +52,7 @@ class MessageResource extends JsonResource
             'attachment_size' => $this->is_retracted ? null : $this->attachment_size,
             'attachment_duration_ms' => $this->is_retracted ? null : $this->attachment_duration_ms,
             'metadata' => $this->metadata ?? [],
+            'reactions' => $this->metadata['reactions'] ?? [],
             'is_retracted' => (bool) $this->is_retracted,
             'retracted_at' => $this->retracted_at?->toIso8601String(),
             'created_at' => $this->created_at?->toIso8601String(),

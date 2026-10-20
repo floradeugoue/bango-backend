@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use Symfony\Component\HttpFoundation\Response;
 
 class AdminInvitationController extends Controller
 {
@@ -28,7 +29,7 @@ class AdminInvitationController extends Controller
 
     /**
      * GET /auth/invitations/{token}
-     * Retourne l'état minimal de l'invitation sans divulguer de données sensibles.
+     * Retourne l'état de l'invitation selon le contrat frontend (Invitation) tout en restant compatible.
      */
     public function show(string $token): JsonResponse
     {
@@ -36,20 +37,38 @@ class AdminInvitationController extends Controller
         $invitation = AdminInvitation::findByToken($token);
 
         if (! $invitation || ! $invitation->isValid()) {
+            $status = ! $invitation ? 'invalid' : ($invitation->accepted_at ? 'used' : 'expired');
+
             return response()->json([
+                'code' => 'token_invalid',
+                'status' => $status,
                 'message' => 'Cette invitation est invalide, expirée ou a déjà été utilisée.',
                 'is_valid' => false,
             ], 404);
         }
 
-        // Masquage de l'adresse email
         $parts = explode('@', $invitation->email);
-        $maskedEmail = Str::mask($parts[0], '*', 2, -1).'@'.($parts[1] ?? 'bango.app');
+        $name = ucfirst($parts[0] ?? 'Opérateur');
+
+        $roleTitle = match ($invitation->role) {
+            'direction' => 'Direction',
+            'moderation' => 'Modérateur',
+            'support' => 'Support',
+            'finance' => 'Finance',
+            'kyc' => 'Agent KYC',
+            default => ucfirst((string) $invitation->role),
+        };
 
         return response()->json([
+            'status' => 'valid',
             'is_valid' => true,
-            'email' => $maskedEmail,
+            'email' => $invitation->email,
+            'name' => $name,
             'role' => $invitation->role,
+            'roleTitle' => $roleTitle,
+            'city' => 'Dakar',
+            'invitedBy' => $invitation->inviter?->name ?? 'Direction BANGO',
+            'expiresAt' => $invitation->expires_at->toIso8601String(),
             'expires_at' => $invitation->expires_at->toIso8601String(),
         ], 200);
     }
@@ -62,7 +81,7 @@ class AdminInvitationController extends Controller
     {
         $request->validate([
             'name' => ['nullable', 'string', 'max:255'],
-            'password' => AdminPasswordPolicy::validationRules(true),
+            'password' => AdminPasswordPolicy::validationRules($request->has('password_confirmation')),
         ], AdminPasswordPolicy::validationMessages());
 
         /** @var AdminInvitation|null $invitation */
@@ -70,6 +89,7 @@ class AdminInvitationController extends Controller
 
         if (! $invitation || ! $invitation->isValid()) {
             return response()->json([
+                'code' => 'token_expired',
                 'message' => 'Cette invitation est invalide, expirée ou a déjà été utilisée.',
                 'success' => false,
             ], 404);
@@ -78,13 +98,14 @@ class AdminInvitationController extends Controller
         $user = User::where('email', $invitation->email)->first();
         if ($user && ($user->isBlocked() || $user->trashed() || ($user->status ?? null) === 'deleted')) {
             return response()->json([
+                'code' => 'forbidden',
                 'message' => 'Ce compte opérateur est bloqué ou désactivé.',
                 'success' => false,
             ], 403);
         }
 
         $totpSecret = $this->totpService->generateSecret();
-        $qrCodeUri = $this->totpService->getOtpAuthUri($totpSecret, $invitation->email, 'BANGO');
+        $qrCodeUri = $this->totpService->getOtpAuthUri($totpSecret, $invitation->email, 'BANGO ADMIN');
 
         $tokenHash = hash('sha256', $token);
         Cache::put("admin_invitation_enrollment:{$tokenHash}", [
@@ -96,6 +117,9 @@ class AdminInvitationController extends Controller
         ], now()->addMinutes(30));
 
         return response()->json([
+            'secret' => $totpSecret,
+            'otpauthUri' => $qrCodeUri,
+            'issuer' => 'BANGO ADMIN',
             'success' => true,
             'totp_secret' => $totpSecret,
             'qr_code_uri' => $qrCodeUri,
@@ -118,6 +142,7 @@ class AdminInvitationController extends Controller
 
         if (! $invitation || ! $invitation->isValid()) {
             return response()->json([
+                'code' => 'token_invalid',
                 'message' => 'Cette invitation est invalide, expirée ou a déjà été utilisée.',
                 'success' => false,
             ], 404);
@@ -128,6 +153,7 @@ class AdminInvitationController extends Controller
 
         if (! $pending || empty($pending['totp_secret'])) {
             return response()->json([
+                'code' => 'validation',
                 'message' => 'Veuillez d\'abord définir votre mot de passe.',
                 'success' => false,
             ], 400);
@@ -136,9 +162,11 @@ class AdminInvitationController extends Controller
         $code = (string) $request->input('code');
         if (! $this->totpService->verifyCode($pending['totp_secret'], $code)) {
             return response()->json([
+                'code' => 'otp_invalid',
                 'message' => 'Code TOTP invalide.',
                 'success' => false,
-            ], 422);
+                'meta' => ['attemptsLeft' => 4],
+            ], 401);
         }
 
         $backupCodes = $this->backupCodeService->generateCodes(10);
@@ -147,6 +175,7 @@ class AdminInvitationController extends Controller
         Cache::put("admin_invitation_enrollment:{$tokenHash}", $pending, now()->addMinutes(30));
 
         return response()->json([
+            'recoveryKeys' => $backupCodes['plain'],
             'success' => true,
             'backup_codes' => $backupCodes['plain'],
             'message' => 'TOTP validé avec succès. Conservez précieusement ces 10 codes de secours.',
@@ -157,7 +186,7 @@ class AdminInvitationController extends Controller
      * POST /auth/invitations/{token}/complete
      * Étape 3 du contrat : finalise l'activation du compte opérateur avec 2FA validé et codes de secours.
      */
-    public function complete(Request $request, string $token): JsonResponse
+    public function complete(Request $request, string $token): Response
     {
         return DB::transaction(function () use ($request, $token) {
             $tokenHash = hash('sha256', $token);
@@ -170,6 +199,7 @@ class AdminInvitationController extends Controller
 
             if (! $invitation || ! $invitation->isValid()) {
                 return response()->json([
+                    'code' => 'token_invalid',
                     'message' => 'Cette invitation est invalide, expirée ou a déjà été utilisée.',
                     'success' => false,
                 ], 400);
@@ -179,6 +209,7 @@ class AdminInvitationController extends Controller
 
             if (! $pending || empty($pending['totp_verified']) || empty($pending['password'])) {
                 return response()->json([
+                    'code' => 'validation',
                     'message' => 'L\'enrôlement 2FA n\'a pas été validé. Veuillez compléter les étapes précédentes.',
                     'success' => false,
                 ], 400);
@@ -187,6 +218,7 @@ class AdminInvitationController extends Controller
             $role = Role::where('slug', $invitation->role)->first();
             if (! $role) {
                 return response()->json([
+                    'code' => 'unknown',
                     'message' => 'Le rôle assigné par l\'invitation est introuvable.',
                 ], 500);
             }
@@ -194,6 +226,7 @@ class AdminInvitationController extends Controller
             $user = User::where('email', $invitation->email)->first();
             if ($user && ($user->isBlocked() || $user->trashed() || ($user->status ?? null) === 'deleted')) {
                 return response()->json([
+                    'code' => 'forbidden',
                     'message' => 'Ce compte opérateur est bloqué ou désactivé.',
                 ], 403);
             }
@@ -205,7 +238,6 @@ class AdminInvitationController extends Controller
                 'status' => 'active',
                 'two_factor_method' => 'totp',
                 'two_factor_secret' => Crypt::encryptString($pending['totp_secret']),
-                'two_factor_confirmed_at' => now(),
                 'backup_codes' => $pending['backup_codes'],
             ];
 
@@ -235,13 +267,7 @@ class AdminInvitationController extends Controller
                 'role' => $role->slug,
             ]);
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Votre compte opérateur et votre 2FA ont été configurés avec succès. Vous pouvez désormais vous connecter.',
-                'operator_id' => $user->id,
-                'email' => $user->email,
-                'role' => $role->slug,
-            ], 200);
+            return response()->noContent(204);
         });
     }
 
@@ -292,7 +318,6 @@ class AdminInvitationController extends Controller
                 'status' => 'active',
                 'two_factor_method' => 'totp',
                 'two_factor_secret' => Crypt::encryptString($totpSecret),
-                'two_factor_confirmed_at' => now(),
                 'backup_codes' => $backupCodes['hashed'],
             ];
 

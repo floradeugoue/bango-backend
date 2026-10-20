@@ -9,6 +9,7 @@ enum DataExportStatus: string
     case Ready = 'ready';
     case Failed = 'failed';
     case Expired = 'expired';
+    case Cancelled = 'cancelled';
 
     public function label(): string
     {
@@ -18,6 +19,7 @@ enum DataExportStatus: string
             self::Ready => 'Archive prête au téléchargement',
             self::Failed => 'Échec de génération',
             self::Expired => 'Archive expirée',
+            self::Cancelled => 'Demande annulée',
         };
     }
 }

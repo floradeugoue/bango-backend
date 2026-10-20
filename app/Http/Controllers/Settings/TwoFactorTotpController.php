@@ -75,8 +75,8 @@ class TwoFactorTotpController extends Controller
         $user->two_factor_method = 'app';
         $user->two_factor_secret = Crypt::encryptString($pendingSecret);
 
-        // Generate initial single-use backup codes
-        $backupResult = $this->backupCodeService->generateCodes();
+        // Generate initial single-use backup codes (8 codes)
+        $backupResult = $this->backupCodeService->generateCodes(8);
         $user->backup_codes = $backupResult['hashed'];
         $user->save();
 

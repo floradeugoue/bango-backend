@@ -42,6 +42,7 @@ class Post extends Model
         'likes_count',
         'comments_count',
         'shares_count',
+        'pinned_comment_id',
     ];
 
     /**
@@ -192,6 +193,14 @@ class Post extends Model
     public function scopeActive(Builder $query): Builder
     {
         return $query->where('is_archived', false);
+    }
+
+    /**
+     * Commentaire épinglé sur cette publication.
+     */
+    public function pinnedComment(): BelongsTo
+    {
+        return $this->belongsTo(PostComment::class, 'pinned_comment_id');
     }
 
     /**

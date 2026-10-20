@@ -39,7 +39,13 @@ class BackupCodeController extends Controller
         /** @var User $user */
         $user = $request->user();
 
-        $result = $this->backupCodeService->generateCodes();
+        if (! empty($user->backup_codes)) {
+            $request->validate([
+                'password' => ['required', 'string', 'current_password'],
+            ]);
+        }
+
+        $result = $this->backupCodeService->generateCodes(8);
 
         $user->backup_codes = $result['hashed'];
         $user->save();

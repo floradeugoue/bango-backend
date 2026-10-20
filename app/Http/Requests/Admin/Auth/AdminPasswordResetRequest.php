@@ -18,8 +18,9 @@ class AdminPasswordResetRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'token' => ['nullable', 'string', 'size:64'],
-            'password' => AdminPasswordPolicy::validationRules(true),
+            'token' => ['nullable', 'string', 'max:64'],
+            'password' => AdminPasswordPolicy::validationRules($this->has('password_confirmation')),
+            'code' => ['nullable', 'string'],
         ];
     }
 

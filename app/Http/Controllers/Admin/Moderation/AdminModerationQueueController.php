@@ -41,6 +41,14 @@ class AdminModerationQueueController extends Controller
         $result = $this->queueService->getQueue($filters, $perPage);
 
         return response()->json([
+            // Contract format: Page<T>
+            'items' => $result['reports']->items(),
+            'page' => $result['reports']->currentPage(),
+            'perPage' => $result['reports']->perPage(),
+            'total' => $result['reports']->total(),
+            'pageCount' => $result['reports']->lastPage(),
+
+            // Legacy keys for backward compatibility
             'success' => true,
             'data' => $result['reports']->items(),
             'pagination' => [
@@ -199,6 +207,14 @@ class AdminModerationQueueController extends Controller
         $decisions = $this->queueService->getMyDecisions($operator, $perPage);
 
         return response()->json([
+            // Contract format: Page<T>
+            'items' => $decisions->items(),
+            'page' => $decisions->currentPage(),
+            'perPage' => $decisions->perPage(),
+            'total' => $decisions->total(),
+            'pageCount' => $decisions->lastPage(),
+
+            // Legacy keys for backward compatibility
             'success' => true,
             'data' => $decisions->items(),
             'pagination' => [

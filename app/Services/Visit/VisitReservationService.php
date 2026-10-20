@@ -20,6 +20,7 @@ use App\Notifications\Visit\VisitCancelledNotification;
 use App\Notifications\Visit\VisitConfirmedNotification;
 use App\Notifications\Visit\VisitDeclinedNotification;
 use App\Notifications\Visit\VisitProposedNotification;
+use App\Notifications\Visit\VisitRequestedNotification;
 use App\Services\Boost\CreditWalletService;
 use App\Services\Listing\ListingService;
 use App\Services\Payment\Gateways\MonetbilGateway;
@@ -176,7 +177,7 @@ class VisitReservationService
                 'prospect_id' => $prospect->id,
                 'owner_id' => $listing->owner_id,
                 'agent_id' => $listing->agent_id,
-                'status' => $isPaid ? VisitReservationStatus::Confirmed : VisitReservationStatus::PendingPayment,
+                'status' => $isPaid ? VisitReservationStatus::Requested : VisitReservationStatus::PendingPayment,
                 'lock_expires_at' => $isPaid ? null : now()->addMinutes(15),
                 'fee_amount' => $feeAmount,
                 'currency' => $quote['currency'],
@@ -187,8 +188,7 @@ class VisitReservationService
             ]);
 
             if ($isPaid) {
-                $lockedSlot->increment('booked_count');
-                $this->notifyVisitConfirmed($reservation);
+                $this->notifyVisitRequested($reservation);
 
                 return [
                     'reservation' => $reservation,
@@ -216,14 +216,13 @@ class VisitReservationService
                     ]
                 );
 
-                $reservation->status = VisitReservationStatus::Confirmed;
+                $reservation->status = VisitReservationStatus::Requested;
                 $reservation->paid_at = now();
                 $reservation->payment_reference = 'VISIT-CREDIT-'.$reservation->id;
                 $reservation->lock_expires_at = null;
                 $reservation->save();
 
-                $lockedSlot->increment('booked_count');
-                $this->notifyVisitConfirmed($reservation);
+                $this->notifyVisitRequested($reservation);
 
                 return [
                     'reservation' => $reservation,
@@ -265,9 +264,52 @@ class VisitReservationService
             $reservation->payment_reference = $transaction->reference;
             $reservation->save();
 
+            // 6. Appel de la passerelle Monetbil pour déclencher le Push USSD sur le téléphone
+            $phone = $payload['phone_number'] ?? $payload['phone'] ?? $prospect->phone;
+            $operator = $payload['operator'] ?? null;
+
+            $attempt = $transaction->createAttempt(
+                provider: PaymentProvider::Monetbil,
+                channel: $transaction->channel,
+                externalReference: null,
+                metadata: [
+                    'phone' => $phone,
+                    'operator' => $operator,
+                ]
+            );
+
+            try {
+                $initiateResult = $this->monetbilGateway->initiatePayment($transaction, [
+                    'phone' => $phone,
+                    'operator' => $operator,
+                ]);
+
+                if ($initiateResult->isSuccessful) {
+                    $attempt->markSuccessful(
+                        externalReference: $initiateResult->gatewayReference,
+                        metadata: ['ussd_prompt' => $initiateResult->ussdPrompt]
+                    );
+
+                    if ($initiateResult->gatewayReference) {
+                        $transaction->external_reference = $initiateResult->gatewayReference;
+                        $transaction->save();
+                    }
+                } else {
+                    $attempt->markFailed(
+                        errorCode: $initiateResult->errorCode ?? 'GATEWAY_ERROR',
+                        errorMessage: $initiateResult->errorMessage ?? 'Échec d\'initialisation du paiement.'
+                    );
+                }
+            } catch (\Throwable $e) {
+                $attempt->markFailed(
+                    errorCode: 'GATEWAY_ERROR',
+                    errorMessage: $e->getMessage()
+                );
+            }
+
             return [
                 'reservation' => $reservation,
-                'transaction' => $transaction,
+                'transaction' => $transaction->fresh(),
                 'quote' => $quote,
             ];
         });
@@ -320,14 +362,13 @@ class VisitReservationService
                 ]
             );
 
-            $lockedReservation->status = VisitReservationStatus::Confirmed;
+            $lockedReservation->status = VisitReservationStatus::Requested;
             $lockedReservation->paid_at = now();
             $lockedReservation->payment_reference = 'VISIT-CREDIT-'.$lockedReservation->id;
             $lockedReservation->lock_expires_at = null;
             $lockedReservation->save();
 
-            $lockedSlot->increment('booked_count');
-            $this->notifyVisitConfirmed($lockedReservation);
+            $this->notifyVisitRequested($lockedReservation);
 
             return $lockedReservation;
         });
@@ -394,14 +435,12 @@ class VisitReservationService
             }
 
             // Validation normale du paiement
-            $reservation->status = VisitReservationStatus::Confirmed;
+            $reservation->status = VisitReservationStatus::Requested;
             $reservation->paid_at = $now;
             $reservation->lock_expires_at = null;
             $reservation->save();
 
-            $slot->increment('booked_count');
-
-            $this->notifyVisitConfirmed($reservation);
+            $this->notifyVisitRequested($reservation);
 
             return $reservation;
         });
@@ -745,6 +784,14 @@ class VisitReservationService
         }
 
         return $count;
+    }
+
+    protected function notifyVisitRequested(VisitReservation $reservation): void
+    {
+        $reservation->owner->notify(new VisitRequestedNotification($reservation));
+        if ($reservation->agent) {
+            $reservation->agent->notify(new VisitRequestedNotification($reservation));
+        }
     }
 
     protected function notifyVisitConfirmed(VisitReservation $reservation): void

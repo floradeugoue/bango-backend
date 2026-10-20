@@ -5,6 +5,8 @@ namespace App\Services\Square;
 use App\Models\Square\Post;
 use App\Models\Square\PostComment;
 use App\Models\User;
+use App\Notifications\Social\SocialNotification;
+use App\Services\Admin\AutomatedTextFilterService;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
@@ -93,7 +95,7 @@ class PostCommentService
             }
         }
 
-        return DB::transaction(function () use ($post, $user, $body, $parentId) {
+        return DB::transaction(function () use ($post, $user, $body, $parentId, $parent) {
             $comment = PostComment::create([
                 'post_id' => $post->id,
                 'user_id' => $user->id,
@@ -111,6 +113,45 @@ class PostCommentService
             // Si c'est une réponse, incrémentation du compteur de réponses du parent
             if ($parentId) {
                 PostComment::where('id', $parentId)->increment('replies_count');
+            }
+
+            // Point 19 : Déclenchement du filtre textuel automatique
+            app(AutomatedTextFilterService::class)
+                ->scanText($body, 'comment', $comment->id, $user);
+
+            // Notifications sociales : commentaire, réponse et mentions
+            if ($parentId && $parent && $parent->user_id !== $user->id) {
+                $parentAuthor = User::find($parent->user_id);
+                if ($parentAuthor) {
+                    $parentAuthor->notify(new SocialNotification('reply', $user, [
+                        'post_id' => $post->id,
+                        'comment_id' => $comment->id,
+                        'text' => $body,
+                    ]));
+                }
+            } elseif (! $parentId && $post->user_id && $post->user_id !== $user->id) {
+                $postAuthor = User::find($post->user_id);
+                if ($postAuthor) {
+                    $postAuthor->notify(new SocialNotification('comment', $user, [
+                        'post_id' => $post->id,
+                        'comment_id' => $comment->id,
+                        'text' => $body,
+                    ]));
+                }
+            }
+
+            // Mentions (@handle)
+            if (preg_match_all('/@([a-zA-Z0-9_.]+)/', $body, $matches) && ! empty($matches[1])) {
+                $mentionedUsers = User::whereIn('handle', $matches[1])
+                    ->where('id', '!=', $user->id)
+                    ->get();
+                foreach ($mentionedUsers as $mentioned) {
+                    $mentioned->notify(new SocialNotification('mention', $user, [
+                        'post_id' => $post->id,
+                        'comment_id' => $comment->id,
+                        'text' => $body,
+                    ]));
+                }
             }
 
             return $comment->load('user');

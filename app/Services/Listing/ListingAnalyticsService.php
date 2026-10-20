@@ -2,9 +2,11 @@
 
 namespace App\Services\Listing;
 
+use App\Enums\Visit\VisitReservationStatus;
 use App\Models\Listing\Listing;
 use App\Models\Listing\ListingDailyMetric;
 use App\Models\Listing\ListingSave;
+use App\Models\Message\Message;
 use App\Models\Visit\VisitReservation;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
@@ -14,7 +16,7 @@ class ListingAnalyticsService
     /**
      * Génère la série temporelle chronologique des 30 derniers jours pour un bien immobilier.
      *
-     * @return array{listing_id: string, period_days: int, series: array<int, array{date: string, views: int, video_views: int, favorites: int, contacts: int}>, totals: array{views: int, video_views: int, favorites: int, contacts: int}}
+     * @return array{listing_id: string, period_days: int, series: array<int, array{date: string, views: int, video_views: int, favorites: int, contacts: int, messages: int, paid_visits: int}>, totals: array{views: int, video_views: int, favorites: int, contacts: int, messages: int, messages_count: int, paid_visits: int, paid_visits_count: int}, messages_count: int, paid_visits_count: int}
      */
     public function getPropertyAnalytics(Listing $listing, int $days = 30): array
     {
@@ -34,6 +36,8 @@ class ListingAnalyticsService
                 'video_views' => 0,
                 'favorites' => 0,
                 'contacts' => 0,
+                'messages' => 0,
+                'paid_visits' => 0,
             ];
         }
 
@@ -80,12 +84,53 @@ class ListingAnalyticsService
             }
         }
 
-        // 5. Calculer les totaux consolidés
+        // 5. Charger les messages liés à l'annonce (conversations rattachées à l'annonce ou métadonnées)
+        $messages = Message::where(function ($query) use ($listing) {
+            $query->whereHas('conversation', fn ($q) => $q->where('listing_id', $listing->id))
+                ->orWhere('metadata->listing_id', (string) $listing->id);
+        })
+            ->whereBetween('created_at', [$startDate, Carbon::now()->endOfDay()])
+            ->selectRaw('DATE(created_at) as msg_date, count(*) as count')
+            ->groupBy('msg_date')
+            ->pluck('count', 'msg_date');
+
+        foreach ($messages as $dateKey => $count) {
+            if (isset($seriesMap[$dateKey])) {
+                $seriesMap[$dateKey]['messages'] = max($seriesMap[$dateKey]['messages'] ?? 0, (int) $count);
+            }
+        }
+
+        // 6. Charger les visites payées réelles
+        $paidVisits = VisitReservation::where('listing_id', $listing->id)
+            ->where('fee', '>', 0)
+            ->where(function ($query) {
+                $query->whereNotNull('paid_at')
+                    ->orWhereIn('status', [
+                        VisitReservationStatus::Confirmed->value,
+                        VisitReservationStatus::Requested->value,
+                    ]);
+            })
+            ->whereBetween('created_at', [$startDate, Carbon::now()->endOfDay()])
+            ->selectRaw('DATE(created_at) as visit_date, count(*) as count')
+            ->groupBy('visit_date')
+            ->pluck('count', 'visit_date');
+
+        foreach ($paidVisits as $dateKey => $count) {
+            if (isset($seriesMap[$dateKey])) {
+                $seriesMap[$dateKey]['paid_visits'] = max($seriesMap[$dateKey]['paid_visits'] ?? 0, (int) $count);
+            }
+        }
+
+        // 7. Calculer les totaux consolidés
         $totals = [
             'views' => 0,
             'video_views' => 0,
             'favorites' => 0,
             'contacts' => 0,
+            'messages' => 0,
+            'messages_count' => 0,
+            'paid_visits' => 0,
+            'paid_visits_count' => 0,
         ];
 
         foreach ($seriesMap as $dayData) {
@@ -93,13 +138,20 @@ class ListingAnalyticsService
             $totals['video_views'] += $dayData['video_views'];
             $totals['favorites'] += $dayData['favorites'];
             $totals['contacts'] += $dayData['contacts'];
+            $totals['messages'] += $dayData['messages'];
+            $totals['paid_visits'] += $dayData['paid_visits'];
         }
+
+        $totals['messages_count'] = $totals['messages'];
+        $totals['paid_visits_count'] = $totals['paid_visits'];
 
         return [
             'listing_id' => (string) $listing->id,
             'period_days' => $days,
             'series' => array_values($seriesMap),
             'totals' => $totals,
+            'messages_count' => $totals['messages'],
+            'paid_visits_count' => $totals['paid_visits'],
         ];
     }
 }

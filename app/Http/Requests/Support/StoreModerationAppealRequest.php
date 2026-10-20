@@ -18,7 +18,8 @@ class StoreModerationAppealRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'sanction_type' => ['required', 'string', 'in:account_suspension,page_suspension,content_removal,warning'],
+            'moderation_decision_id' => ['nullable', 'integer', 'exists:moderation_decisions,id'],
+            'sanction_type' => ['required_without:moderation_decision_id', 'nullable', 'string', 'in:account_suspension,page_suspension,content_removal,warning'],
             'sanction_reference' => ['nullable', 'string', 'max:255'],
             'reason' => ['required', 'string', 'max:255'],
             'explanation' => ['required', 'string', 'min:10', 'max:3000'],

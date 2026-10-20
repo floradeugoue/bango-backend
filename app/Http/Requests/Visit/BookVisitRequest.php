@@ -20,7 +20,7 @@ class BookVisitRequest extends FormRequest
         return [
             'slot_id' => ['required', 'string', 'uuid', 'exists:visit_slots,id'],
             'message' => ['nullable', 'string', 'max:1000'],
-            'channel' => ['nullable', 'string', 'in:mobile_money,orange_money,mtn_momo'],
+            'channel' => ['nullable', 'string', 'in:mobile_money,orange_money,mtn_momo,credit_wallet,credit'],
             'operator' => ['nullable', 'string', 'max:50'],
             'phone_number' => ['nullable', 'string', 'max:30'],
             'idempotency_key' => ['nullable', 'string', 'max:100'],

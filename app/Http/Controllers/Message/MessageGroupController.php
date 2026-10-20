@@ -89,4 +89,42 @@ class MessageGroupController extends Controller
             'message' => 'Membre retiré du groupe.',
         ]);
     }
+
+    /**
+     * Mettre à jour les réglages du groupe (titre, avatar, description).
+     *
+     * PUT /api/messages/groups/{id}
+     */
+    public function update(string $id, Request $request): JsonResponse
+    {
+        /** @var Conversation $group */
+        $group = Conversation::query()->findOrFail($id);
+
+        Gate::authorize('update', $group);
+
+        $validated = $request->validate([
+            'title' => ['nullable', 'string', 'max:100'],
+            'avatar_url' => ['nullable', 'string', 'max:2048'],
+            'description' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        if (array_key_exists('title', $validated)) {
+            $group->title = $validated['title'];
+        }
+        if (array_key_exists('avatar_url', $validated)) {
+            $group->avatar_url = $validated['avatar_url'];
+        }
+        if (array_key_exists('description', $validated)) {
+            $meta = $group->metadata ?? [];
+            $meta['description'] = $validated['description'];
+            $group->metadata = $meta;
+        }
+        $group->save();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Réglages du groupe mis à jour.',
+            'group' => new ConversationResource($group->fresh(['members.user'])),
+        ]);
+    }
 }

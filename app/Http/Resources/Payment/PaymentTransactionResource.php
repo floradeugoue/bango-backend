@@ -46,6 +46,7 @@ class PaymentTransactionResource extends JsonResource
             'reference' => $this->reference,
             'kind' => $kind,
             'service_type' => $this->service_type->value,
+            'channel' => $this->channel->value,
             'provider' => $this->metadata['operator'] ?? $this->metadata['provider'] ?? $this->provider->value,
             'label' => $label,
             'amount' => (float) $this->amount,

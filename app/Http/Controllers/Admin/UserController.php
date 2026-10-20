@@ -41,6 +41,18 @@ class UserController extends Controller
         if ($request->has('display_name')) {
             $query->where('display_name', $likeOperator, '%'.$request->display_name.'%');
         }
+
+        // Point 20 : Filtrage selon les pays autorisés dans la session de l'opérateur
+        $adminSession = $request->attributes->get('admin_session');
+        if ($adminSession && ! empty($adminSession->allowed_countries)) {
+            $allowedCountries = (array) $adminSession->allowed_countries;
+            $query->where(function ($uq) use ($allowedCountries) {
+                $uq->whereIn('country_code', $allowedCountries)
+                    ->orWhereHas('country', function ($cq) use ($allowedCountries) {
+                        $cq->whereIn('code', $allowedCountries)->orWhereIn('iso2', $allowedCountries);
+                    });
+            });
+        }
         if ($request->has('email')) {
             $query->where('email', $likeOperator, '%'.$request->email.'%');
         }
@@ -129,7 +141,25 @@ class UserController extends Controller
             'account_type' => 'sometimes|string',
         ]);
 
+        $oldAttributes = $user->only(array_keys($validated));
         $user->update($validated);
+
+        $operator = $request->user();
+        if ($operator) {
+            AdminAuditLog::logChainedEvent(
+                event: 'user.updated',
+                operator: $operator,
+                targetType: 'User',
+                targetId: (string) $user->id,
+                targetLabel: "Modification utilisateur #{$user->id} ({$user->name})",
+                context: [
+                    'old' => $oldAttributes,
+                    'new' => $validated,
+                ],
+                ip: $request->ip(),
+                userAgent: $request->userAgent()
+            );
+        }
 
         return response()->json(['success' => true, 'user' => $user]);
     }
@@ -141,13 +171,25 @@ class UserController extends Controller
      *
      * @urlParam user integer required L'ID de l'utilisateur. Example: 1
      */
-    public function suspend(User $user)
+    public function suspend(Request $request, User $user)
     {
         $user->update(['status' => 'suspended']);
         $user->tokens()->delete(); // Kick the user out
         AdminSession::where('user_id', $user->id)->whereNull('revoked_at')->update(['revoked_at' => now()]);
 
-        AdminAuditLog::logEvent('user.status.suspended', $user, request()->ip(), request()->userAgent());
+        $operator = $request->user();
+        if ($operator) {
+            AdminAuditLog::logChainedEvent(
+                event: 'user.status_suspended',
+                operator: $operator,
+                targetType: 'User',
+                targetId: (string) $user->id,
+                targetLabel: "Suspension utilisateur #{$user->id} ({$user->name})",
+                context: ['target_user_id' => $user->id, 'email' => $user->email],
+                ip: $request->ip(),
+                userAgent: $request->userAgent()
+            );
+        }
 
         return response()->json(['success' => true, 'status' => 'suspended']);
     }
@@ -157,11 +199,23 @@ class UserController extends Controller
      *
      * @urlParam user integer required L'ID de l'utilisateur. Example: 1
      */
-    public function unsuspend(User $user)
+    public function unsuspend(Request $request, User $user)
     {
         $user->update(['status' => 'active']);
 
-        AdminAuditLog::logEvent('user.status.unsuspended', $user, request()->ip(), request()->userAgent());
+        $operator = $request->user();
+        if ($operator) {
+            AdminAuditLog::logChainedEvent(
+                event: 'user.status_unsuspended',
+                operator: $operator,
+                targetType: 'User',
+                targetId: (string) $user->id,
+                targetLabel: "Levée suspension utilisateur #{$user->id} ({$user->name})",
+                context: ['target_user_id' => $user->id, 'email' => $user->email],
+                ip: $request->ip(),
+                userAgent: $request->userAgent()
+            );
+        }
 
         return response()->json(['success' => true, 'status' => 'active']);
     }
@@ -173,13 +227,25 @@ class UserController extends Controller
      *
      * @urlParam user integer required L'ID de l'utilisateur. Example: 1
      */
-    public function block(User $user)
+    public function block(Request $request, User $user)
     {
         $user->update(['status' => 'blocked']);
         $user->tokens()->delete(); // Kick the user out
         AdminSession::where('user_id', $user->id)->whereNull('revoked_at')->update(['revoked_at' => now()]);
 
-        AdminAuditLog::logEvent('user.status.blocked', $user, request()->ip(), request()->userAgent());
+        $operator = $request->user();
+        if ($operator) {
+            AdminAuditLog::logChainedEvent(
+                event: 'user.status_blocked',
+                operator: $operator,
+                targetType: 'User',
+                targetId: (string) $user->id,
+                targetLabel: "Blocage utilisateur #{$user->id} ({$user->name})",
+                context: ['target_user_id' => $user->id, 'email' => $user->email],
+                ip: $request->ip(),
+                userAgent: $request->userAgent()
+            );
+        }
 
         return response()->json(['success' => true, 'status' => 'blocked']);
     }
@@ -189,11 +255,23 @@ class UserController extends Controller
      *
      * @urlParam user integer required L'ID de l'utilisateur. Example: 1
      */
-    public function unblock(User $user)
+    public function unblock(Request $request, User $user)
     {
         $user->update(['status' => 'active']);
 
-        AdminAuditLog::logEvent('user.status.unblocked', $user, request()->ip(), request()->userAgent());
+        $operator = $request->user();
+        if ($operator) {
+            AdminAuditLog::logChainedEvent(
+                event: 'user.status_unblocked',
+                operator: $operator,
+                targetType: 'User',
+                targetId: (string) $user->id,
+                targetLabel: "Déblocage utilisateur #{$user->id} ({$user->name})",
+                context: ['target_user_id' => $user->id, 'email' => $user->email],
+                ip: $request->ip(),
+                userAgent: $request->userAgent()
+            );
+        }
 
         return response()->json(['success' => true, 'status' => 'active']);
     }
@@ -205,13 +283,25 @@ class UserController extends Controller
      *
      * @urlParam user integer required L'ID de l'utilisateur. Example: 1
      */
-    public function destroy(User $user)
+    public function destroy(Request $request, User $user)
     {
         $user->delete(); // Soft delete
         $user->tokens()->delete();
         AdminSession::where('user_id', $user->id)->whereNull('revoked_at')->update(['revoked_at' => now()]);
 
-        AdminAuditLog::logEvent('user.status.deleted', $user, request()->ip(), request()->userAgent());
+        $operator = $request->user();
+        if ($operator) {
+            AdminAuditLog::logChainedEvent(
+                event: 'user.status_deleted',
+                operator: $operator,
+                targetType: 'User',
+                targetId: (string) $user->id,
+                targetLabel: "Suppression utilisateur #{$user->id} ({$user->name})",
+                context: ['target_user_id' => $user->id, 'email' => $user->email],
+                ip: $request->ip(),
+                userAgent: $request->userAgent()
+            );
+        }
 
         return response()->json(['success' => true]);
     }
