@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\RateLimiter;
 
 class TwoFactorTotpController extends Controller
 {
@@ -50,6 +51,18 @@ class TwoFactorTotpController extends Controller
         /** @var User $user */
         $user = $request->user();
 
+        $rateKey = '2fa_totp_verify:'.$user->id;
+        if (RateLimiter::tooManyAttempts($rateKey, 5)) {
+            $seconds = RateLimiter::availableIn($rateKey);
+
+            return response()->json([
+                'kind' => 'locked',
+                'message' => 'Trop de tentatives infructueuses. Veuillez réessayer dans '.ceil($seconds / 60).' minutes.',
+                'minutes' => ceil($seconds / 60),
+                'until' => now()->addSeconds($seconds)->toIso8601String(),
+            ], 429);
+        }
+
         $request->validate([
             'code' => ['required', 'string'],
         ]);
@@ -65,11 +78,27 @@ class TwoFactorTotpController extends Controller
         }
 
         if (! $this->totpService->verifyCode($pendingSecret, $code, $user->id)) {
+            RateLimiter::hit($rateKey, 900);
+            $attempts = RateLimiter::attempts($rateKey);
+
+            if ($attempts >= 5) {
+                Cache::forget("2fa_pending_secret:{$user->id}");
+
+                return response()->json([
+                    'kind' => 'locked',
+                    'message' => 'Trop de tentatives infructueuses. La configuration a été annulée.',
+                    'minutes' => 15,
+                ], 429);
+            }
+
             return response()->json([
                 'kind' => 'invalid-code',
                 'message' => 'Code TOTP invalide.',
+                'attemptsLeft' => max(0, 5 - $attempts),
             ], 422);
         }
+
+        RateLimiter::clear($rateKey);
 
         // Activate TOTP on user with encrypted secret
         $user->two_factor_method = 'app';

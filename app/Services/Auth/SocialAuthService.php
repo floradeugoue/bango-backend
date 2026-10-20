@@ -313,12 +313,18 @@ class SocialAuthService
      */
     protected function initiateTwoFactorChallenge(User $user, string $deviceName, bool $persistent): array
     {
-        $channel = $user->two_factor_method === 'email' ? OtpChannel::Email : OtpChannel::Sms;
-        $destination = $user->two_factor_method === 'email' ? $user->email : $user->phone;
+        $isApp = in_array($user->two_factor_method, ['app', 'totp'], true);
+        $isEmail = $user->two_factor_method === 'email';
 
-        if ($user->two_factor_method === 'app' || empty($destination)) {
-            // TOTP method
+        if ($isApp) {
+            $channel = 'app';
             $destination = $user->email ?: 'authenticator-app';
+        } elseif ($isEmail) {
+            $channel = 'email';
+            $destination = $user->email;
+        } else {
+            $channel = 'sms';
+            $destination = $user->phone ?: $user->email;
         }
 
         $challengeId = Str::random(40);
@@ -327,7 +333,7 @@ class SocialAuthService
             'persistent' => $persistent,
             'device_name' => $deviceName,
             'destination' => $destination,
-            'channel' => $user->two_factor_method,
+            'channel' => $channel,
         ], now()->addMinutes(10));
 
         if ($user->email) {
@@ -337,15 +343,25 @@ class SocialAuthService
             Cache::put('2fa.challenge.id.'.$user->phone, $challengeId, now()->addMinutes(10));
         }
 
-        if (in_array($user->two_factor_method, ['email', 'sms'], true) && $destination) {
-            $this->otpService->sendOtp($destination, $channel, 'second_factor');
+        if (in_array($channel, ['email', 'sms'], true) && $destination) {
+            $otpChannel = $channel === 'email' ? OtpChannel::Email : OtpChannel::Sms;
+            $otpResult = $this->otpService->sendOtp($destination, $otpChannel, 'second_factor');
+
+            if (is_array($otpResult)) {
+                Cache::forget('2fa.challenge.'.$challengeId);
+
+                return [
+                    'status' => $otpResult['status'],
+                    'data' => $otpResult['data'],
+                ];
+            }
         }
 
         return [
             'status' => 200,
             'data' => [
                 'kind' => 'second-factor',
-                'destination' => $this->maskDestination($destination, $user->two_factor_method),
+                'destination' => $this->maskDestination($destination, $channel),
                 'challenge' => $challengeId,
             ],
         ];
