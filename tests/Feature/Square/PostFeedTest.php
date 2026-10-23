@@ -87,3 +87,28 @@ it('filtre les publications par quartier ou ville dans l onglet neighbourhood', 
     expect($ids)->toContain((string) $pNeighbour->id)
         ->not->toContain((string) $pOtherCity->id);
 });
+
+it('limite l onglet neighbourhood a mon quartier et retombe sur le quartier de l auteur sans lieu', function () {
+    $user = User::factory()->create(['city' => 'Douala', 'neighbourhood' => 'Bonapriso']);
+    Passport::actingAs($user);
+
+    $neighbourAuthor = User::factory()->create(['city' => 'Douala', 'neighbourhood' => 'Bonapriso']);
+    $otherAuthor = User::factory()->create(['city' => 'Douala', 'neighbourhood' => 'Akwa']);
+
+    $sameNeighbourhood = Post::create(['user_id' => $otherAuthor->id, 'body' => 'a', 'place_city' => 'Douala', 'place_neighbourhood' => 'Bonapriso', 'audience' => 'public']);
+    $sameCityOnly = Post::create(['user_id' => $neighbourAuthor->id, 'body' => 'b', 'place_city' => 'Douala', 'place_neighbourhood' => 'Akwa', 'audience' => 'public']);
+    $noPlaceNeighbour = Post::create(['user_id' => $neighbourAuthor->id, 'body' => 'c', 'audience' => 'public']);
+    $noPlaceOther = Post::create(['user_id' => $otherAuthor->id, 'body' => 'd', 'audience' => 'public']);
+
+    $ids = collect(getJson('/api/square-cr1/square/feed?tab=neighbourhood')->assertOk()->json('data'))->pluck('id')->all();
+
+    expect($ids)->toContain((string) $sameNeighbourhood->id)
+        ->toContain((string) $noPlaceNeighbour->id)
+        ->not->toContain((string) $sameCityOnly->id)
+        ->not->toContain((string) $noPlaceOther->id);
+
+    $cityIds = collect(getJson('/api/square-cr1/square/feed?tab=city')->assertOk()->json('data'))->pluck('id')->all();
+
+    expect($cityIds)->toContain((string) $sameCityOnly->id)
+        ->toContain((string) $noPlaceOther->id);
+});

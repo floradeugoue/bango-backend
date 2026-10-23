@@ -2,6 +2,7 @@
 
 namespace App\Services\Visit;
 
+use App\Enums\Boost\CreditTransactionType;
 use App\Enums\Payment\PaymentChannel;
 use App\Enums\Payment\PaymentEventSource;
 use App\Enums\Payment\PaymentProvider;
@@ -36,8 +37,11 @@ class VisitReservationService
         protected ListingService $listingService,
         protected VisitSlotService $slotService,
         protected PaymentEngineService $paymentEngineService,
-        protected MonetbilGateway $monetbilGateway
-    ) {}
+        protected MonetbilGateway $monetbilGateway,
+        protected ?CreditWalletService $creditWalletService = null
+    ) {
+        $this->creditWalletService ??= app(CreditWalletService::class);
+    }
 
     /**
      * Calcule le devis des frais de visite pour une annonce et un créneau.
@@ -572,7 +576,8 @@ class VisitReservationService
                 $locked->save();
 
                 // Déclencher le remboursement intégral car le refus émane du bailleur
-                if ($locked->fee_amount > 0 && $locked->paymentTransaction) {
+                $isCredit = str_starts_with((string) $locked->payment_reference, 'VISIT-CREDIT-');
+                if ($locked->fee_amount > 0 && ($locked->paymentTransaction || $isCredit)) {
                     $this->processRefund($locked, 'Visite déclinée par le gestionnaire', VisitReservationStatus::Declined);
                 }
 
@@ -632,7 +637,8 @@ class VisitReservationService
             $locked->cancelled_at = now();
             $locked->save();
 
-            if ($locked->fee_amount > 0 && $locked->paymentTransaction) {
+            $isCredit = str_starts_with((string) $locked->payment_reference, 'VISIT-CREDIT-');
+            if ($locked->fee_amount > 0 && ($locked->paymentTransaction || $isCredit)) {
                 $this->processRefund($locked, 'Proposition de créneau refusée par le prospect');
             }
 
@@ -697,7 +703,8 @@ class VisitReservationService
             $locked->lock_expires_at = null;
             $locked->save();
 
-            if ($isEligibleForRefund && $locked->paymentTransaction) {
+            $isCredit = str_starts_with((string) $locked->payment_reference, 'VISIT-CREDIT-');
+            if ($isEligibleForRefund && ($locked->paymentTransaction || $isCredit)) {
                 $this->processRefund($locked, $locked->cancellation_reason);
             }
 
@@ -712,18 +719,41 @@ class VisitReservationService
         string $reason,
         ?VisitReservationStatus $targetStatus = VisitReservationStatus::Refunded
     ): void {
+        $isCredit = str_starts_with((string) $reservation->payment_reference, 'VISIT-CREDIT-');
         $transaction = $reservation->paymentTransaction;
-        if (! $transaction) {
+
+        if (! $transaction && ! $isCredit) {
             return;
         }
 
-        if ($transaction->status !== PaymentStatus::Refunded) {
-            $this->paymentEngineService->refundTransaction(
-                transaction: $transaction,
-                reason: $reason,
-                amount: (float) $reservation->fee_amount,
-                externalRefundReference: 'REFUND-VISIT-'.$reservation->id
-            );
+        if ($isCredit) {
+            $prospect = $reservation->prospect ?? User::find($reservation->prospect_id);
+            if ($prospect && $reservation->fee_amount > 0) {
+                $this->creditWalletService->credit(
+                    account: $prospect,
+                    amount: (float) $reservation->fee_amount,
+                    type: CreditTransactionType::Deposit,
+                    description: sprintf('Remboursement visite annonce #%s', $reservation->listing_id),
+                    idempotencyKey: 'REFUND-VISIT-'.$reservation->id,
+                    reference: $reservation,
+                    metadata: [
+                        'reservation_id' => $reservation->id,
+                        'listing_id' => $reservation->listing_id,
+                        'reason' => $reason,
+                    ],
+                    source: 'visit_refund',
+                    refCode: 'REFUND-VISIT-'.$reservation->id,
+                );
+            }
+        } elseif ($transaction) {
+            if ($transaction->status !== PaymentStatus::Refunded) {
+                $this->paymentEngineService->refundTransaction(
+                    transaction: $transaction,
+                    reason: $reason,
+                    amount: (float) $reservation->fee_amount,
+                    externalRefundReference: 'REFUND-VISIT-'.$reservation->id
+                );
+            }
         }
 
         if ($targetStatus !== null) {
@@ -757,12 +787,13 @@ class VisitReservationService
     }
 
     /**
-     * Traite les demandes de visite sans réponse après 18h (BL-07 / EDGE) :
+     * Traite les demandes de visite sans réponse après le délai configuré (BL-07 / EDGE) :
      * Décline automatiquement avec le motif no-answer et recrédite le prospect.
      */
     public function settleOverdueUnanswered(): int
     {
-        $deadline = now()->subHours(18);
+        $answerHours = (int) config('visits.answer_hours', 24);
+        $deadline = now()->subHours($answerHours);
 
         $overdue = VisitReservation::where('status', VisitReservationStatus::Requested->value)
             ->whereNotNull('paid_at')
@@ -775,11 +806,19 @@ class VisitReservationService
             $reservation->decline_reason = VisitDeclineReason::NoAnswer->value;
             $reservation->save();
 
-            if ($reservation->fee_amount > 0 && $reservation->paymentTransaction) {
-                $this->processRefund($reservation, 'Expiration du délai de réponse bailleur (18h)', VisitReservationStatus::Declined);
+            $isCredit = str_starts_with((string) $reservation->payment_reference, 'VISIT-CREDIT-');
+            if ($reservation->fee_amount > 0 && ($reservation->paymentTransaction || $isCredit)) {
+                $this->processRefund(
+                    $reservation,
+                    sprintf('Expiration du délai de réponse bailleur (%dh)', $answerHours),
+                    VisitReservationStatus::Declined
+                );
             }
 
-            $reservation->prospect->notify(new VisitDeclinedNotification($reservation, 'Délai de réponse de 18h dépassé'));
+            $reservation->prospect->notify(new VisitDeclinedNotification(
+                $reservation,
+                sprintf('Délai de réponse de %dh dépassé', $answerHours)
+            ));
             $count++;
         }
 

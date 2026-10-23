@@ -40,13 +40,13 @@ class InterestSeeder extends Seeder
             ],
             [
                 'id' => 'food',
-                'name_fr' => 'Gastronomie',
-                'name_en' => 'Food & Dining',
+                'name_fr' => 'Cuisine',
+                'name_en' => 'Food',
             ],
             [
                 'id' => 'tech',
-                'name_fr' => 'Tech & Innovation',
-                'name_en' => 'Technology',
+                'name_fr' => 'Tech',
+                'name_en' => 'Tech',
             ],
             [
                 'id' => 'travel',

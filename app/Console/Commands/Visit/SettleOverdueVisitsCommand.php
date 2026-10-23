@@ -19,14 +19,15 @@ class SettleOverdueVisitsCommand extends Command
      *
      * @var string
      */
-    protected $description = 'Décline automatiquement les demandes de visite sans réponse après 18h et recrédite les prospects';
+    protected $description = 'Décline automatiquement les demandes de visite sans réponse après expiration du délai et recrédite les prospects';
 
     /**
      * Execute the console command.
      */
     public function handle(VisitReservationService $reservationService): int
     {
-        $this->info('Vérification des demandes de visite sans réponse depuis plus de 18h...');
+        $hours = (int) config('visits.answer_hours', 24);
+        $this->info("Vérification des demandes de visite sans réponse depuis plus de {$hours}h...");
 
         $count = $reservationService->settleOverdueUnanswered();
 

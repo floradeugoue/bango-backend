@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Admin\AdminAuditLog;
 use App\Models\Admin\AdminSession;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -173,7 +174,34 @@ class UserController extends Controller
      */
     public function suspend(Request $request, User $user)
     {
-        $user->update(['status' => 'suspended']);
+        $startsAt = Carbon::now();
+        $reason = $request->input('reason');
+        $until = $request->input('until');
+        $duration = $request->input('duration');
+        $days = $request->input('days') ?? $request->input('duration_days');
+
+        $endsAt = null;
+        if ($until) {
+            $endsAt = Carbon::parse($until);
+        } elseif ($duration) {
+            $daysCount = match ($duration) {
+                '7_days', '7d', '7' => 7,
+                '30_days', '30d', '30' => 30,
+                default => is_numeric($duration) ? (int) $duration : null,
+            };
+            if ($daysCount) {
+                $endsAt = $startsAt->copy()->addDays($daysCount);
+            }
+        } elseif ($days && is_numeric($days)) {
+            $endsAt = $startsAt->copy()->addDays((int) $days);
+        }
+
+        $user->update([
+            'status' => 'suspended',
+            'suspension_reason' => $reason ?? $user->suspension_reason,
+            'suspended_from' => $startsAt,
+            'suspended_until' => $endsAt,
+        ]);
         $user->tokens()->delete(); // Kick the user out
         AdminSession::where('user_id', $user->id)->whereNull('revoked_at')->update(['revoked_at' => now()]);
 
@@ -185,13 +213,23 @@ class UserController extends Controller
                 targetType: 'User',
                 targetId: (string) $user->id,
                 targetLabel: "Suspension utilisateur #{$user->id} ({$user->name})",
-                context: ['target_user_id' => $user->id, 'email' => $user->email],
+                context: [
+                    'target_user_id' => $user->id,
+                    'email' => $user->email,
+                    'reason' => $reason,
+                    'until' => $endsAt?->toIso8601String(),
+                ],
                 ip: $request->ip(),
                 userAgent: $request->userAgent()
             );
         }
 
-        return response()->json(['success' => true, 'status' => 'suspended']);
+        return response()->json([
+            'success' => true,
+            'status' => 'suspended',
+            'reason' => $user->suspension_reason,
+            'until' => $endsAt?->toIso8601String(),
+        ]);
     }
 
     /**
@@ -201,7 +239,12 @@ class UserController extends Controller
      */
     public function unsuspend(Request $request, User $user)
     {
-        $user->update(['status' => 'active']);
+        $user->update([
+            'status' => 'active',
+            'suspension_reason' => null,
+            'suspended_from' => null,
+            'suspended_until' => null,
+        ]);
 
         $operator = $request->user();
         if ($operator) {

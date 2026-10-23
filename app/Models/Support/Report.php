@@ -80,6 +80,11 @@ class Report extends Model
         return $this->belongsTo(User::class, 'assigned_to');
     }
 
+    public function operator(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'assigned_to');
+    }
+
     public function escalatedOperator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'escalated_to');

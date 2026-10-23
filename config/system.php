@@ -21,5 +21,10 @@ return [
             'latest_version' => env('APP_LATEST_VERSION_IOS', '1.2.0'),
             'store_url' => env('APP_STORE_URL_IOS', 'https://apps.apple.com/app/bango/id000000000'),
         ],
+        'web' => [
+            'min_version' => env('APP_MIN_VERSION_WEB', '1.0.0'),
+            'latest_version' => env('APP_LATEST_VERSION_WEB', '1.0.0'),
+            'store_url' => env('APP_STORE_URL_WEB', 'https://bango.app'),
+        ],
     ],
 ];

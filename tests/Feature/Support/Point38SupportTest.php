@@ -82,7 +82,16 @@ test('Point 38 : Consultation des sanctions et avertissements reçus', function 
     $response->assertOk()
         ->assertJsonCount(1, 'data')
         ->assertJsonPath('data.0.type', 'warning')
-        ->assertJsonPath('data.0.reason', 'Non respect des règles de bienséance dans les commentaires.');
+        ->assertJsonPath('data.0.reason', 'Non respect des règles de bienséance dans les commentaires.')
+        ->assertJsonMissingPath('data.0.operator')
+        ->assertJsonMissingPath('data.0.operator_id')
+        ->assertJsonMissingPath('data.0.lifted_by_id')
+        ->assertJsonMissingPath('data.0.lifted_by');
+
+    $sanctionData = $response->json('data.0');
+    expect(array_keys($sanctionData))->toEqualCanonicalizing([
+        'id', 'type', 'level', 'starts_at', 'ends_at', 'reason', 'is_active', 'lifted_at', 'created_at',
+    ]);
 });
 
 test('Point 38 : Signalement formel d\'atteinte aux droits d\'auteur', function () {

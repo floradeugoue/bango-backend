@@ -85,7 +85,10 @@ class ListingResource extends JsonResource
             'comments_count' => (int) ($this->comments_count ?? 0),
             'saves' => (int) $this->saves_count,
             'is_saved' => $viewer ? $this->isSavedBy($viewer) : false,
+            'likes_count' => (int) ($this->likes_count ?? 0),
+            'is_liked' => $viewer ? $this->isLikedBy($viewer) : false,
             'visit_fee' => (float) $this->visit_fee,
+            'uses_agenda' => $this->usesAgenda(),
             'sponsored' => (bool) $this->sponsored,
             'media_count' => $this->photos->count() + $this->videos->count(),
         ];

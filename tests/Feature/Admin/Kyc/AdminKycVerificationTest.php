@@ -442,3 +442,71 @@ it('lists badges with expiring and active filters', function () {
             ],
         ]);
 });
+
+it('handles soft-deleted users in KYC queue without 500 and does not hardcode city or badge', function () {
+    [$solange, $sessionId] = createKycSession('verification');
+
+    // User 1: Active user with no city and no badge
+    $user1 = User::factory()->create([
+        'name' => 'Utilisateur Sans Ville',
+        'city' => null,
+        'badge' => 'none',
+    ]);
+
+    $sub1 = KycSubmission::create([
+        'user_id' => $user1->id,
+        'status' => KycStatus::Pending->value,
+        'profile_category' => 'other',
+        'full_name' => 'Utilisateur Sans Ville',
+        'id_type' => 'cni',
+        'id_number' => 'CNI-1111',
+    ]);
+
+    // User 2: User who submitted KYC and was then soft-deleted
+    $user2 = User::factory()->create([
+        'name' => 'Utilisateur Supprime',
+        'city' => 'Douala',
+    ]);
+
+    $sub2 = KycSubmission::create([
+        'user_id' => $user2->id,
+        'status' => KycStatus::Pending->value,
+        'profile_category' => 'landlord',
+        'full_name' => 'Utilisateur Supprime',
+        'id_type' => 'cni',
+        'id_number' => 'CNI-2222',
+    ]);
+
+    // Soft-delete user2
+    $user2->delete();
+
+    // 1. Call GET /api/admin/kyc/queue (alias route)
+    $responseQueue = $this->withUnencryptedCookie('bango_admin_session', $sessionId)
+        ->getJson('/api/admin/kyc/queue');
+
+    $responseQueue->assertStatus(200);
+    $itemsQueue = collect($responseQueue->json('items'));
+
+    // Soft-deleted user's submission must not appear in the active queue
+    expect($itemsQueue->pluck('id'))->not->toContain((string) $sub2->id);
+
+    // Active user's submission appears
+    expect($itemsQueue->pluck('id'))->toContain((string) $sub1->id);
+
+    // City must be null, NOT defaulted to 'Dakar'
+    $item1 = $itemsQueue->firstWhere('id', (string) $sub1->id);
+    expect($item1['city'])->toBeNull();
+    expect($item1['account']['city'])->toBeNull();
+
+    // Badge must be null, NOT defaulted to 'bailleur'
+    expect($item1['badge'])->toBeNull();
+
+    // 2. Call GET /api/admin/kyc/requests
+    $responseRequests = $this->withUnencryptedCookie('bango_admin_session', $sessionId)
+        ->getJson('/api/admin/kyc/requests');
+
+    $responseRequests->assertStatus(200);
+    $itemsRequests = collect($responseRequests->json('items'));
+    expect($itemsRequests->pluck('id'))->not->toContain((string) $sub2->id);
+    expect($itemsRequests->pluck('id'))->toContain((string) $sub1->id);
+});

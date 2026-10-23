@@ -35,13 +35,33 @@ class NeighbourhoodController extends Controller
         $validated = $request->validate([
             'city_id' => 'required|exists:cities,id',
             'name' => 'required|string|max:100',
-            'slug' => 'nullable|string|max:100|unique:neighbourhoods,slug',
+            'slug' => 'nullable|string|max:255',
+            'lat' => 'nullable|numeric|between:-90,90',
+            'lng' => 'nullable|numeric|between:-180,180',
             'is_active' => 'sometimes|boolean',
         ]);
 
-        if (empty($validated['slug'])) {
-            $validated['slug'] = Str::slug($validated['name']);
+        // Idempotence : si le quartier existe déjà pour cette ville
+        $existing = Neighbourhood::where('city_id', $validated['city_id'])
+            ->whereRaw('LOWER(name) = ?', [mb_strtolower($validated['name'])])
+            ->first();
+
+        if ($existing) {
+            if ($request->filled('lat') || $request->filled('lng')) {
+                $existing->update($request->only(['lat', 'lng']));
+            }
+
+            return response()->json($existing->load('city'), 200);
         }
+
+        $slug = ! empty($validated['slug']) ? $validated['slug'] : Str::slug($validated['name']);
+        $baseSlug = $slug;
+        $counter = 1;
+        while (Neighbourhood::where('slug', $slug)->exists()) {
+            $slug = "{$baseSlug}-{$counter}";
+            $counter++;
+        }
+        $validated['slug'] = $slug;
 
         $neighbourhood = Neighbourhood::create($validated);
 
@@ -65,7 +85,9 @@ class NeighbourhoodController extends Controller
         $validated = $request->validate([
             'city_id' => 'sometimes|exists:cities,id',
             'name' => 'sometimes|string|max:100',
-            'slug' => 'sometimes|string|max:100|unique:neighbourhoods,slug,'.$neighbourhood->id,
+            'slug' => 'sometimes|string|max:255|unique:neighbourhoods,slug,'.$neighbourhood->id,
+            'lat' => 'nullable|numeric|between:-90,90',
+            'lng' => 'nullable|numeric|between:-180,180',
             'is_active' => 'sometimes|boolean',
         ]);
 

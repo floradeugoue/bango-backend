@@ -221,7 +221,13 @@ class AdminSystemSettingsController extends Controller
     public function addArea(AdminAreaCreateRequest $request, string $city): JsonResponse
     {
         try {
-            $area = $this->settingsService->addArea($city, $request->input('name'), $request->user());
+            $area = $this->settingsService->addArea(
+                $city,
+                $request->input('name'),
+                $request->user(),
+                $request->filled('lat') ? (float) $request->input('lat') : null,
+                $request->filled('lng') ? (float) $request->input('lng') : null,
+            );
         } catch (DomainException $e) {
             return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
         }

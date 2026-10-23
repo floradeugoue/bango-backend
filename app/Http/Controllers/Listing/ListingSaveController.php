@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Listing;
 
+use App\Enums\Listing\ListingStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\Listing\ListingResource;
 use App\Models\Listing\Listing;
@@ -25,9 +26,13 @@ class ListingSaveController extends Controller
         $user = $request->user();
         $perPage = max(1, min(50, $request->integer('per_page', 15)));
 
-        // Ne retourner que les annonces encore publiquement accessibles ou avec statut légitime
+        // Inclure les biens avec leur statut (published, reserved, taken) ; n'exclure que les supprimés/invalides
         $paginator = $user->savedListings()
-            ->publiclyVisible()
+            ->whereIn('listings.status', [
+                ListingStatus::Published->value,
+                ListingStatus::Reserved->value,
+                ListingStatus::Taken->value,
+            ])
             ->with(['owner', 'agent', 'photos', 'videos', 'saves'])
             ->orderByDesc('listing_saves.created_at')
             ->paginate($perPage);

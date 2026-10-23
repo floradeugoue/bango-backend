@@ -297,7 +297,7 @@ class AdminFinanceService
         $monetbilTx = $statsByProvider->where('provider', PaymentProvider::Monetbil);
         $monetbilMetrics = $calcMetrics($monetbilTx);
 
-        $momoAttempts = $attemptsByChannel->filter(fn ($a) => stripos((string) $a->channel, 'mobile') !== false);
+        $momoAttempts = $attemptsByChannel->filter(fn ($a) => stripos($a->channel?->value ?? (string) $a->channel, 'mobile') !== false);
 
         return [
             'window' => 'Derniers 7 jours',
@@ -353,7 +353,7 @@ class AdminFinanceService
     public function getSubscriptions(array $filters, int $perPage = 20): LengthAwarePaginator
     {
         $query = Subscription::with([
-            'user:id,name,email,phone,handle,badge_type',
+            'user:id,name,email,phone,handle,badge',
             'product:id,code,name',
             'price:id,cadence,amount,currency',
         ])

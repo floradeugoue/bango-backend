@@ -810,9 +810,12 @@ class StoryService
         }
 
         return StoryView::where('story_id', $story->id)
-            ->with(['viewer' => function ($q) {
-                $q->select(['id', 'name', 'handle', 'display_name', 'avatar_url', 'is_verified']);
-            }])
+            ->with([
+                'viewer' => function ($q) {
+                    $q->select(['id', 'name', 'handle', 'display_name', 'avatar_url', 'is_verified']);
+                },
+                'story.slides',
+            ])
             ->orderByDesc('viewed_at')
             ->paginate($perPage);
     }

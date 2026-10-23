@@ -3,6 +3,7 @@
 namespace App\Notifications\Delegation;
 
 use App\Models\Delegation\Delegation;
+use App\Models\Listing\Listing;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
@@ -17,6 +18,11 @@ class DelegationRevokedNotification extends Notification implements ShouldQueue
         public ?string $reason = null
     ) {}
 
+    private function listingTitle(): ?string
+    {
+        return Listing::withTrashed()->find($this->delegation->listing_id)?->title;
+    }
+
     /**
      * @return array<int, string>
      */
@@ -27,8 +33,8 @@ class DelegationRevokedNotification extends Notification implements ShouldQueue
 
     public function toMail(object $notifiable): MailMessage
     {
-        $landlordName = $this->delegation->bailleur->name ?? 'Le bailleur';
-        $listingTitle = $this->delegation->listing->title ?? 'un bien';
+        $landlordName = $this->delegation->bailleur?->display_name ?: ($this->delegation->bailleur?->name ?? 'Le bailleur');
+        $listingTitle = $this->listingTitle() ?? 'un bien';
 
         $mail = (new MailMessage)
             ->subject("Mandat révoqué : {$listingTitle}")
@@ -52,8 +58,8 @@ class DelegationRevokedNotification extends Notification implements ShouldQueue
             'delegation_id' => $this->delegation->id,
             'listing_id' => $this->delegation->listing_id,
             'bailleur_id' => $this->delegation->bailleur_id,
-            'bailleur_name' => $this->delegation->bailleur->name ?? 'Bailleur',
-            'listing_title' => $this->delegation->listing->title ?? 'Bien',
+            'bailleur_name' => $this->delegation->bailleur?->display_name ?: ($this->delegation->bailleur?->name ?? 'Bailleur'),
+            'listing_title' => $this->listingTitle() ?? 'Bien',
             'reason' => $this->reason,
             'message' => 'Le mandat a été révoqué',
         ];

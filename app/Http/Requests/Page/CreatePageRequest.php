@@ -4,6 +4,7 @@ namespace App\Http\Requests\Page;
 
 use App\Enums\Page\PageSector;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 class CreatePageRequest extends FormRequest
@@ -11,6 +12,28 @@ class CreatePageRequest extends FormRequest
     public function authorize(): bool
     {
         return $this->user() !== null;
+    }
+
+    /**
+     * Normalise l'identifiant en forme slug avant la règle d'unicité.
+     */
+    protected function prepareForValidation(): void
+    {
+        $handle = $this->input('handle');
+
+        if (is_string($handle) && ($slug = Str::slug($handle)) !== '') {
+            $this->merge(['handle' => $slug]);
+        }
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'handle.unique' => 'handle taken',
+        ];
     }
 
     /**

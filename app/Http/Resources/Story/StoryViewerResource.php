@@ -20,12 +20,15 @@ class StoryViewerResource extends JsonResource
     public function toArray(Request $request): array
     {
         $viewer = $this->viewer;
+        $story = $this->story;
         $storyId = $this->story_id;
         $viewerId = $viewer->id;
 
-        $pollVote = StoryPollVote::where('story_id', $storyId)
-            ->where('user_id', $viewerId)
-            ->first();
+        $pollVote = $story
+            ? StoryPollVote::whereIn('story_slide_id', $story->slides()->pluck('id'))
+                ->where('user_id', $viewerId)
+                ->first()
+            : null;
 
         $reply = StoryReply::where('story_id', $storyId)
             ->where('user_id', $viewerId)
@@ -45,7 +48,7 @@ class StoryViewerResource extends JsonResource
             'viewed_at' => $this->viewed_at?->toIso8601String() ?? $this->created_at?->toIso8601String(),
             'has_voted' => $pollVote !== null,
             'vote' => $pollVote ? [
-                'slide_id' => (string) $pollVote->slide_id,
+                'slide_id' => (string) ($pollVote->story_slide_id ?? $pollVote->slide_id),
                 'sticker_id' => (string) $pollVote->sticker_id,
                 'option_index' => (int) $pollVote->option_index,
             ] : null,

@@ -4,6 +4,7 @@ namespace App\Http\Resources\Payment;
 
 use App\Enums\Payment\PaymentServiceType;
 use App\Models\Payment\PaymentTransaction;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -70,6 +71,17 @@ class PaymentTransactionResource extends JsonResource
             'at' => $this->created_at?->toIso8601String(),
             'confirmedAt' => $this->confirmed_at?->toIso8601String(),
             'subscription_id' => $this->subscription_id,
+            'period_start' => $this->service_type === PaymentServiceType::Subscription
+                ? ($this->subscription?->current_period_start?->toIso8601String()
+                    ?? (isset($this->metadata['period_start']) ? Carbon::parse($this->metadata['period_start'])->toIso8601String() : null)
+                    ?? $this->confirmed_at?->toIso8601String()
+                    ?? $this->created_at?->toIso8601String())
+                : null,
+            'period_end' => $this->service_type === PaymentServiceType::Subscription
+                ? ($this->subscription?->current_period_end?->toIso8601String()
+                    ?? (isset($this->metadata['period_end']) ? Carbon::parse($this->metadata['period_end'])->toIso8601String() : null)
+                    ?? ($this->confirmed_at ? $this->confirmed_at->copy()->addMonth()->toIso8601String() : null))
+                : null,
         ];
     }
 }

@@ -121,6 +121,8 @@ class PostResource extends JsonResource
             'comments_count' => (int) $this->comments_count,
             'shares' => (int) $this->shares_count,
             'shares_count' => (int) $this->shares_count,
+            'views' => (int) $this->views_count,
+            'views_count' => (int) $this->views_count,
             'liked' => $request->user() ? $this->isLikedBy($request->user()) : false,
 
             // Paramètres de publication

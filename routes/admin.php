@@ -957,6 +957,9 @@ Route::middleware(['admin.session'])->group(function () {
         Route::get('/requests', [AdminKycQueueController::class, 'index'])
             ->middleware('admin.permission:kyc:view')
             ->name('requests.index');
+        Route::get('/queue', [AdminKycQueueController::class, 'index'])
+            ->middleware('admin.permission:kyc:view')
+            ->name('queue.index');
 
         // Fiche détaillée d'un dossier KYC (A.4)
         Route::get('/requests/{id}', [AdminKycQueueController::class, 'show'])

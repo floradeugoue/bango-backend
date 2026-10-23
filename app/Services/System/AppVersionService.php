@@ -26,7 +26,7 @@ class AppVersionService
     {
         $platform = strtolower(trim($platform));
 
-        if (! in_array($platform, ['android', 'ios'], true)) {
+        if (! in_array($platform, ['android', 'ios', 'web'], true)) {
             $platform = 'android';
         }
 

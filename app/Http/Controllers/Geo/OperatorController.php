@@ -36,8 +36,17 @@ class OperatorController extends Controller
             'name' => 'required|string|max:100',
             'code' => 'required|string|max:50|unique:operators,code',
             'logo_url' => 'nullable|string|max:255',
+            'prefixes' => 'nullable|array',
+            'prefixes.*' => 'string|max:10',
             'is_active' => 'sometimes|boolean',
         ]);
+
+        $existing = Operator::where('code', $validated['code'])->first();
+        if ($existing) {
+            $existing->update($validated);
+
+            return response()->json($existing->load('country'), 200);
+        }
 
         $operator = Operator::create($validated);
 
@@ -63,6 +72,8 @@ class OperatorController extends Controller
             'name' => 'sometimes|string|max:100',
             'code' => 'sometimes|string|max:50|unique:operators,code,'.$operator->id,
             'logo_url' => 'nullable|string|max:255',
+            'prefixes' => 'nullable|array',
+            'prefixes.*' => 'string|max:10',
             'is_active' => 'sometimes|boolean',
         ]);
 

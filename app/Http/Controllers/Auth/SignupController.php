@@ -7,6 +7,7 @@ use App\Http\Requests\Auth\SignupRequest;
 use App\Models\Auth\Role;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
@@ -72,5 +73,20 @@ class SignupController extends Controller
                 'displayName' => $user->display_name,
             ],
         ], 201);
+    }
+
+    /**
+     * Annule une inscription en cours (LG-09) : efface le compte et révoque ses jetons.
+     * DELETE /api/auth/signup
+     */
+    public function destroy(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if ($user) {
+            $user->tokens()->delete();
+            $user->forceDelete();
+        }
+
+        return response()->json(null, 204);
     }
 }

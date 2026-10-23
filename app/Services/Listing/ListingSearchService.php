@@ -113,10 +113,11 @@ class ListingSearchService
     {
         $query = Listing::query()->publiclyVisible();
 
-        // Exclusion des utilisateurs bloqués ou bloqueurs si un utilisateur est connecté
+        // Exclusion des utilisateurs bloqués ou bloqueurs et masqués (mutes actifs) si un utilisateur est connecté
         if ($viewer) {
             $blockedUserIds = $viewer->blockedUsers()->pluck('blocked_id')
                 ->merge($viewer->blockedByUsers()->pluck('blocker_id'))
+                ->merge($viewer->activeMutedUserIds())
                 ->unique();
 
             if ($blockedUserIds->isNotEmpty()) {

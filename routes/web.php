@@ -1,10 +1,20 @@
 <?php
 
+use App\Http\Controllers\Geo\GenderController;
+use App\Http\Controllers\Search\PeopleSearchController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
     return view('welcome');
 });
+
+// Route publique des genres (AU-07)
+Route::get('/genders', [GenderController::class, 'index'])->name('web.genders');
+
+// Suggestions d'habitants et voisins (SQ-01, AU-19) - support direct sans préfixe /api
+Route::get('/people/suggestions', [PeopleSearchController::class, 'suggestions'])->middleware('api')->name('web.people.suggestions');
+// Recherche de profils - support direct sans préfixe /api
+Route::get('/search/people', [PeopleSearchController::class, 'index'])->middleware('api')->name('web.search.people');
 
 // Support direct /admin/v1 base URL without /api prefix for back-office frontend
 Route::prefix('admin/v1')->middleware('api')->group(base_path('routes/admin.php'));

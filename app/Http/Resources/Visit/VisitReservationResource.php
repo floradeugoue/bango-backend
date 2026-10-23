@@ -30,7 +30,7 @@ class VisitReservationResource extends JsonResource
         return [
             'id' => $this->id,
             'listing_id' => $this->listing_id,
-            'listing' => [
+            'listing' => $listing ? [
                 'id' => $listing->id,
                 'title' => $listing->title,
                 'mode' => $listing->mode,
@@ -42,7 +42,7 @@ class VisitReservationResource extends JsonResource
                 'address' => $canAccessAddress ? $listing->address : null,
                 'cover_url' => $listing->cover_image_url,
                 'cover_image_url' => $listing->cover_image_url,
-            ],
+            ] : null,
             'slot_id' => $this->slot_id,
             'slot' => $slot ? [
                 'id' => $slot->id,

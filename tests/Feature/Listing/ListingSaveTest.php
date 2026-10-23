@@ -121,20 +121,41 @@ test('saved listings list returns only listings saved by the current user', func
     expect($savedIdsB)->not->toContain($this->listing1->id);
 });
 
-test('saved listings list hides listings that become draft or inaccessible', function (): void {
+test('saved listings list keeps listings that become reserved or taken with their status, but hides draft or deleted', function (): void {
     // User A saves listing 1
     Passport::actingAs($this->userA);
     $this->postJson("/api/listings/{$this->listing1->id}/save");
 
-    // Listing 1 is turned into draft by owner
+    // Listing 1 becomes taken
+    $this->listing1->update(['status' => ListingStatus::Taken]);
+
+    // Check User A saved list: listing 1 should still be present with status 'taken'
+    $responseTaken = $this->getJson('/api/listings/saved');
+    $responseTaken->assertOk();
+    $savedItemsTaken = collect($responseTaken->json('data'));
+    expect($savedItemsTaken->pluck('id')->all())->toContain($this->listing1->id);
+    expect($savedItemsTaken->firstWhere('id', $this->listing1->id)['status'])->toBe('taken');
+
+    // Listing 1 becomes reserved
+    $this->listing1->update(['status' => ListingStatus::Reserved]);
+    $responseReserved = $this->getJson('/api/listings/saved');
+    $responseReserved->assertOk();
+    $savedItemsReserved = collect($responseReserved->json('data'));
+    expect($savedItemsReserved->pluck('id')->all())->toContain($this->listing1->id);
+    expect($savedItemsReserved->firstWhere('id', $this->listing1->id)['status'])->toBe('reserved');
+
+    // Listing 1 is turned into draft: should now be excluded
     $this->listing1->update(['status' => ListingStatus::Draft]);
+    $responseDraft = $this->getJson('/api/listings/saved');
+    $responseDraft->assertOk();
+    expect(collect($responseDraft->json('data'))->pluck('id')->all())->not->toContain($this->listing1->id);
 
-    // Check User A saved list: listing 1 should be excluded from display
-    $response = $this->getJson('/api/listings/saved');
-    $response->assertOk();
-
-    $savedIds = collect($response->json('data'))->pluck('id')->all();
-    expect($savedIds)->not->toContain($this->listing1->id);
+    // Listing 1 restored to published then soft deleted: should be excluded
+    $this->listing1->update(['status' => ListingStatus::Published]);
+    $this->listing1->delete();
+    $responseDeleted = $this->getJson('/api/listings/saved');
+    $responseDeleted->assertOk();
+    expect(collect($responseDeleted->json('data'))->pluck('id')->all())->not->toContain($this->listing1->id);
 });
 
 test('unauthenticated user cannot save or access saved listings', function (): void {

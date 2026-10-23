@@ -30,7 +30,7 @@ class MessageThreadService
             ->forUser($user->id)
             ->with([
                 'members.user' => function ($q): void {
-                    $q->select(['id', 'name', 'handle', 'avatar', 'avatar_url', 'is_verified', 'account_type']);
+                    $q->select(['id', 'name', 'handle', 'avatar_url', 'is_verified', 'account_type']);
                 },
                 'latestMessage.sender' => function ($q): void {
                     $q->select(['id', 'name', 'handle']);
@@ -377,7 +377,7 @@ class MessageThreadService
             })
             ->with([
                 'members.user' => function ($q): void {
-                    $q->select(['id', 'name', 'handle', 'avatar', 'avatar_url', 'badge', 'is_verified', 'verification_lapsed']);
+                    $q->select(['id', 'name', 'handle', 'avatar_url', 'badge', 'is_verified', 'verification_lapsed']);
                 },
                 'latestMessage.sender' => function ($q): void {
                     $q->select(['id', 'name', 'handle']);

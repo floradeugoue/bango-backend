@@ -94,12 +94,29 @@ class ProfileController extends Controller
 
     /**
      * Update birthdate (must be 18+).
+     * LG-09 : Si l'utilisateur est mineur (< 18 ans), le compte et ses jetons sont immédiatement effacés.
      */
     public function updateBirthdate(Request $request): JsonResponse
     {
         $request->validate([
-            'birthDate' => ['required', 'date', 'before_or_equal:'.Carbon::now()->subYears(18)->format('Y-m-d')],
+            'birthDate' => ['required', 'date'],
         ]);
+
+        $birthDate = Carbon::parse($request->birthDate);
+        if ($birthDate->isAfter(Carbon::now()->subYears(18))) {
+            $user = $request->user();
+            if ($user) {
+                $user->tokens()->delete();
+                $user->forceDelete();
+            }
+
+            return response()->json([
+                'message' => 'L\'inscription est réservée aux personnes majeures (18 ans et plus). Vos données ont été effacées.',
+                'errors' => [
+                    'birthDate' => ['Vous devez avoir au moins 18 ans pour utiliser BANGO.'],
+                ],
+            ], 422);
+        }
 
         $request->user()->update([
             'birth_date' => $request->birthDate,

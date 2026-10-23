@@ -8,6 +8,7 @@ use App\Http\Requests\Support\ReplySupportTicketRequest;
 use App\Http\Requests\Support\StoreSupportTicketRequest;
 use App\Http\Resources\Support\SupportTicketMessageResource;
 use App\Http\Resources\Support\SupportTicketResource;
+use App\Http\Resources\Support\UserSanctionResource;
 use App\Models\Support\SupportTicket;
 use App\Models\Support\SupportTicketAttachment;
 use App\Services\Support\SupportTicketService;
@@ -256,13 +257,11 @@ class SupportTicketController extends Controller
      * GET /api/me/sanctions
      * GET /api/support/sanctions/mine
      */
-    public function mySanctions(Request $request): JsonResponse
+    public function mySanctions(Request $request): AnonymousResourceCollection
     {
         $user = $request->user();
-        $sanctions = $user->sanctions()->with('operator:id,name,email')->get();
+        $sanctions = $user->sanctions()->latest('created_at')->get();
 
-        return response()->json([
-            'data' => $sanctions,
-        ]);
+        return UserSanctionResource::collection($sanctions);
     }
 }
