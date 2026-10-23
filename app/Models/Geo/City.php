@@ -17,6 +17,8 @@ class City extends Model
     {
         return [
             'is_active' => 'boolean',
+            'lat' => 'float',
+            'lng' => 'float',
         ];
     }
 

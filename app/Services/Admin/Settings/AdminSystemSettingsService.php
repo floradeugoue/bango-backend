@@ -56,7 +56,7 @@ class AdminSystemSettingsService
         $price = SubscriptionPrice::with('product')->findOrFail($priceId);
 
         $activeSubscriptions = Subscription::where('price_id', $price->id)
-            ->where('status', 'active')
+            ->where('state', 'active')
             ->count();
 
         $currentAmount = (float) $price->price_amount;
@@ -204,7 +204,7 @@ class AdminSystemSettingsService
      */
     public function getMobileMoneyOperators(): Collection
     {
-        return Operator::with(['country:id,name,iso_code'])->get();
+        return Operator::with(['country:id,name,iso2'])->get();
     }
 
     /**
@@ -328,7 +328,7 @@ class AdminSystemSettingsService
      */
     public function getCities(): Collection
     {
-        return City::withCount('neighbourhoods')->with('country:id,name,iso_code')->get();
+        return City::withCount('neighbourhoods')->with('country:id,name,iso2')->get();
     }
 
     /**
@@ -361,9 +361,9 @@ class AdminSystemSettingsService
     /**
      * Ajout d'un quartier à une ville existante.
      */
-    public function addArea(string $cityNameOrId, string $name, User $operator): Neighbourhood
+    public function addArea(string $cityNameOrId, string $name, User $operator, ?float $lat = null, ?float $lng = null): Neighbourhood
     {
-        return DB::transaction(function () use ($cityNameOrId, $name, $operator) {
+        return DB::transaction(function () use ($cityNameOrId, $name, $operator, $lat, $lng) {
             $city = is_numeric($cityNameOrId)
                 ? City::findOrFail($cityNameOrId)
                 : City::where('name', 'like', $cityNameOrId)->firstOrFail();
@@ -385,6 +385,8 @@ class AdminSystemSettingsService
                 'city_id' => $city->id,
                 'name' => $name,
                 'slug' => $slug.'-'.uniqid(),
+                'lat' => $lat,
+                'lng' => $lng,
                 'is_active' => true,
                 'is_ignored' => false,
             ]);
@@ -395,7 +397,7 @@ class AdminSystemSettingsService
                 targetType: 'Neighbourhood',
                 targetId: (string) $area->id,
                 targetLabel: "Création du quartier {$area->name} ({$city->name})",
-                context: ['city_id' => $city->id, 'name' => $name]
+                context: ['city_id' => $city->id, 'name' => $name, 'lat' => $lat, 'lng' => $lng]
             );
 
             return $area;
@@ -420,6 +422,12 @@ class AdminSystemSettingsService
 
             if (! empty($data['name'])) {
                 $area->name = $data['name'];
+            }
+            if (array_key_exists('lat', $data)) {
+                $area->lat = $data['lat'];
+            }
+            if (array_key_exists('lng', $data)) {
+                $area->lng = $data['lng'];
             }
             if (isset($data['is_active'])) {
                 $area->is_active = filter_var($data['is_active'], FILTER_VALIDATE_BOOLEAN);

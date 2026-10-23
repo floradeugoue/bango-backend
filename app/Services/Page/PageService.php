@@ -28,14 +28,22 @@ class PageService
     {
         return DB::transaction(function () use ($owner, $data, $logo, $cover) {
             $name = trim($data['name']);
-            $handle = isset($data['handle']) ? Str::slug($data['handle']) : Str::slug($name);
+            $hasExplicitHandle = isset($data['handle']) && Str::slug($data['handle']) !== '';
+            $handle = $hasExplicitHandle ? Str::slug($data['handle']) : Str::slug($name);
 
-            // Vérification de l'unicité du handle avec fallback incrémental si nécessaire
-            $baseHandle = $handle;
-            $count = 1;
-            while (Page::withTrashed()->where('handle', $handle)->exists()) {
-                $handle = "{$baseHandle}-{$count}";
-                $count++;
+            if ($hasExplicitHandle) {
+                // Identifiant choisi par l'utilisateur : jamais renommé en silence
+                if (Page::withTrashed()->where('handle', $handle)->exists()) {
+                    throw ValidationException::withMessages(['handle' => ['handle taken']]);
+                }
+            } else {
+                // Identifiant dérivé du nom : suffixe incrémental en cas de collision
+                $baseHandle = $handle;
+                $count = 1;
+                while (Page::withTrashed()->where('handle', $handle)->exists()) {
+                    $handle = "{$baseHandle}-{$count}";
+                    $count++;
+                }
             }
 
             $logoUrl = null;

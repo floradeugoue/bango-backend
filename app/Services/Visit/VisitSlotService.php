@@ -4,6 +4,7 @@ namespace App\Services\Visit;
 
 use App\Enums\Visit\VisitReservationStatus;
 use App\Enums\Visit\VisitSlotStatus;
+use App\Models\Geo\City;
 use App\Models\Listing\Listing;
 use App\Models\User;
 use App\Models\Visit\VisitReservation;
@@ -65,8 +66,8 @@ class VisitSlotService
             ->with(['activeReservations'])
             ->get();
 
-        // 2. Si aucun créneau n'est créé en base, générer les créneaux par défaut selon les règles BL-08
-        if ($existingSlots->isEmpty()) {
+        // 2. Si aucun créneau n'est créé en base et que le bailleur utilise l'agenda, générer les créneaux par défaut selon les règles BL-08
+        if ($existingSlots->isEmpty() && $listing->usesAgenda()) {
             $this->ensureDefaultSlotsExist($listing, $at, self::DAYS_SHOWN);
             $existingSlots = VisitSlot::where('listing_id', $listing->id)
                 ->where('start_at', '>=', $at->copy()->startOfDay())
@@ -139,15 +140,75 @@ class VisitSlotService
     }
 
     /**
+     * Résout le fuseau horaire de l'annonce d'après sa ville ou sa devise (IM-07).
+     */
+    public function resolveListingTimezone(Listing $listing): string
+    {
+        if (! empty($listing->city)) {
+            $cityName = strtolower(trim($listing->city));
+
+            if (in_array($cityName, ['douala', 'yaounde', 'yaoundé', 'bafoussam', 'garoua', 'kribi', 'limbe', 'maroua', 'bamenda'], true)) {
+                return 'Africa/Douala';
+            }
+            if (in_array($cityName, ['abidjan', 'yamoussoukro', 'bouake', 'bouaké', 'san pedro', 'korhogo'], true)) {
+                return 'Africa/Abidjan';
+            }
+            if (in_array($cityName, ['dakar', 'thies', 'thiès', 'saint-louis', 'touba', 'mbour', 'ziguinchor'], true)) {
+                return 'Africa/Dakar';
+            }
+            if (in_array($cityName, ['libreville', 'port-gentil', 'franceville', 'oyem'], true)) {
+                return 'Africa/Libreville';
+            }
+            if (in_array($cityName, ['lagos', 'abuja', 'ibadan', 'kano', 'port harcourt'], true)) {
+                return 'Africa/Lagos';
+            }
+            if (in_array($cityName, ['accra', 'kumasi', 'tamale'], true)) {
+                return 'Africa/Accra';
+            }
+            if (in_array($cityName, ['paris', 'lyon', 'marseille', 'bordeaux'], true)) {
+                return 'Europe/Paris';
+            }
+
+            $city = City::with('country')->where('name', 'ilike', $listing->city)->first();
+            if ($city && $city->country) {
+                return match (strtoupper($city->country->iso2 ?? $city->country->code ?? '')) {
+                    'CM' => 'Africa/Douala',
+                    'CI' => 'Africa/Abidjan',
+                    'SN' => 'Africa/Dakar',
+                    'GA' => 'Africa/Libreville',
+                    'NG' => 'Africa/Lagos',
+                    'GH' => 'Africa/Accra',
+                    'FR' => 'Europe/Paris',
+                    default => 'Africa/Douala',
+                };
+            }
+        }
+
+        if (! empty($listing->currency)) {
+            return match (strtoupper($listing->currency)) {
+                'XOF' => 'Africa/Abidjan',
+                'XAF' => 'Africa/Douala',
+                'EUR' => 'Europe/Paris',
+                'NGN' => 'Africa/Lagos',
+                'GHS' => 'Africa/Accra',
+                default => 'Africa/Douala',
+            };
+        }
+
+        return 'Africa/Douala';
+    }
+
+    /**
      * Génère automatiquement les créneaux par défaut pour les jours à venir si l'annonce n'en a pas encore.
      */
     public function ensureDefaultSlotsExist(Listing $listing, Carbon $startDate, int $daysCount = 5): void
     {
         // Créneaux horaires par défaut : 09:30, 11:00, 14:00, 15:30, 17:00
         $defaultTimes = ['09:30', '11:00', '14:00', '15:30', '17:00'];
+        $timezone = $this->resolveListingTimezone($listing);
 
         for ($i = 0; $i < $daysCount; $i++) {
-            $day = $startDate->copy()->addDays($i);
+            $day = $startDate->copy()->setTimezone($timezone)->addDays($i);
 
             // Pas de visites le dimanche (jour 0)
             if ($day->dayOfWeek === Carbon::SUNDAY) {
@@ -156,7 +217,8 @@ class VisitSlotService
 
             foreach ($defaultTimes as $time) {
                 [$hour, $minute] = explode(':', $time);
-                $startAt = $day->copy()->setTime((int) $hour, (int) $minute, 0);
+                // Créer le créneau dans le fuseau du pays de l'annonce, puis stocker en UTC
+                $startAt = $day->copy()->setTime((int) $hour, (int) $minute, 0)->utc();
                 $endAt = $startAt->copy()->addMinutes(self::VISIT_DURATION_MINUTES);
 
                 VisitSlot::firstOrCreate(
@@ -347,9 +409,10 @@ class VisitSlotService
                 $horizonDays = max(1, min(30, (int) ($payload['horizon_days'] ?? 7)));
                 $slotDuration = max(15, min(120, (int) ($payload['slot_duration_minutes'] ?? self::VISIT_DURATION_MINUTES)));
                 $scheduleByDay = collect($payload['days'])->keyBy('day');
+                $timezone = $this->resolveListingTimezone($listing);
 
                 for ($d = 0; $d < $horizonDays; $d++) {
-                    $date = now()->addDays($d);
+                    $date = now()->setTimezone($timezone)->addDays($d);
                     $dayOfWeek = $date->dayOfWeek;
 
                     if (! $scheduleByDay->has($dayOfWeek)) {
@@ -371,7 +434,7 @@ class VisitSlotService
                     $limit = $date->copy()->setTime((int) $toH, (int) $toM, 0);
 
                     while ($cursor->copy()->addMinutes($slotDuration)->lte($limit)) {
-                        $start = $cursor->copy();
+                        $start = $cursor->copy()->utc();
                         $end = $start->copy()->addMinutes($slotDuration);
 
                         if ($start->isFuture()) {

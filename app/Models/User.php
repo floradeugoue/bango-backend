@@ -19,6 +19,7 @@ use App\Models\Housing\HousingSearch;
 use App\Models\Kyc\KycSubmission;
 use App\Models\Legal\TermsAcceptance;
 use App\Models\Listing\Listing;
+use App\Models\Listing\ListingAlert;
 use App\Models\Message\Conversation;
 use App\Models\Message\ConversationMember;
 use App\Models\Message\Message;
@@ -28,6 +29,7 @@ use App\Models\Page\PageMember;
 use App\Models\Payment\PaymentTransaction;
 use App\Models\Profile\FollowRequest;
 use App\Models\Profile\Interest;
+use App\Models\Profile\UserMute;
 use App\Models\Reel\Reel;
 use App\Models\Reel\ReelComment;
 use App\Models\Reel\ReelReaction;
@@ -108,6 +110,7 @@ class User extends Authenticatable
         'is_certified',
         'certified_at',
         'verification_lapsed',
+        'uses_agenda',
         'restricted_until',
         'terms_accepted_at',
         'accepted_terms_version',
@@ -132,6 +135,7 @@ class User extends Authenticatable
             'gender_hidden' => 'boolean',
             'is_verified' => 'boolean',
             'is_certified' => 'boolean',
+            'uses_agenda' => 'boolean',
             'certified_at' => 'datetime',
             'locked_until' => 'datetime',
             'suspended_from' => 'datetime',
@@ -320,6 +324,38 @@ class User extends Authenticatable
     {
         return $this->belongsToMany(User::class, 'user_blocks', 'blocked_id', 'blocker_id')
             ->withTimestamps();
+    }
+
+    /**
+     * Masquages (mutes) initiés par cet utilisateur.
+     */
+    public function mutes(): HasMany
+    {
+        return $this->hasMany(UserMute::class, 'user_id');
+    }
+
+    /**
+     * Utilisateurs masqués par cet utilisateur.
+     */
+    public function mutedUsers(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'user_mutes', 'user_id', 'muted_user_id')
+            ->withPivot('expires_at')
+            ->withTimestamps();
+    }
+
+    /**
+     * Identifiants des utilisateurs actuellement masqués par cet utilisateur (délai actif ou permanent).
+     *
+     * @return array<int>
+     */
+    public function activeMutedUserIds(): array
+    {
+        return $this->mutes()
+            ->active()
+            ->pluck('muted_user_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
     }
 
     /**
@@ -666,6 +702,23 @@ class User extends Authenticatable
     {
         return $this->belongsToMany(Listing::class, 'listing_saves', 'user_id', 'listing_id')
             ->withTimestamps();
+    }
+
+    /**
+     * Annonces immobilières aimées par cet utilisateur.
+     */
+    public function likedListings(): BelongsToMany
+    {
+        return $this->belongsToMany(Listing::class, 'listing_likes', 'user_id', 'listing_id')
+            ->withTimestamps();
+    }
+
+    /**
+     * Alertes de recherche immobilière personnalisées de l'utilisateur.
+     */
+    public function listingAlerts(): HasMany
+    {
+        return $this->hasMany(ListingAlert::class);
     }
 
     /**

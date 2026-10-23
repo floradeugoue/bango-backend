@@ -4,10 +4,12 @@ use App\Enums\Payment\PaymentChannel;
 use App\Enums\Payment\PaymentProvider;
 use App\Enums\Payment\PaymentServiceType;
 use App\Enums\Payment\PaymentStatus;
+use App\Mail\Payment\PaymentReceiptMail;
 use App\Models\Payment\PaymentTransaction;
 use App\Models\User;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Laravel\Passport\Passport;
 
@@ -179,4 +181,129 @@ it('generates a valid binary PDF receipt for subscription and boost transactions
     $boostResponse = get("/api/payments/{$boostTx->reference}/receipt");
     $boostResponse->assertStatus(200);
     expect($boostResponse->getContent())->toStartWith('%PDF-1.4');
+});
+
+it('sends receipt PDF by email to user verified email address or custom provided email (PAY-23)', function () {
+    Mail::fake();
+
+    $user = User::factory()->create([
+        'email' => 'client@example.com',
+        'email_verified_at' => now(),
+    ]);
+
+    $transaction = PaymentTransaction::create([
+        'reference' => 'TX-CONFIRMED-EMAIL',
+        'idempotency_key' => (string) Str::uuid(),
+        'user_id' => $user->id,
+        'service_type' => PaymentServiceType::Visit,
+        'provider' => PaymentProvider::Monetbil,
+        'channel' => PaymentChannel::MobileMoney,
+        'currency' => 'XAF',
+        'amount' => 5000,
+        'fee_amount' => 100,
+        'tax_amount' => 0,
+        'total_amount' => 5100,
+        'amount_charged' => 5100,
+        'status' => PaymentStatus::Confirmed,
+        'confirmed_at' => now(),
+    ]);
+
+    Passport::actingAs($user);
+
+    // 1. Envoi à l'adresse du compte connecté par défaut
+    $response = $this->postJson("/api/payments/{$transaction->id}/receipt/email");
+    $response->assertStatus(202)
+        ->assertJson([
+            'success' => true,
+            'recipient' => 'client@example.com',
+        ]);
+
+    Mail::assertSent(PaymentReceiptMail::class, function ($mail) {
+        return $mail->hasTo('client@example.com');
+    });
+
+    // 2. Envoi à une adresse personnalisée fournie dans le corps
+    $customResponse = $this->postJson("/api/payments/{$transaction->id}/receipt/email", [
+        'email' => 'comptabilite@societe.com',
+    ]);
+    $customResponse->assertStatus(202)
+        ->assertJson([
+            'success' => true,
+            'recipient' => 'comptabilite@societe.com',
+        ]);
+
+    Mail::assertSent(PaymentReceiptMail::class, function ($mail) {
+        return $mail->hasTo('comptabilite@societe.com');
+    });
+});
+
+it('returns 404 when sending receipt email for a payment belonging to another user', function () {
+    Mail::fake();
+
+    $user1 = User::factory()->create(['email' => 'user1@example.com']);
+    $user2 = User::factory()->create(['email' => 'user2@example.com']);
+
+    $transaction = PaymentTransaction::create([
+        'reference' => 'TX-OTHER-USER',
+        'idempotency_key' => (string) Str::uuid(),
+        'user_id' => $user1->id,
+        'service_type' => PaymentServiceType::Visit,
+        'provider' => PaymentProvider::Monetbil,
+        'channel' => PaymentChannel::MobileMoney,
+        'currency' => 'XAF',
+        'amount' => 5000,
+        'fee_amount' => 100,
+        'tax_amount' => 0,
+        'total_amount' => 5100,
+        'amount_charged' => 5100,
+        'status' => PaymentStatus::Confirmed,
+        'confirmed_at' => now(),
+    ]);
+
+    Passport::actingAs($user2);
+
+    $this->postJson("/api/payments/{$transaction->id}/receipt/email")
+        ->assertStatus(404);
+
+    Mail::assertNothingSent();
+});
+
+it('returns 422 when sending receipt email if user account email is unverified or empty', function () {
+    Mail::fake();
+
+    $user = User::factory()->create([
+        'email' => 'unverified@example.com',
+        'email_verified_at' => null,
+    ]);
+
+    $transaction = PaymentTransaction::create([
+        'reference' => 'TX-NO-EMAIL',
+        'idempotency_key' => (string) Str::uuid(),
+        'user_id' => $user->id,
+        'service_type' => PaymentServiceType::Visit,
+        'provider' => PaymentProvider::Monetbil,
+        'channel' => PaymentChannel::MobileMoney,
+        'currency' => 'XAF',
+        'amount' => 5000,
+        'fee_amount' => 100,
+        'tax_amount' => 0,
+        'total_amount' => 5100,
+        'amount_charged' => 5100,
+        'status' => PaymentStatus::Confirmed,
+        'confirmed_at' => now(),
+    ]);
+
+    Passport::actingAs($user);
+
+    $this->postJson("/api/payments/{$transaction->id}/receipt/email")
+        ->assertStatus(422)
+        ->assertJsonStructure(['message', 'errors' => ['email']]);
+
+    Mail::assertNothingSent();
+
+    // Mais si une adresse email explicite valide est fournie, cela passe
+    $this->postJson("/api/payments/{$transaction->id}/receipt/email", ['email' => 'autre@domaine.com'])
+        ->assertStatus(202);
+
+    Mail::assertSent(PaymentReceiptMail::class);
 });

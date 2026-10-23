@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Story\Story;
+use App\Models\Story\StoryPollVote;
 use App\Models\Story\StorySlide;
 use App\Models\Story\StorySticker;
 use App\Models\Story\StoryView;
@@ -123,4 +124,36 @@ test('le vote avec un index d option invalide est rejeté avec 422', function ()
     $this->postJson("/api/stories/{$slide->id}/poll/{$sticker->id}/vote", ['option_index' => 5])
         ->assertStatus(422)
         ->assertJsonValidationErrors(['option_index']);
+});
+
+test('le propriétaire peut consulter les spectateurs et voir les votes de sondage associés (CR-35)', function () {
+    $story = Story::factory()->create(['user_id' => $this->author->id]);
+    $slide = StorySlide::factory()->create(['story_id' => $story->id]);
+    $sticker = StorySticker::factory()->poll('Question ?', ['Choix 0', 'Choix 1'])->create(['story_slide_id' => $slide->id]);
+
+    StoryView::create([
+        'story_id' => $story->id,
+        'story_slide_id' => $slide->id,
+        'viewer_id' => $this->viewer->id,
+        'ip_address' => hash('sha256', '127.0.0.1'),
+        'viewed_at' => now(),
+    ]);
+
+    StoryPollVote::create([
+        'story_slide_id' => $slide->id,
+        'sticker_id' => $sticker->id,
+        'user_id' => $this->viewer->id,
+        'option_index' => 1,
+    ]);
+
+    Passport::actingAs($this->author);
+    $response = $this->getJson("/api/stories/{$story->id}/viewers");
+
+    $response->assertOk()
+        ->assertJsonCount(1, 'data')
+        ->assertJsonPath('data.0.id', $this->viewer->id)
+        ->assertJsonPath('data.0.has_voted', true)
+        ->assertJsonPath('data.0.vote.slide_id', (string) $slide->id)
+        ->assertJsonPath('data.0.vote.sticker_id', (string) $sticker->id)
+        ->assertJsonPath('data.0.vote.option_index', 1);
 });

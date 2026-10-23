@@ -48,6 +48,7 @@ class Listing extends Model
         'mode',
         'kind',
         'status',
+        'uses_agenda',
         'price',
         'currency',
         'period',
@@ -73,6 +74,7 @@ class Listing extends Model
         'lng',
         'views_count',
         'saves_count',
+        'likes_count',
         'pending_visits_count',
         'submitted_at',
         'review_due_at',
@@ -102,6 +104,7 @@ class Listing extends Model
             'mode' => ListingMode::class,
             'kind' => ListingKind::class,
             'status' => ListingStatus::class,
+            'uses_agenda' => 'boolean',
             'withdrawn_by_bango' => 'boolean',
             'withdrawn_by_bango_at' => 'datetime',
             'price' => 'decimal:2',
@@ -120,6 +123,7 @@ class Listing extends Model
             'sponsored' => 'boolean',
             'views_count' => 'integer',
             'saves_count' => 'integer',
+            'likes_count' => 'integer',
             'pending_visits_count' => 'integer',
             'amenities' => 'array',
             'features' => 'array',
@@ -131,6 +135,22 @@ class Listing extends Model
             'published_at' => 'datetime',
             'taken_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Indique si l'annonce ou le bailleur utilise le système d'agenda automatique.
+     */
+    public function usesAgenda(): bool
+    {
+        if ($this->uses_agenda !== null) {
+            return (bool) $this->uses_agenda;
+        }
+
+        if ($this->relationLoaded('owner') && $this->owner) {
+            return (bool) ($this->owner->uses_agenda ?? true);
+        }
+
+        return (bool) ($this->owner?->uses_agenda ?? true);
     }
 
     /**
@@ -207,6 +227,14 @@ class Listing extends Model
     public function saves(): HasMany
     {
         return $this->hasMany(ListingSave::class, 'listing_id');
+    }
+
+    /**
+     * « J'aime » de cette annonce.
+     */
+    public function likes(): HasMany
+    {
+        return $this->hasMany(ListingLike::class, 'listing_id');
     }
 
     /**
@@ -501,6 +529,22 @@ class Listing extends Model
         }
 
         return $this->saves()->where('user_id', $user->id)->exists();
+    }
+
+    /**
+     * Vérifie si l'annonce est aimée par l'utilisateur donné.
+     */
+    public function isLikedBy(?User $user): bool
+    {
+        if (! $user) {
+            return false;
+        }
+
+        if ($this->relationLoaded('likes')) {
+            return $this->likes->contains('user_id', $user->id);
+        }
+
+        return $this->likes()->where('user_id', $user->id)->exists();
     }
 
     /**

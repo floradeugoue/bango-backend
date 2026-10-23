@@ -471,6 +471,50 @@ test('landlord can retrieve incoming visit requests with pagination and filters'
     expect($response->json('data'))->toHaveCount(1);
 });
 
+test('landlord can retrieve visit requests even if the listing has been soft-deleted (BL-06)', function (): void {
+    $landlord = ($this->createLandlord)();
+
+    $listing = Listing::factory()->published()->create([
+        'owner_id' => $landlord->id,
+    ]);
+
+    $slot = VisitSlot::create([
+        'listing_id' => $listing->id,
+        'owner_id' => $landlord->id,
+        'start_at' => now()->addDays(1)->setTime(14, 0),
+        'end_at' => now()->addDays(1)->setTime(14, 30),
+        'capacity' => 1,
+        'booked_count' => 0,
+        'status' => VisitSlotStatus::Open,
+    ]);
+
+    $prospect = User::factory()->create();
+
+    $reservation = VisitReservation::create([
+        'listing_id' => $listing->id,
+        'slot_id' => $slot->id,
+        'owner_id' => $landlord->id,
+        'prospect_id' => $prospect->id,
+        'status' => VisitReservationStatus::Requested,
+        'fee' => 5000,
+        'currency' => 'XOF',
+    ]);
+
+    // Soft delete the listing
+    $listing->delete();
+    expect($listing->trashed())->toBeTrue();
+
+    Passport::actingAs($landlord);
+
+    $response = $this->getJson('/api/landlord/visit-requests');
+
+    $response->assertOk();
+    expect($response->json('data'))->toHaveCount(1);
+    expect($response->json('data.0.id'))->toBe($reservation->id);
+    expect($response->json('data.0.listing.id'))->toBe($listing->id);
+    expect($response->json('data.0.listing.title'))->toBe($listing->title);
+});
+
 test('user can submit KYC documents securely to private storage', function (): void {
     Storage::fake('local');
     Notification::fake();

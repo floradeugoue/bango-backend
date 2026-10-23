@@ -163,8 +163,7 @@ class AdminAccountOperationsService
      */
     public function getUserListings(User $user, int $perPage = 15): LengthAwarePaginator
     {
-        return Listing::where('user_id', $user->id)
-            ->with(['city:id,name', 'country:id,name'])
+        return Listing::where('owner_id', $user->id)
             ->orderByDesc('created_at')
             ->paginate(min(max($perPage, 1), 50));
     }
@@ -207,9 +206,10 @@ class AdminAccountOperationsService
      */
     public function getUserCases(User $user, int $perPage = 15): LengthAwarePaginator
     {
-        return Report::where('user_id', $user->id)
+        return Report::where('reporter_id', $user->id)
             ->orWhere(function (Builder $q) use ($user) {
-                $q->where('reportable_type', User::class)->where('reportable_id', $user->id);
+                $q->whereIn('reportable_type', [User::class, 'user', 'User', (new User)->getMorphClass()])
+                    ->where('reportable_id', $user->id);
             })
             ->with(['reporter:id,name', 'operator:id,name'])
             ->orderByDesc('created_at')
@@ -393,7 +393,7 @@ class AdminAccountOperationsService
         }
 
         $activeTokensCount = $user->tokens()->count();
-        $activeListingsCount = Listing::where('user_id', $user->id)->where('status', 'published')->count();
+        $activeListingsCount = Listing::where('owner_id', $user->id)->where('status', 'published')->count();
 
         $consequences = match ($kind) {
             'suspend_7d' => [
@@ -890,7 +890,7 @@ class AdminAccountOperationsService
                 'badge' => $user->badge,
                 'created_at' => $user->created_at?->toIso8601String(),
             ],
-            'listings_count' => Listing::where('user_id', $user->id)->count(),
+            'listings_count' => Listing::where('owner_id', $user->id)->count(),
             'posts_count' => Post::where('user_id', $user->id)->count(),
             'reels_count' => Reel::where('user_id', $user->id)->count(),
             'tickets_count' => SupportTicket::where('user_id', $user->id)->count(),

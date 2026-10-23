@@ -233,7 +233,7 @@ class DelegationService
             }
 
             // Vérifier la validité du bailleur et du bien
-            if ($locked->listing->trashed()) {
+            if (! $locked->listing || $locked->listing->trashed()) {
                 throw ValidationException::withMessages([
                     'delegation' => ['L\'annonce immobilière concernée n\'est plus disponible.'],
                 ]);
@@ -301,7 +301,28 @@ class DelegationService
             throw new AuthorizationException('Vous n\'êtes pas autorisé à révoquer cette délégation.');
         }
 
-        return DB::transaction(function () use ($delegation, $actor, $reason) {
+        return $this->performRevocation($delegation, $actor, $reason);
+    }
+
+    /**
+     * Révoque les mandats actifs ou en attente d'une annonce supprimée et prévient les agents.
+     */
+    public function revokeForDeletedListing(Listing $listing, User $actor): int
+    {
+        $delegations = Delegation::where('listing_id', $listing->id)
+            ->whereIn('status', [DelegationStatus::Active->value, DelegationStatus::Pending->value])
+            ->get();
+
+        foreach ($delegations as $delegation) {
+            $this->performRevocation($delegation, $actor, 'annonce supprimée', true);
+        }
+
+        return $delegations->count();
+    }
+
+    private function performRevocation(Delegation $delegation, User $actor, ?string $reason, bool $notifyPending = false): Delegation
+    {
+        return DB::transaction(function () use ($delegation, $actor, $reason, $notifyPending) {
             /** @var Delegation $locked */
             $locked = Delegation::where('id', $delegation->id)->lockForUpdate()->firstOrFail();
 
@@ -323,12 +344,12 @@ class DelegationService
             $locked->save();
 
             // Si l'agent était affecté comme gestionnaire exclusif sur l'annonce, le désassigner
-            if ($locked->listing->agent_id === $locked->agent_id) {
+            if ($locked->listing && $locked->listing->agent_id === $locked->agent_id) {
                 $locked->listing->agent_id = null;
                 $locked->listing->save();
             }
 
-            if ($previousStatus === DelegationStatus::Active) {
+            if ($previousStatus === DelegationStatus::Active || $notifyPending) {
                 try {
                     $locked->agent->notify(new DelegationRevokedNotification($locked, $reason));
                 } catch (\Throwable $e) {

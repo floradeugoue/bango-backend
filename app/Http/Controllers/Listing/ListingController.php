@@ -11,6 +11,7 @@ use App\Http\Resources\Listing\ListingDetailResource;
 use App\Http\Resources\Listing\ListingResource;
 use App\Models\Listing\Listing;
 use App\Policies\ListingPolicy;
+use App\Services\Delegation\DelegationService;
 use App\Services\Listing\ListingSearchService;
 use App\Services\Listing\ListingService;
 use App\Services\Subscription\BadgeResolutionService;
@@ -60,8 +61,34 @@ class ListingController extends Controller
     {
         $viewer = $request->user() ?? $request->user('api');
 
-        /** @var Listing $listing */
-        $listing = Listing::with(['owner', 'agent', 'media', 'saves'])->findOrFail($id);
+        /** @var Listing|null $listing */
+        $listing = Listing::withTrashed()->with(['owner', 'agent', 'media', 'saves'])->find($id);
+
+        if (! $listing) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cette annonce immobilière n\'existe pas.',
+            ], 404);
+        }
+
+        // Si l'annonce a été supprimée ou retirée, rendre 410 avec les détails géographiques et la raison (IM-21)
+        if ($listing->trashed()) {
+            $reason = 'withdrawn';
+            if ($listing->status === ListingStatus::Taken) {
+                $reason = 'rented';
+            } elseif ($listing->withdrawn_by_bango || $listing->status === ListingStatus::Rejected) {
+                $reason = 'moderated';
+            }
+
+            return response()->json([
+                'title' => $listing->title,
+                'city' => $listing->city,
+                'neighbourhood' => $listing->neighbourhood,
+                'mode' => $listing->mode?->value ?? (string) $listing->mode,
+                'removed_at' => $listing->deleted_at?->toIso8601String(),
+                'reason' => $reason,
+            ], 410);
+        }
 
         // Contrôle d'accès et de visibilité selon la policy
         if (! (new ListingPolicy($this->listingService))->view($viewer, $listing)) {
@@ -162,6 +189,8 @@ class ListingController extends Controller
         }
 
         $listing->delete();
+
+        app(DelegationService::class)->revokeForDeletedListing($listing, $user);
 
         return response()->json([
             'success' => true,

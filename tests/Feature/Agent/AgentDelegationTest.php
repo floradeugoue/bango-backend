@@ -481,3 +481,61 @@ test('public users can search certified agents without exposing private informat
     $first = $response->json('data.0');
     expect($first)->not->toHaveKeys(['password', 'remember_token', 'kyc_submissions', 'verification_lapsed']);
 });
+
+test('deleting a listing revokes its mandates, notifies the agent and hides them from lists', function (): void {
+    Notification::fake();
+
+    $landlord = ($this->createLandlord)(['name' => 'jeanpaul', 'display_name' => 'Jean-Paul Kamga']);
+    $agent = ($this->createAgent)();
+    $listing = Listing::factory()->published()->create(['owner_id' => $landlord->id]);
+
+    $active = Delegation::create([
+        'bailleur_id' => $landlord->id,
+        'agent_id' => $agent->id,
+        'listing_id' => $listing->id,
+        'status' => DelegationStatus::Active,
+        'capabilities' => [DelegationCapability::Visits->value],
+        'invited_at' => now()->subDay(),
+        'answered_at' => now()->subHours(12),
+    ]);
+
+    Passport::actingAs($landlord);
+
+    $this->getJson('/api/landlord/delegations')
+        ->assertOk()
+        ->assertJsonPath('data.0.bailleur_name', 'Jean-Paul Kamga');
+
+    $this->deleteJson("/api/listings/{$listing->id}")->assertOk();
+
+    $active->refresh();
+    expect($active->status)->toBe(DelegationStatus::Revoked);
+    expect($active->metadata['revocation_reason'])->toBe('annonce supprimée');
+    Notification::assertSentTo($agent, DelegationRevokedNotification::class);
+
+    expect($this->getJson('/api/landlord/delegations')->assertOk()->json('data'))->toBeEmpty();
+
+    Passport::actingAs($agent);
+    expect($this->getJson('/api/agent/invitations')->assertOk()->json('data'))->toBeEmpty();
+});
+
+test('revoking a mandate whose listing is already deleted does not crash', function (): void {
+    $landlord = ($this->createLandlord)();
+    $agent = ($this->createAgent)();
+    $listing = Listing::factory()->published()->create(['owner_id' => $landlord->id]);
+
+    $delegation = Delegation::create([
+        'bailleur_id' => $landlord->id,
+        'agent_id' => $agent->id,
+        'listing_id' => $listing->id,
+        'status' => DelegationStatus::Active,
+        'capabilities' => [DelegationCapability::Visits->value],
+        'invited_at' => now()->subDay(),
+    ]);
+
+    $listing->delete();
+    Passport::actingAs($landlord);
+
+    $this->deleteJson("/api/landlord/delegations/{$delegation->id}")
+        ->assertOk()
+        ->assertJsonPath('data.status', DelegationStatus::Revoked->value);
+});

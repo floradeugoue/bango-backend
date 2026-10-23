@@ -41,10 +41,11 @@ class PostFeedService
             $u->where('status', '!=', 'suspended');
         });
 
-        // Exclure les utilisateurs bloqués si l'utilisateur est connecté
+        // Exclure les utilisateurs bloqués et masqués (mutes actifs) si l'utilisateur est connecté
         if ($user) {
             $blockedIds = $user->blockedUsers()->pluck('blocked_id')
                 ->merge($user->blockedByUsers()->pluck('blocker_id'))
+                ->merge($user->activeMutedUserIds())
                 ->unique()
                 ->all();
 
@@ -111,17 +112,43 @@ class PostFeedService
 
             $query->whereIn('user_id', $followingIds);
         } elseif ($tab === 'neighbourhood' && $user) {
-            // Posts dans le même quartier ou la même ville
-            if (! $user->neighbourhood && ! $user->city) {
+            // Mon quartier uniquement (et la même ville) ; à défaut de lieu sur la publication, le quartier du profil de l'auteur
+            $neighbourhood = $user->getRawOriginal('neighbourhood');
+            $city = $user->getRawOriginal('city');
+
+            if (! $neighbourhood) {
                 $query->whereRaw('1 = 0');
             } else {
-                $query->where(function (Builder $q) use ($user) {
-                    if ($user->neighbourhood) {
-                        $q->where('place_neighbourhood', $user->neighbourhood);
-                    }
-                    if ($user->city) {
-                        $q->orWhere('place_city', $user->city);
-                    }
+                $query->where(function (Builder $q) use ($neighbourhood, $city) {
+                    $q->where(function (Builder $placed) use ($neighbourhood, $city) {
+                        $placed->where('place_neighbourhood', $neighbourhood);
+                        if ($city) {
+                            $placed->where('place_city', $city);
+                        }
+                    })->orWhere(function (Builder $unplaced) use ($neighbourhood, $city) {
+                        $unplaced->where(fn (Builder $empty) => $empty->whereNull('place_neighbourhood')->orWhere('place_neighbourhood', ''))
+                            ->whereHas('user', function (Builder $author) use ($neighbourhood, $city) {
+                                $author->where('neighbourhood', $neighbourhood);
+                                if ($city) {
+                                    $author->where('city', $city);
+                                }
+                            });
+                    });
+                });
+            }
+        } elseif ($tab === 'city' && $user) {
+            // Toute ma ville : lieu de la publication, ou ville du profil de l'auteur à défaut de lieu
+            $city = $user->getRawOriginal('city');
+
+            if (! $city) {
+                $query->whereRaw('1 = 0');
+            } else {
+                $query->where(function (Builder $q) use ($city) {
+                    $q->where('place_city', $city)
+                        ->orWhere(function (Builder $unplaced) use ($city) {
+                            $unplaced->where(fn (Builder $empty) => $empty->whereNull('place_city')->orWhere('place_city', ''))
+                                ->whereHas('user', fn (Builder $author) => $author->where('city', $city));
+                        });
                 });
             }
         } else {

@@ -49,7 +49,7 @@ class AdminStrategicStatsService
         $netRevenue = $grossRevenue - $refundsAmount - $providerFees;
 
         // 2. Abonnements et Badges actifs
-        $activeSubscriptions = Subscription::where('status', 'active')->count();
+        $activeSubscriptions = Subscription::where('state', 'active')->count();
 
         $badgesBreakdown = [
             'landlord' => User::where('badge', 'landlord')->count(),
@@ -118,7 +118,7 @@ class AdminStrategicStatsService
             ->count('user_id');
 
         $activeSubscribers = Subscription::whereBetween('created_at', [$from, $to])
-            ->where('status', 'active')
+            ->where('state', 'active')
             ->distinct('user_id')
             ->count('user_id');
 

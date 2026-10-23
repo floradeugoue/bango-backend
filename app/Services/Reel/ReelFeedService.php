@@ -49,9 +49,10 @@ class ReelFeedService
                 $q->where('users.id', $user->id);
             });
 
-            // Exclure les créateurs bloqués
+            // Exclure les créateurs bloqués et masqués (mutes actifs)
             $blockedUserIds = $user->blockedUsers()->pluck('blocked_id')
                 ->merge($user->blockedByUsers()->pluck('blocker_id'))
+                ->merge($user->activeMutedUserIds())
                 ->unique();
 
             if ($blockedUserIds->isNotEmpty()) {

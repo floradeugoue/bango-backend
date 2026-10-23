@@ -2,7 +2,13 @@
 
 namespace App\Services\Payment;
 
+use App\Enums\Payment\PaymentServiceType;
+use App\Enums\Payment\PaymentStatus;
 use App\Models\Payment\PaymentTransaction;
+use App\Models\User;
+use App\Models\Visit\VisitReservation;
+use Carbon\Carbon;
+use Illuminate\Support\Collection;
 
 class ReceiptPdfService
 {
@@ -46,6 +52,25 @@ class ReceiptPdfService
             "Type de service      : {$serviceLabel}",
             "Canal de paiement    : {$channel} ({$provider})",
             "Reference operateur  : {$externalRef}",
+        ];
+
+        // Pour les abonnements, mention de la période couverte
+        if ($transaction->service_type === PaymentServiceType::Subscription || $transaction->subscription_id) {
+            $periodStart = $transaction->subscription?->current_period_start
+                ?? (isset($transaction->metadata['period_start']) ? Carbon::parse($transaction->metadata['period_start']) : null)
+                ?? $transaction->confirmed_at
+                ?? $transaction->created_at;
+
+            $periodEnd = $transaction->subscription?->current_period_end
+                ?? (isset($transaction->metadata['period_end']) ? Carbon::parse($transaction->metadata['period_end']) : null)
+                ?? ($periodStart ? $periodStart->copy()->addMonth() : null);
+
+            if ($periodStart && $periodEnd) {
+                $lines[] = sprintf('Periode couverte     : %s -> %s', $periodStart->format('d/m/Y'), $periodEnd->format('d/m/Y'));
+            }
+        }
+
+        $lines = array_merge($lines, [
             '',
             '------------------------------------------------------------------------',
             'VENTILATION FINANCIERE',
@@ -62,9 +87,138 @@ class ReceiptPdfService
             'Ce document tient lieu de justificatif de paiement certifie conforme.',
             'BANGO SAS - Plateforme de mise en relation immobiliere et sociale.',
             '========================================================================',
-        ];
+        ]);
 
         return $this->buildPdfBinary($lines, "Recu {$ref}");
+    }
+
+    /**
+     * Génère le reçu PDF officiel pour une réservation de visite (même réglée par crédits BANGO).
+     */
+    public function generateVisitReceiptPdf(VisitReservation $reservation): string
+    {
+        $ref = $reservation->payment_reference ?? ('VISIT-'.$reservation->id);
+        $date = $reservation->paid_at ? $reservation->paid_at->format('d/m/Y H:i:s') : ($reservation->created_at ? $reservation->created_at->format('d/m/Y H:i:s') : now()->format('d/m/Y H:i:s'));
+        $fee = (float) $reservation->fee_amount;
+        $amount = number_format($fee, 2, ',', ' ').' '.$reservation->currency;
+        $prospectName = $reservation->prospect?->name ?? 'Client BANGO';
+        $prospectEmail = $reservation->prospect?->email ?? 'N/A';
+        $prospectPhone = $reservation->prospect_phone ?? ($reservation->prospect?->phone ?? 'N/A');
+
+        $listing = $reservation->listing;
+        $listingTitle = $listing?->title ?? 'Annonce immobiliere BANGO';
+        $listingLoc = trim(($listing?->neighbourhood ? $listing->neighbourhood.', ' : '').($listing?->city ?? ''));
+        $scheduledAt = $reservation->slot?->start_at ? $reservation->slot->start_at->format('d/m/Y a H:i') : 'Date a convenir';
+
+        $channel = $reservation->paymentTransaction?->channel?->value ?? ($fee > 0 && str_contains($ref, 'CREDIT') ? 'Portefeuille Credits BANGO' : 'Prestation directe');
+        $signature = strtoupper(substr(hash('sha256', "BANGO:VISIT:{$reservation->id}:{$fee}:{$reservation->prospect_id}"), 0, 24));
+
+        $lines = [
+            '========================================================================',
+            '                        BANGO TECHNOLOGIES LTD                         ',
+            '                RECU OFFICIEL DE VISITE IMMOBILIERE                    ',
+            '========================================================================',
+            '',
+            "Reference du recu    : REC-{$ref}",
+            "Reservation visite   : {$reservation->id}",
+            "Date et heure reglt  : {$date}",
+            "Statut reservation   : {$reservation->status->value}",
+            '',
+            '------------------------------------------------------------------------',
+            'INFORMATIONS DU PROSPECT',
+            '------------------------------------------------------------------------',
+            "Nom et Prenom        : {$prospectName}",
+            "Telephone            : {$prospectPhone}",
+            "Email                : {$prospectEmail}",
+            '',
+            '------------------------------------------------------------------------',
+            'DETAILS DU BIEN ET DU CRENEAU',
+            '------------------------------------------------------------------------',
+            "Bien concerne        : {$listingTitle}",
+            "Localisation         : {$listingLoc}",
+            "Creneau programme    : {$scheduledAt}",
+            "Mode de reglement    : {$channel}",
+            '',
+            '------------------------------------------------------------------------',
+            'VENTILATION FINANCIERE',
+            '------------------------------------------------------------------------',
+            "Frais de visite      : {$amount}",
+            '------------------------------------------------------------------------',
+            "TOTAL ACQUITTE       : {$amount}",
+            '========================================================================',
+            '',
+            'CERTIFICAT D AUTHENTICITE NUMERIQUE BANGO',
+            "Signature numerique  : {$signature}",
+            'Ce document tient lieu de justificatif officiel de reservation de visite.',
+            'BANGO SAS - Plateforme de mise en relation immobiliere et sociale.',
+            '========================================================================',
+        ];
+
+        return $this->buildPdfBinary($lines, "Recu Visite {$reservation->id}");
+    }
+
+    /**
+     * Génère un relevé financier de transactions (statement.pdf) signé numériquement.
+     *
+     * @param  Collection<int, PaymentTransaction>  $transactions
+     */
+    public function generateStatementPdf(User $user, Collection $transactions, ?Carbon $from = null, ?Carbon $to = null): string
+    {
+        $userName = $user->name ?? 'Client BANGO';
+        $userEmail = $user->email ?? 'N/A';
+        $generatedAt = now()->format('d/m/Y H:i:s');
+        $periodLabel = ($from || $to)
+            ? sprintf('%s -> %s', $from ? $from->format('d/m/Y') : 'Debut', $to ? $to->format('d/m/Y') : 'A ce jour')
+            : 'Toutes les transactions';
+
+        $totalSpent = $transactions->where('status', PaymentStatus::Confirmed)->sum('total_amount');
+        $count = $transactions->count();
+
+        $signature = strtoupper(substr(hash('sha256', "BANGO:STATEMENT:{$user->id}:{$count}:{$totalSpent}"), 0, 24));
+
+        $lines = [
+            '========================================================================',
+            '                        BANGO TECHNOLOGIES LTD                         ',
+            '                     RELEVE DE TRANSACTIONS BANGO                      ',
+            '========================================================================',
+            '',
+            "Titulaire du compte  : {$userName}",
+            "Email                : {$userEmail}",
+            "Date d emission      : {$generatedAt}",
+            "Periode analysee     : {$periodLabel}",
+            "Nombre d operations  : {$count}",
+            sprintf('Volume total confirme: %s XAF', number_format((float) $totalSpent, 2, ',', ' ')),
+            '',
+            '------------------------------------------------------------------------',
+            sprintf('%-12s | %-16s | %-16s | %-10s | %s', 'DATE', 'REFERENCE', 'MONTANT', 'STATUT', 'SERVICE'),
+            '------------------------------------------------------------------------',
+        ];
+
+        foreach ($transactions as $tx) {
+            $txDate = $tx->created_at ? $tx->created_at->format('d/m/Y') : '-';
+            $txRef = substr($tx->reference, 0, 16);
+            $txAmount = sprintf('%s %s', number_format((float) $tx->total_amount, 0, ',', ' '), $tx->currency ?? 'XAF');
+            $txStatus = substr($tx->status?->value ?? (string) $tx->status, 0, 10);
+            $txService = substr($tx->service_type?->value ?? (string) $tx->service_type, 0, 15);
+
+            $lines[] = sprintf('%-12s | %-16s | %-16s | %-10s | %s', $txDate, $txRef, $txAmount, $txStatus, $txService);
+        }
+
+        if ($transactions->isEmpty()) {
+            $lines[] = 'Aucune transaction enregistree pour les criteres selectionnes.';
+        }
+
+        $lines = array_merge($lines, [
+            '------------------------------------------------------------------------',
+            '',
+            'CERTIFICAT D AUTHENTICITE NUMERIQUE BANGO',
+            "Signature numerique  : {$signature}",
+            'Ce releve officiel certifie l historique des operations du compte.',
+            'BANGO SAS - Plateforme de mise en relation immobiliere et sociale.',
+            '========================================================================',
+        ]);
+
+        return $this->buildPdfBinary($lines, "Releve {$user->id}");
     }
 
     /**
@@ -90,7 +244,7 @@ class ReceiptPdfService
      */
     protected function buildPdfBinary(array $textLines, string $title): string
     {
-        $streamContent = "BT\n/F1 10 Tf\n40 780 Td\n14 TL\n";
+        $streamContent = "BT\n/F1 9 Tf\n40 790 Td\n13 TL\n";
         foreach ($textLines as $line) {
             // Échapper les parenthèses et backslash pour les chaînes de texte PDF
             $escaped = str_replace(['\\', '(', ')'], ['\\\\', '\\(', '\\)'], $line);

@@ -11,19 +11,24 @@ use App\Http\Resources\Visit\VisitReservationResource;
 use App\Models\Listing\Listing;
 use App\Models\Visit\VisitReservation;
 use App\Models\Visit\VisitSlot;
+use App\Services\Payment\ReceiptPdfService;
 use App\Services\Visit\VisitReservationService;
 use App\Services\Visit\VisitSlotService;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Http\Response;
 
 class ProspectVisitController extends Controller
 {
     public function __construct(
         protected VisitSlotService $slotService,
-        protected VisitReservationService $reservationService
-    ) {}
+        protected VisitReservationService $reservationService,
+        protected ?ReceiptPdfService $pdfService = null
+    ) {
+        $this->pdfService ??= app(ReceiptPdfService::class);
+    }
 
     /**
      * Consulter les créneaux disponibles pour une annonce.
@@ -188,6 +193,29 @@ class ProspectVisitController extends Controller
 
         return response()->json([
             'data' => new VisitReceiptResource($reservation),
+        ]);
+    }
+
+    /**
+     * Téléchargement du reçu officiel de visite au format PDF signé (PAY-23).
+     * GET /api/visits/{id}/receipt.pdf
+     */
+    public function receiptPdf(Request $request, string $id): Response
+    {
+        $reservation = VisitReservation::with(['listing', 'slot', 'prospect', 'paymentTransaction'])->findOrFail($id);
+
+        $user = $request->user();
+        if ($user->id !== $reservation->prospect_id && ! $user->isAdmin()) {
+            throw new AuthorizationException('Accès refusé au reçu de visite.');
+        }
+
+        $pdfBinary = $this->pdfService->generateVisitReceiptPdf($reservation);
+        $filename = "recu-visite-{$reservation->id}.pdf";
+
+        return response($pdfBinary, 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => "attachment; filename=\"{$filename}\"",
+            'Cache-Control' => 'no-cache, private',
         ]);
     }
 }

@@ -18,6 +18,10 @@ class CityController extends Controller
 
         if ($request->has('country_id')) {
             $query->where('country_id', $request->country_id);
+        } elseif ($request->has('country_code')) {
+            $query->whereHas('country', fn ($q) => $q->where('code', $request->country_code)->orWhere('iso2', $request->country_code));
+        } elseif ($request->has('iso2')) {
+            $query->whereHas('country', fn ($q) => $q->where('iso2', $request->iso2));
         }
 
         if ($request->has('is_active')) {
@@ -35,13 +39,33 @@ class CityController extends Controller
         $validated = $request->validate([
             'country_id' => 'required|exists:countries,id',
             'name' => 'required|string|max:100',
-            'slug' => 'nullable|string|max:100|unique:cities,slug',
+            'slug' => 'nullable|string|max:255',
+            'lat' => 'nullable|numeric|between:-90,90',
+            'lng' => 'nullable|numeric|between:-180,180',
             'is_active' => 'sometimes|boolean',
         ]);
 
-        if (empty($validated['slug'])) {
-            $validated['slug'] = Str::slug($validated['name']);
+        // Idempotence : si la ville existe déjà pour ce pays
+        $existing = City::where('country_id', $validated['country_id'])
+            ->whereRaw('LOWER(name) = ?', [mb_strtolower($validated['name'])])
+            ->first();
+
+        if ($existing) {
+            if ($request->filled('lat') || $request->filled('lng')) {
+                $existing->update($request->only(['lat', 'lng']));
+            }
+
+            return response()->json($existing->load('country'), 200);
         }
+
+        $slug = ! empty($validated['slug']) ? $validated['slug'] : Str::slug($validated['name']);
+        $baseSlug = $slug;
+        $counter = 1;
+        while (City::where('slug', $slug)->exists()) {
+            $slug = "{$baseSlug}-{$counter}";
+            $counter++;
+        }
+        $validated['slug'] = $slug;
 
         $city = City::create($validated);
 
@@ -65,7 +89,9 @@ class CityController extends Controller
         $validated = $request->validate([
             'country_id' => 'sometimes|exists:countries,id',
             'name' => 'sometimes|string|max:100',
-            'slug' => 'sometimes|string|max:100|unique:cities,slug,'.$city->id,
+            'slug' => 'sometimes|string|max:255|unique:cities,slug,'.$city->id,
+            'lat' => 'nullable|numeric|between:-90,90',
+            'lng' => 'nullable|numeric|between:-180,180',
             'is_active' => 'sometimes|boolean',
         ]);
 

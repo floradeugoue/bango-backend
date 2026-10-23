@@ -9,6 +9,8 @@ use App\Models\Subscription\Subscription;
 use App\Models\Subscription\SubscriptionProduct;
 use App\Models\User;
 use App\Services\Payment\Gateways\MonetbilGateway;
+use App\Services\Payment\ReceiptPdfService;
+use Carbon\Carbon;
 use Database\Seeders\RoleSeeder;
 use Database\Seeders\SubscriptionCatalogSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -292,4 +294,67 @@ it('returns paginated payment history isolated to authenticated user without exp
     $content = $res->getContent();
     expect($content)->not->toContain('mock_service_secret')
         ->and($content)->not->toContain('service_key');
+});
+
+it('renders period_start and period_end for subscription service_type in payment resource and PDF receipt', function () {
+    $user = User::factory()->create();
+    $subProduct = SubscriptionProduct::where('code', 'landlord')->first();
+    $subPrice = $subProduct->prices()->first();
+
+    $start = Carbon::parse('2026-10-01 00:00:00');
+    $end = Carbon::parse('2026-10-31 23:59:59');
+
+    $subscription = Subscription::create([
+        'user_id' => $user->id,
+        'product_id' => $subProduct->id,
+        'price_id' => $subPrice->id,
+        'badge_type' => 'landlord',
+        'cadence' => 'monthly',
+        'state' => 'active',
+        'amount' => 15000,
+        'currency' => 'XAF',
+        'current_period_start' => $start,
+        'current_period_end' => $end,
+        'auto_renew' => true,
+    ]);
+
+    $transaction = PaymentTransaction::create([
+        'reference' => 'TX-SUB-OCTOBER',
+        'idempotency_key' => (string) Str::uuid(),
+        'user_id' => $user->id,
+        'subscription_id' => $subscription->id,
+        'product_id' => $subProduct->id,
+        'price_id' => $subPrice->id,
+        'service_type' => PaymentServiceType::Subscription,
+        'provider' => PaymentProvider::Monetbil,
+        'channel' => PaymentChannel::MobileMoney,
+        'currency' => 'XAF',
+        'amount' => 15000,
+        'fee_amount' => 300,
+        'tax_amount' => 0,
+        'total_amount' => 15300,
+        'amount_charged' => 15300,
+        'status' => PaymentStatus::Confirmed,
+        'confirmed_at' => $start,
+    ]);
+
+    Passport::actingAs($user);
+
+    // 1. GET /api/payments/history
+    $historyRes = getJson('/api/payments/history');
+    $historyRes->assertOk();
+    $item = collect($historyRes->json('data'))->firstWhere('id', (string) $transaction->id);
+    expect($item)->not->toBeNull()
+        ->and($item['period_start'])->toBe($start->toIso8601String())
+        ->and($item['period_end'])->toBe($end->toIso8601String());
+
+    // 2. GET /api/payments/{id}/status
+    $statusRes = getJson("/api/payments/{$transaction->id}/status");
+    $statusRes->assertOk()
+        ->assertJsonPath('data.period_start', $start->toIso8601String())
+        ->assertJsonPath('data.period_end', $end->toIso8601String());
+
+    // 3. GET /api/payments/{id}/receipt (PDF)
+    $receiptPdf = app(ReceiptPdfService::class)->generateReceiptPdf($transaction);
+    expect($receiptPdf)->toContain('Periode couverte     : 01/10/2026 -> 31/10/2026');
 });

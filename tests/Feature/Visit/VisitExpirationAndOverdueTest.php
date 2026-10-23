@@ -87,8 +87,9 @@ test('expire-pending command expires reservations with expired 15m lock and rele
         ->and($validReservation->fresh()->lock_expires_at)->not->toBeNull();
 });
 
-test('settle-overdue command auto-declines requests unanswered after 18h and triggers refund', function (): void {
-    // Demande de visite payée il y a 19 heures sans réponse du bailleur
+test('settle-overdue command auto-declines requests unanswered after delay and triggers refund', function (): void {
+    // Demande de visite payée au-delà du délai sans réponse du bailleur
+    $answerHours = (int) config('visits.answer_hours', 24);
     $overdueReservation = VisitReservation::create([
         'listing_id' => $this->listing->id,
         'slot_id' => $this->slot->id,
@@ -97,7 +98,7 @@ test('settle-overdue command auto-declines requests unanswered after 18h and tri
         'status' => VisitReservationStatus::Requested,
         'fee' => 5000,
         'currency' => 'XAF',
-        'paid_at' => now()->subHours(19),
+        'paid_at' => now()->subHours($answerHours + 1),
     ]);
 
     $tx = PaymentTransaction::create([

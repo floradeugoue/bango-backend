@@ -24,11 +24,11 @@ class AppVersionController extends Controller
 
         $platform = strtolower(trim((string) $platform));
 
-        if (! in_array($platform, ['android', 'ios'], true)) {
+        if (! in_array($platform, ['android', 'ios', 'web'], true)) {
             return response()->json([
-                'message' => 'La plateforme demandée est invalide. Valeurs acceptées : android, ios.',
+                'message' => 'La plateforme demandée est invalide. Valeurs acceptées : android, ios, web.',
                 'errors' => [
-                    'platform' => ['La plateforme doit être soit android, soit ios.'],
+                    'platform' => ['La plateforme doit être soit android, soit ios, soit web.'],
                 ],
             ], 422);
         }

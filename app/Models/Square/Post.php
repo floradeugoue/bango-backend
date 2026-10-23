@@ -42,6 +42,7 @@ class Post extends Model
         'likes_count',
         'comments_count',
         'shares_count',
+        'views_count',
         'pinned_comment_id',
     ];
 
@@ -61,6 +62,7 @@ class Post extends Model
             'likes_count' => 'integer',
             'comments_count' => 'integer',
             'shares_count' => 'integer',
+            'views_count' => 'integer',
         ];
     }
 

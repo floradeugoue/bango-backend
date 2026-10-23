@@ -23,6 +23,7 @@ use App\Http\Controllers\Credits\CreditTransactionController;
 use App\Http\Controllers\Geo\CityController;
 use App\Http\Controllers\Geo\CountryController;
 use App\Http\Controllers\Geo\CurrencyController;
+use App\Http\Controllers\Geo\GenderController;
 use App\Http\Controllers\Geo\NeighbourhoodController;
 use App\Http\Controllers\Geo\OperatorController;
 use App\Http\Controllers\Housing\HousingSearchController;
@@ -34,9 +35,11 @@ use App\Http\Controllers\Legal\CopyrightClaimController;
 use App\Http\Controllers\Legal\DataExportController;
 use App\Http\Controllers\Legal\LegalDocumentController;
 use App\Http\Controllers\Legal\TermsAcceptanceController;
+use App\Http\Controllers\Listing\ListingAlertController;
 use App\Http\Controllers\Listing\ListingCommentController;
 use App\Http\Controllers\Listing\ListingController;
 use App\Http\Controllers\Listing\ListingDraftController;
+use App\Http\Controllers\Listing\ListingLikeController;
 use App\Http\Controllers\Listing\ListingMapController;
 use App\Http\Controllers\Listing\ListingMediaController;
 use App\Http\Controllers\Listing\ListingSaveController;
@@ -68,6 +71,7 @@ use App\Http\Controllers\Profile\FollowController;
 use App\Http\Controllers\Profile\FollowRequestController;
 use App\Http\Controllers\Profile\HandleCheckController;
 use App\Http\Controllers\Profile\HandleSuggestionController;
+use App\Http\Controllers\Profile\MuteController;
 use App\Http\Controllers\Profile\PasswordController;
 use App\Http\Controllers\Profile\PrivacyController;
 use App\Http\Controllers\Profile\ProfileController;
@@ -98,6 +102,7 @@ use App\Http\Controllers\Square\PostController;
 use App\Http\Controllers\Square\PostFeedController;
 use App\Http\Controllers\Square\PostLikeController;
 use App\Http\Controllers\Square\PostShareController;
+use App\Http\Controllers\Square\PostViewController;
 use App\Http\Controllers\Story\CloseListController;
 use App\Http\Controllers\Story\HighlightController;
 use App\Http\Controllers\Story\StoryController;
@@ -113,6 +118,7 @@ use App\Http\Controllers\Sync\OfflineSyncController;
 use App\Http\Controllers\System\AppVersionController;
 use App\Http\Controllers\Upload\TusUploadController;
 use App\Http\Controllers\Visit\LandlordVisitController;
+use App\Http\Controllers\Visit\ListingVisitRequestController;
 use App\Http\Controllers\Visit\ProspectVisitController;
 use App\Http\Resources\UserResource;
 use App\Models\Profile\Interest;
@@ -155,6 +161,8 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('auth')->group(function () {
     // Création d'un nouveau compte utilisateur
     Route::post('/signup', SignupController::class);
+    // Annulation immédiate de l'inscription et effacement du compte (LG-09)
+    Route::delete('/signup', [SignupController::class, 'destroy'])->middleware('auth:api');
     // Connexion et génération du token d'accès (Passport)
     Route::post('/signin', SigninController::class);
     // Validation du second facteur (2FA)
@@ -218,7 +226,12 @@ Route::prefix('geo')->group(function () {
     Route::apiResource('neighbourhoods', NeighbourhoodController::class)->only(['index', 'show']);
     // Lister et afficher un opérateur téléphonique/internet
     Route::apiResource('operators', OperatorController::class)->only(['index', 'show']);
+    // Lister les genres acceptés (AU-07)
+    Route::get('/genders', [GenderController::class, 'index'])->name('api.geo.genders');
 });
+
+// Alias pour GET /genders (AU-07)
+Route::get('/genders', [GenderController::class, 'index'])->name('api.genders');
 
 // --------------------------------------------------------------------------
 // AGENTS — ANNUAIRE PUBLIC & RECHERCHE (AG-06)
@@ -420,7 +433,19 @@ Route::middleware('auth:api')->group(function () {
         Route::delete('/{id}/block', [BlockController::class, 'unblock']);
         // Débloquer un utilisateur (verbe POST)
         Route::post('/{id}/unblock', [BlockController::class, 'unblock']);
+
+        // Comptes masqués (RL-06 « Masquer ce compte 30 jours », menu L'Immo)
+        // Liste des comptes masqués par l'utilisateur connecté
+        Route::get('/muted', [MuteController::class, 'index'])->name('api.profile.muted');
+        // Masquer un compte utilisateur
+        Route::post('/{id}/mute', [MuteController::class, 'mute'])->name('api.profile.mute');
+        // Retirer le masquage d'un compte
+        Route::delete('/{id}/mute', [MuteController::class, 'unmute'])->name('api.profile.unmute');
     });
+
+    // Alias /users/{id}/mute pour compatibilité directe avec les spécifications frontend
+    Route::post('/users/{id}/mute', [MuteController::class, 'mute'])->name('api.users.mute');
+    Route::delete('/users/{id}/mute', [MuteController::class, 'unmute'])->name('api.users.unmute');
 
     // --------------------------------------------------------------------------
     // OTP (Authentification et vérifications diverses)
@@ -479,6 +504,15 @@ Route::middleware('auth:api')->group(function () {
         // Ressource : ListingSave | Accès : Authentifié | Isole strictement les favoris par utilisateur
         Route::get('/saved', [ListingSaveController::class, 'index'])->name('api.listings.saved.index');
 
+        // Alertes de recherche immobilière (IM-25, IM-26, IM-04, IM-06)
+        Route::get('/alerts', [ListingAlertController::class, 'index'])->name('api.listings.alerts.index');
+        Route::post('/alerts', [ListingAlertController::class, 'store'])->name('api.listings.alerts.store');
+        Route::patch('/alerts/{id}', [ListingAlertController::class, 'update'])->whereUuid('id')->name('api.listings.alerts.update');
+        Route::delete('/alerts/{id}', [ListingAlertController::class, 'destroy'])->whereUuid('id')->name('api.listings.alerts.destroy');
+
+        // Liste paginée des annonces aimées par l'utilisateur (IM-00a / profil onglet Immo « biens aimés »)
+        Route::get('/liked', [ListingLikeController::class, 'index'])->name('api.listings.liked.index');
+
         // Téléversement d'un média temporaire autonome pour l'assistant de publication (CR-42)
         // Ressource : Fichier temporaire | Accès : Authentifié | Validation stricte MIME/taille/ratio
         Route::post('/media', [ListingMediaController::class, 'uploadTemp'])->name('api.listings.media.uploadTemp');
@@ -494,6 +528,12 @@ Route::middleware('auth:api')->group(function () {
         // Retirer explicitement une annonce des favoris
         // Ressource : ListingSave | Accès : Authentifié | Idempotent
         Route::delete('/{id}/save', [ListingSaveController::class, 'destroy'])->whereUuid('id')->name('api.listings.save.destroy');
+
+        // Aimer une annonce (idempotent, IM-00a)
+        Route::post('/{id}/like', [ListingLikeController::class, 'store'])->whereUuid('id')->name('api.listings.like.store');
+
+        // Retirer son « j'aime » d'une annonce (idempotent, IM-00a)
+        Route::delete('/{id}/like', [ListingLikeController::class, 'destroy'])->whereUuid('id')->name('api.listings.like.destroy');
 
         // Mettre à jour les informations (titre, prix, charges) sans relancer l'examen vidéo (CR-48)
         // Ressource : Listing | Accès : Authentifié (propriétaire, agent délégué ou admin)
@@ -523,6 +563,10 @@ Route::middleware('auth:api')->group(function () {
         // Ressource : VisitReservation | Accès : Authentifié (prospect) | Transactionnel et atomique
         Route::post('/{id}/visits', [ProspectVisitController::class, 'book'])->whereUuid('id')->name('api.listings.visits.book');
 
+        // Demander une visite avec propositions de créneaux (IM-22 / IM-23 : bailleur sans agenda)
+        // Ressource : ListingVisitRequest | Accès : Authentifié (prospect)
+        Route::post('/{id}/visit-requests', [ListingVisitRequestController::class, 'store'])->whereUuid('id')->name('api.listings.visit_requests.store');
+
         // Commentaires sur une annonce immobilière
         // Lister les commentaires publiés sur une annonce immobilière
         Route::get('/{id}/comments', [ListingCommentController::class, 'index'])->whereUuid('id')->name('api.listings.comments.index');
@@ -539,6 +583,10 @@ Route::middleware('auth:api')->group(function () {
         // Historique paginé des visites de l'utilisateur connecté
         Route::get('/mine', [ProspectVisitController::class, 'mine'])->name('api.visits.mine');
 
+        // Demandes de visites sans agenda préalable (IM-22 / IM-23)
+        Route::get('/requests/{id}', [ListingVisitRequestController::class, 'show'])->whereUuid('id')->name('api.visits.requests.show');
+        Route::post('/requests/{id}/cancel', [ListingVisitRequestController::class, 'cancel'])->whereUuid('id')->name('api.visits.requests.cancel');
+
         // Consultation détaillée d'une réservation de visite
         Route::get('/{id}', [ProspectVisitController::class, 'show'])->whereUuid('id')->name('api.visits.show');
 
@@ -551,8 +599,9 @@ Route::middleware('auth:api')->group(function () {
         // Répondre à une proposition de créneau alternatif par le bailleur
         Route::post('/{id}/proposal/respond', [ProspectVisitController::class, 'respondToProposal'])->whereUuid('id')->name('api.visits.proposal.respond');
 
-        // Télécharger ou consulter le reçu officiel de visite
+        // Télécharger ou consulter le reçu officiel de visite (JSON et PDF signé)
         Route::get('/{id}/receipt', [ProspectVisitController::class, 'receipt'])->whereUuid('id')->name('api.visits.receipt');
+        Route::get('/{id}/receipt.pdf', [ProspectVisitController::class, 'receiptPdf'])->whereUuid('id')->name('api.visits.receipt.pdf');
     });
 
     // --------------------------------------------------------------------------
@@ -593,6 +642,9 @@ Route::middleware('auth:api')->group(function () {
 
         // Consulter toutes les demandes de visite entrantes du bailleur (BL-07)
         Route::get('/visit-requests', [LandlordPropertyController::class, 'visitRequests'])->name('api.landlord.visit_requests');
+
+        // Choisir un créneau parmi les propositions d'une demande de visite (IM-22 / IM-23)
+        Route::post('/visit-requests/{id}/choose', [ListingVisitRequestController::class, 'choose'])->whereUuid('id')->name('api.landlord.visit_requests.choose');
 
         // Consulter les demandes et réservations de visite d'un bien spécifique (BL-07)
         Route::get('/properties/{id}/visit-requests', [LandlordVisitController::class, 'visitRequests'])->whereUuid('id')->name('api.landlord.properties.visit_requests');
@@ -777,8 +829,12 @@ Route::middleware('auth:api')->group(function () {
 
         // Obtenir le statut en temps réel d'un paiement (polling 120s / reprise réseau)
         Route::get('/{id}/status', [PaymentController::class, 'status']);
+        // Télécharger le relevé de paiements PDF officiel du compte (PAY-21)
+        Route::get('/statement.pdf', [PaymentReceiptController::class, 'downloadStatement'])->name('api.payments.statement.pdf');
         // Télécharger le reçu PDF officiel d'une transaction (Étape 10)
         Route::get('/{id}/receipt', [PaymentReceiptController::class, 'downloadReceipt'])->name('api.payments.receipt.download');
+        // Envoyer le reçu PDF officiel par courrier électronique (PAY-23)
+        Route::post('/{id}/receipt/email', [PaymentReceiptController::class, 'sendReceiptEmail'])->name('api.payments.receipt.email');
         // Annuler un paiement en attente
         Route::post('/{id}/cancel', [PaymentController::class, 'cancel']);
         // Consulter l'historique paginé des transactions du client
@@ -792,6 +848,8 @@ Route::middleware('auth:api')->group(function () {
     Route::get('/square/feed', [PostFeedController::class, 'index'])->name('api.square.feed.alias');
     // Alias racine pour afficher une publication Square spécifique
     Route::get('/posts/{post}', [PostController::class, 'show'])->name('api.posts.show.alias');
+    // Enregistrer une vue de publication (au plus une par compte et par 24 h)
+    Route::post('/posts/{post}/view', [PostViewController::class, 'store'])->name('api.posts.view');
     // Alias racine pour lister les mentions « J'aime » d'une publication
     Route::get('/posts/{post}/likes', [PostLikeController::class, 'likers'])->name('api.posts.likes.alias');
     // Alias racine pour lister les commentaires d'une publication
@@ -802,6 +860,8 @@ Route::middleware('auth:api')->group(function () {
     Route::post('/posts/{post}/pin-comment', [PostCommentController::class, 'pin'])->name('api.posts.pin_comment.alias');
     // Alias racine pour lister les réponses d'un commentaire
     Route::get('/comments/{comment}/replies', [PostCommentController::class, 'replies'])->name('api.comments.replies.alias');
+    // Suggestions d'habitants et voisins (SQ-01, AU-19)
+    Route::get('/people/suggestions', [PeopleSearchController::class, 'suggestions'])->name('api.people.suggestions');
 
     Route::prefix('square-cr1')->group(function () {
         // Fil Square paginé (CR-11 et flux découverte, abonnés, voisinage)
@@ -814,6 +874,9 @@ Route::middleware('auth:api')->group(function () {
 
         // Afficher les détails d'une publication spécifique selon les règles d'audience
         Route::get('/posts/{post}', [PostController::class, 'show'])->name('api.posts.show');
+
+        // Enregistrer une vue de publication (au plus une par compte et par 24 h)
+        Route::post('/posts/{post}/view', [PostViewController::class, 'store'])->name('api.square.posts.view');
 
         // Supprimer une publication (SQ-15, réservé à l'auteur)
         Route::delete('/posts/{post}', [PostController::class, 'destroy'])->name('api.posts.destroy');
@@ -877,6 +940,8 @@ Route::middleware('auth:api')->group(function () {
 
         // Rechercher des personnes pour les identifier sur une photo ou les mentionner (CR-08)
         Route::get('/search/people', [PeopleSearchController::class, 'index'])->name('api.search.people');
+        // Suggestions de voisins et habitants (SQ-01, AU-19)
+        Route::get('/people/suggestions', [PeopleSearchController::class, 'suggestions'])->name('api.square.people.suggestions');
 
         // Rechercher des hashtags par correspondance textuelle et volume (CR-07)
         Route::get('/search/hashtags', [HashtagSearchController::class, 'trending']);
@@ -891,6 +956,8 @@ Route::middleware('auth:api')->group(function () {
     // MODULE RC — RECHERCHE GLOBALE ET DÉCOUVERTE (Posts, Hashtags, Tendances)
     // --------------------------------------------------------------------------
     Route::prefix('search')->group(function () {
+        // Rechercher des personnes et profils (CR-08, RC-02) avec filtres q, city, neighbourhood
+        Route::get('/people', [PeopleSearchController::class, 'index'])->name('api.search.people.global');
         // Rechercher des publications Square par mot-clé ou texte intégral
         Route::get('/posts', [PostSearchController::class, 'index'])->name('api.search.posts');
         // Rechercher et explorer des hashtags par préfixe ou volume

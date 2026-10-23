@@ -38,14 +38,16 @@ class AdminKycQueueController extends Controller
 
         // Transformation conforme au contrat TypeScript KycRow + compatibilité existante
         $items = collect($submissions->items())->map(function (KycSubmission $sub) {
+            $user = $sub->user;
+
             $badge = match ($sub->profile_category) {
                 'landlord' => 'bailleur',
                 'agent' => 'agent',
                 'page' => 'page',
-                default => $sub->user->badge ?? 'bailleur',
+                default => ($user?->badge && $user->badge !== 'none') ? $user->badge : null,
             };
 
-            $accountKind = ($sub->profile_category === 'page' || ($sub->user->account_type ?? null) === 'page') ? 'page' : 'person';
+            $accountKind = ($sub->profile_category === 'page' || ($user?->account_type ?? null) === 'page') ? 'page' : 'person';
             $kind = $sub->metadata['kind'] ?? 'new';
             $status = $sub->status->value === 'supplement_requested' ? 'more_info' : ($sub->status->value === 'approved' ? 'approved' : ($sub->status->value === 'rejected' ? 'rejected' : 'pending'));
 
@@ -53,17 +55,17 @@ class AdminKycQueueController extends Controller
                 'id' => (string) $sub->id,
                 'reference' => $sub->reference,
                 'account' => [
-                    'id' => (string) $sub->user->id,
-                    'name' => $sub->user->name ?? $sub->full_name,
-                    'handle' => $sub->user->handle ?? ('user'.$sub->user->id),
-                    'avatarUrl' => $sub->user->avatar_url,
-                    'city' => $sub->user->city ?? 'Dakar',
+                    'id' => $user ? (string) $user->id : null,
+                    'name' => $user?->name ?? $sub->full_name,
+                    'handle' => $user?->handle ?? ($user ? 'user'.$user->id : null),
+                    'avatarUrl' => $user?->avatar_url,
+                    'city' => $user?->city,
                 ],
                 'accountKind' => $accountKind,
                 'badge' => $badge,
                 'kind' => $kind,
-                'city' => $sub->user->city ?? 'Dakar',
-                'country' => $sub->user->country_code ?? 'SN',
+                'city' => $user?->city,
+                'country' => $user?->country_code,
                 'submittedAt' => $sub->created_at->toISOString(),
                 'attempt' => 1,
                 'docs' => [
@@ -73,7 +75,7 @@ class AdminKycQueueController extends Controller
                 'headline' => [
                     'key' => 'id_valid',
                     'ok' => true,
-                    'vars' => ['city' => $sub->user->city ?? 'Dakar'],
+                    'vars' => ['city' => $user?->city],
                 ],
                 'alerts' => 0,
                 'subscription' => null,
@@ -85,21 +87,21 @@ class AdminKycQueueController extends Controller
                     'id' => (string) $sub->escalatedTo->id,
                     'name' => $sub->escalatedTo->name,
                     'title' => 'Vérification',
-                    'city' => 'Dakar',
+                    'city' => $sub->escalatedTo->city,
                 ] : null,
-                'area' => $sub->user->city ?? 'Dakar',
+                'area' => $user?->city,
                 'badgeExpiresAt' => $sub->expires_on?->toISOString(),
                 'requestedDoc' => null,
 
                 // Legacy fields for backward compatibility
-                'user' => [
-                    'id' => $sub->user->id,
-                    'name' => $sub->user->name,
-                    'email' => $sub->user->email,
-                    'phone' => $sub->user->phone,
-                    'badge' => $sub->user->badge,
-                    'is_verified' => (bool) $sub->user->is_verified,
-                ],
+                'user' => $user ? [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'phone' => $user->phone,
+                    'badge' => $user->badge,
+                    'is_verified' => (bool) $user->is_verified,
+                ] : null,
                 'profile_category' => $sub->profile_category,
                 'full_name' => $sub->full_name,
                 'id_type' => $sub->id_type,
@@ -119,11 +121,11 @@ class AdminKycQueueController extends Controller
             ];
         });
 
-        $toVerifyCount = KycSubmission::whereIn('status', ['pending', 'supplement_requested'])->count();
-        $activeCount = KycSubmission::where('status', 'approved')->count();
-        $expiringCount = KycSubmission::where('status', 'approved')->where('expires_on', '<=', now()->addDays(30))->count();
-        $refusalsCount = KycSubmission::where('status', 'rejected')->count();
-        $awaitingCount = KycSubmission::where('status', 'supplement_requested')->count();
+        $toVerifyCount = KycSubmission::whereHas('user')->whereIn('status', ['pending', 'supplement_requested'])->count();
+        $activeCount = KycSubmission::whereHas('user')->where('status', 'approved')->count();
+        $expiringCount = KycSubmission::whereHas('user')->where('status', 'approved')->where('expires_on', '<=', now()->addDays(30))->count();
+        $refusalsCount = KycSubmission::whereHas('user')->where('status', 'rejected')->count();
+        $awaitingCount = KycSubmission::whereHas('user')->where('status', 'supplement_requested')->count();
 
         return response()->json([
             // Contract Page<T> format

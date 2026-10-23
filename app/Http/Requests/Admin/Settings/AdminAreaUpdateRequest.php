@@ -22,6 +22,8 @@ class AdminAreaUpdateRequest extends FormRequest
     {
         return [
             'name' => ['nullable', 'string', 'min:2', 'max:100'],
+            'lat' => ['nullable', 'numeric', 'between:-90,90'],
+            'lng' => ['nullable', 'numeric', 'between:-180,180'],
             'is_active' => ['nullable', 'boolean'],
             'is_ignored' => ['nullable', 'boolean'],
         ];

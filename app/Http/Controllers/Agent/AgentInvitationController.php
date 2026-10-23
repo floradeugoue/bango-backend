@@ -25,6 +25,7 @@ class AgentInvitationController extends Controller
         $agent = $request->user();
 
         $invitations = Delegation::where('agent_id', $agent->id)
+            ->whereHas('listing')
             ->with(['bailleur', 'listing'])
             ->latest('invited_at')
             ->paginate($request->integer('per_page', 20));

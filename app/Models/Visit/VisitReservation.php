@@ -157,7 +157,7 @@ class VisitReservation extends Model
 
     public function listing(): BelongsTo
     {
-        return $this->belongsTo(Listing::class, 'listing_id');
+        return $this->belongsTo(Listing::class, 'listing_id')->withTrashed();
     }
 
     public function slot(): BelongsTo

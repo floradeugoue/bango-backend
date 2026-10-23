@@ -31,7 +31,8 @@ class AdminKycService
      */
     public function getQueue(array $filters = [], int $perPage = 20): LengthAwarePaginator
     {
-        $query = KycSubmission::with(['user.role', 'decidedBy', 'escalatedTo', 'documents'])
+        $query = KycSubmission::whereHas('user')
+            ->with(['user.role', 'decidedBy', 'escalatedTo', 'documents'])
             ->select('kyc_submissions.*');
 
         // Filtrage selon les pays autorisés dans la session de l'opérateur (Point 20)
@@ -237,7 +238,8 @@ class AdminKycService
      */
     public function getRefusals(array $filters = [], int $perPage = 20): LengthAwarePaginator
     {
-        $query = KycSubmission::with(['user.role', 'decidedBy'])
+        $query = KycSubmission::whereHas('user')
+            ->with(['user.role', 'decidedBy'])
             ->where('status', KycStatus::Rejected->value);
 
         // Filtrage selon les pays autorisés dans la session de l'opérateur (Point 20)

@@ -26,6 +26,7 @@ class LandlordDelegationController extends Controller
         $landlord = $request->user();
 
         $delegations = Delegation::where('bailleur_id', $landlord->id)
+            ->whereHas('listing')
             ->with(['agent', 'listing'])
             ->latest('created_at')
             ->paginate($request->integer('per_page', 20));
