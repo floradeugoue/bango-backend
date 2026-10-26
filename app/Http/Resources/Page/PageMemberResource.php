@@ -25,11 +25,20 @@ class PageMemberResource extends JsonResource
             'status' => $this->status->value,
             'status_label' => $this->status->label(),
             'user' => [
-                'id' => (int) $this->user->id,
-                'name' => $this->user->name,
-                'handle' => $this->user->handle,
-                'avatar_url' => $this->user->avatar_url,
+                'id' => (int) $this->user?->id,
+                'name' => $this->user?->display_name ?? $this->user?->name,
+                'handle' => $this->user?->handle,
+                'avatar_url' => $this->user?->avatar_url,
             ],
+            'page' => $this->whenLoaded('page', function () {
+                return [
+                    'id' => (int) $this->page->id,
+                    'name' => $this->page->name,
+                    'handle' => $this->page->handle,
+                    'logo_url' => $this->page->logo_url,
+                    'sector' => $this->page->sector->value,
+                ];
+            }),
             'invited_by_id' => $this->invited_by_id,
             'invited_at' => $this->invited_at?->toIso8601String(),
             'accepted_at' => $this->accepted_at?->toIso8601String(),

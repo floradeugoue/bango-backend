@@ -203,3 +203,26 @@ test('l\'administrateur peut examiner, approuver ou refuser un dossier de certif
     expect($this->page->fresh()->isCertified())->toBeTrue()
         ->and($this->page->fresh()->certification_status)->toBe(PageCertificationStatus::Approved);
 });
+
+test('DELETE /pages/{page}/certification permet d\'annuler une demande en attente sans remboursement', function () {
+    $cert = PageCertification::factory()->create([
+        'page_id' => $this->page->id,
+        'submitted_by_id' => $this->owner->id,
+        'status' => PageCertificationStatus::Pending,
+    ]);
+    $this->page->update(['certification_status' => PageCertificationStatus::Pending]);
+
+    Passport::actingAs($this->owner);
+
+    $response = $this->deleteJson("/api/pages/{$this->page->id}/certification");
+    $response->assertOk()
+        ->assertJsonFragment(['message' => 'Votre demande de certification a été annulée avec succès (frais de traitement non remboursés).']);
+
+    expect($cert->fresh()->trashed())->toBeTrue();
+    expect($this->page->fresh()->certification_status)->toBe(PageCertificationStatus::None);
+
+    // Une deuxième tentative d'annulation échoue car aucune demande n'est pending
+    $res2 = $this->deleteJson("/api/pages/{$this->page->id}/certification");
+    $res2->assertStatus(422)
+        ->assertJsonValidationErrors(['certification']);
+});

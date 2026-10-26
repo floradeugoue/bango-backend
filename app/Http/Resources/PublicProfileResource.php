@@ -36,7 +36,9 @@ class PublicProfileResource extends JsonResource
         $isBlockedBy = $currentUser ? $currentUser->isBlockedBy($this->resource) : false;
         $canViewContent = $currentUser ? $currentUser->canViewContentOf($this->resource) : ! $this->is_private;
 
-        $place = collect([$this->neighbourhood, $this->city])->filter()->join(', ');
+        $showNeighbourhood = (bool) data_get($this->privacy_settings, 'showNeighbourhood', true);
+        $neighbourhood = $showNeighbourhood ? $this->neighbourhood : null;
+        $place = collect([$neighbourhood, $this->city])->filter()->join(', ');
 
         return [
             'id' => $this->id,
@@ -46,8 +48,9 @@ class PublicProfileResource extends JsonResource
             'place' => $place,
             'countryCode' => $this->country_code,
             'city' => $this->city,
-            'neighbourhood' => $this->neighbourhood,
+            'neighbourhood' => $neighbourhood,
             'bio' => $this->bio ?? '',
+            'website' => $this->website,
             'badge' => $badge,
             'badges' => $badges,
             'verified' => (bool) ($this->badge && $this->badge !== 'none' && ! $this->verification_lapsed),
@@ -59,7 +62,7 @@ class PublicProfileResource extends JsonResource
             'counts' => [
                 'followers' => $this->followers()->count(),
                 'following' => $this->following()->count(),
-                'posts' => 0,
+                'posts' => $this->publishedPostsAndReelsCount(),
             ],
             'isFollowing' => $isFollowing,
             'isFollowedBy' => $isFollowedBy,

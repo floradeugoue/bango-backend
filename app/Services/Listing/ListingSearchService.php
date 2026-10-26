@@ -4,6 +4,7 @@ namespace App\Services\Listing;
 
 use App\Models\Listing\Listing;
 use App\Models\User;
+use App\Services\Boost\AdDeliveryService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -20,11 +21,13 @@ class ListingSearchService
         $query = $this->buildBaseQuery($filters, $viewer);
 
         // Tri stable : annonces sponsorisées en priorité, puis par date de publication décroissante
-        return $query->with(['owner', 'agent', 'photos', 'videos', 'saves'])
+        $paginator = $query->with(['owner', 'agent', 'photos', 'videos', 'saves'])
             ->orderByDesc('sponsored')
             ->orderByDesc('published_at')
             ->orderByDesc('id')
             ->paginate($perPage);
+
+        return app(AdDeliveryService::class)->injectIntoListingFeed($paginator, $viewer, $filters);
     }
 
     /**

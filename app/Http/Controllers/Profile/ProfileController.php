@@ -9,6 +9,7 @@ use App\Models\Geo\City;
 use App\Models\Geo\Country;
 use App\Models\Geo\Neighbourhood;
 use App\Models\User;
+use App\Services\Boost\CampaignAttributionService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -64,6 +65,11 @@ class ProfileController extends Controller
             ], 403);
         }
 
+        // Attribution publicitaire automatique (Boost) si visite post-impression < 24h
+        if ($request->user()) {
+            app(CampaignAttributionService::class)->attributeProfileVisit($request->user(), $user);
+        }
+
         return new PublicProfileResource($user);
     }
 
@@ -76,6 +82,7 @@ class ProfileController extends Controller
             'handle' => ['required', 'string', 'min:3', 'max:20', 'regex:/^[a-z0-9.]+$/', 'unique:users,handle,'.$request->user()->id],
             'displayName' => ['nullable', 'string', 'max:50'],
             'bio' => ['nullable', 'string', 'max:500'],
+            'website' => ['nullable', 'url', 'max:120'],
         ]);
 
         $updates = [
@@ -85,6 +92,10 @@ class ProfileController extends Controller
 
         if ($request->has('bio')) {
             $updates['bio'] = $request->bio;
+        }
+
+        if ($request->has('website')) {
+            $updates['website'] = $request->website;
         }
 
         $request->user()->update($updates);

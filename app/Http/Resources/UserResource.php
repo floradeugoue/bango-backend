@@ -17,6 +17,7 @@ class UserResource extends JsonResource
             'displayName' => $this->display_name ?? $this->name,
             'avatarUrl' => $this->avatar_url,
             'bio' => $this->bio,
+            'website' => $this->website,
             'birthDate' => $this->birth_date?->format('Y-m-d'),
             'countryCode' => $this->country_code,
             'countryId' => $this->country_id,

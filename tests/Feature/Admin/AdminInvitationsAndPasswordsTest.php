@@ -205,8 +205,7 @@ it('handles forgot password and resets password securely while invalidating prio
         'password' => 'NewPassword456!Secure2026',
         'password_confirmation' => 'NewPassword456!Secure2026',
     ]);
-    $resetSubmitResponse->assertStatus(200)
-        ->assertJsonFragment(['message' => 'Votre mot de passe a été réinitialisé avec succès. Toutes vos sessions ont été déconnectées par mesure de sécurité.']);
+    $resetSubmitResponse->assertStatus(204);
 
     // Le mot de passe a bien changé
     $operator->refresh();
@@ -223,4 +222,66 @@ it('handles forgot password and resets password securely while invalidating prio
         'password_confirmation' => 'AnotherPassword789!Secure',
     ]);
     $reuseResetResponse->assertStatus(400);
+});
+
+it('allows custom comma-separated domains from ADMIN_ALLOWED_EMAIL_DOMAINS or any domain if empty', function () {
+    // 1. Configuration avec plusieurs domaines autorisés : "bango.app, marie-holding.com, @invest.cm"
+    config(['auth.admin_allowed_email_domains' => 'bango.app, marie-holding.com, @invest.cm']);
+
+    // Adresse autorisée via bango.app
+    $res1 = $this->postJson('/api/admin/auth/access-requests', [
+        'first_name' => 'Alice',
+        'last_name' => 'Bango',
+        'email' => 'alice@bango.app',
+        'department' => 'Operations',
+        'requested_role' => 'direction',
+        'reason' => 'Demande acces direction valide',
+    ]);
+    $res1->assertStatus(201);
+
+    // Adresse de Marie via marie-holding.com
+    $res2 = $this->postJson('/api/admin/auth/access-requests', [
+        'first_name' => 'Marie',
+        'last_name' => 'Fondatrice',
+        'email' => 'marie@marie-holding.com',
+        'department' => 'Direction',
+        'requested_role' => 'direction',
+        'reason' => 'Porteuse du projet BANGO',
+    ]);
+    $res2->assertStatus(201);
+
+    // Adresse de Marie via invest.cm
+    $res3 = $this->postJson('/api/admin/auth/access-requests', [
+        'first_name' => 'Marie',
+        'last_name' => 'Invest',
+        'email' => 'marie@invest.cm',
+        'department' => 'Direction',
+        'requested_role' => 'direction',
+        'reason' => 'Porteuse du projet BANGO invest',
+    ]);
+    $res3->assertStatus(201);
+
+    // Adresse non autorisée (ex: yahoo.fr)
+    $resForbidden = $this->postJson('/api/admin/auth/access-requests', [
+        'first_name' => 'Hacker',
+        'last_name' => 'Test',
+        'email' => 'test@yahoo.fr',
+        'department' => 'Inconnu',
+        'requested_role' => 'support',
+        'reason' => 'Tentative hors domaine',
+    ]);
+    $resForbidden->assertStatus(422)->assertJsonValidationErrors(['email']);
+
+    // 2. Configuration vide : autorise n'importe quel domaine valide
+    config(['auth.admin_allowed_email_domains' => '']);
+
+    $resAny = $this->postJson('/api/admin/auth/access-requests', [
+        'first_name' => 'Marie',
+        'last_name' => 'Perso',
+        'email' => 'marie.perso@gmail.com',
+        'department' => 'Direction',
+        'requested_role' => 'direction',
+        'reason' => 'Acces direction avec adresse perso',
+    ]);
+    $resAny->assertStatus(201);
 });

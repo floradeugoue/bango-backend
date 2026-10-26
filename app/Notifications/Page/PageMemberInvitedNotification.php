@@ -40,14 +40,14 @@ class PageMemberInvitedNotification extends Notification implements ShouldQueue
     public function toArray(object $notifiable): array
     {
         return [
-            'type' => 'page_member_invited',
+            'type' => 'page_invitation',
+            'member_id' => $this->member->id,
             'page_id' => $this->member->page_id,
             'page_name' => $this->member->page->name ?? 'Page',
-            'member_id' => $this->member->id,
             'role' => $this->member->role->value,
             'role_label' => $this->member->role->label(),
             'invited_by_id' => $this->member->invited_by_id,
-            'message' => 'Vous avez reçu une invitation pour rejoindre une Page Professionnelle.',
+            'message' => "Vous avez reçu une invitation pour rejoindre la page {$this->member->page?->name}.",
         ];
     }
 }

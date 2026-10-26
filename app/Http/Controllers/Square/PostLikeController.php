@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Square;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\Square\PostLikerResource;
+use App\Http\Resources\Square\PostResource;
 use App\Models\Square\Post;
 use App\Services\Square\PostLikeService;
 use Illuminate\Http\JsonResponse;
@@ -63,5 +64,21 @@ class PostLikeController extends Controller
         );
 
         return PostLikerResource::collection($likers);
+    }
+
+    /**
+     * GET /api/square-cr1/posts/liked
+     * Liste paginée des publications aimées par l'utilisateur connecté (les plus récentes d'abord).
+     */
+    public function likedPosts(Request $request): AnonymousResourceCollection
+    {
+        $perPage = (int) $request->input('per_page', 15);
+
+        $posts = $this->likeService->getLikedPosts(
+            user: $request->user(),
+            perPage: $perPage
+        );
+
+        return PostResource::collection($posts);
     }
 }

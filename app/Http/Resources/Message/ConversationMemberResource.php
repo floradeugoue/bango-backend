@@ -23,6 +23,7 @@ class ConversationMemberResource extends JsonResource
             'is_muted' => (bool) $this->is_muted,
             'last_read_message_id' => $this->last_read_message_id,
             'last_read_at' => $this->last_read_at?->toIso8601String(),
+            'last_delivered_at' => $this->last_delivered_at?->toIso8601String(),
             'joined_at' => $this->joined_at?->toIso8601String(),
             'user' => $this->whenLoaded('user', function () {
                 if (! $this->user) {
@@ -34,6 +35,19 @@ class ConversationMemberResource extends JsonResource
                     ];
                 }
 
+                // Respect du réglage « Statut en ligne » (onlineStatus dans privacy_settings, true par défaut)
+                $privacy = $this->user->privacy_settings ?? [];
+                $allowsOnlineStatus = (bool) ($privacy['onlineStatus'] ?? true);
+
+                $lastSeen = $this->user->last_seen_at;
+                $isOnline = false;
+                $renderedLastSeen = null;
+
+                if ($allowsOnlineStatus && $lastSeen) {
+                    $isOnline = $lastSeen->diffInSeconds(now()) <= 120;
+                    $renderedLastSeen = $lastSeen->toIso8601String();
+                }
+
                 return [
                     'id' => $this->user->id,
                     'name' => $this->user->name,
@@ -41,6 +55,8 @@ class ConversationMemberResource extends JsonResource
                     'avatar_url' => $this->user->avatar_url ?? $this->user->avatar,
                     'is_verified' => (bool) $this->user->is_verified,
                     'account_type' => $this->user->account_type?->value ?? 'personal',
+                    'is_online' => $isOnline,
+                    'last_seen_at' => $renderedLastSeen,
                 ];
             }),
         ];

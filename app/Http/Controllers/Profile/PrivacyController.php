@@ -19,6 +19,8 @@ class PrivacyController extends Controller
         'onlineStatus' => true,
         'readReceipts' => true,
         'ads_personalization' => true,
+        'showNeighbourhood' => true,
+        'showFollowing' => true,
     ];
 
     /**
@@ -51,6 +53,8 @@ class PrivacyController extends Controller
             'onlineStatus' => ['sometimes', 'boolean'],
             'readReceipts' => ['sometimes', 'boolean'],
             'ads_personalization' => ['sometimes', 'boolean'],
+            'showNeighbourhood' => ['sometimes', 'boolean'],
+            'showFollowing' => ['sometimes', 'boolean'],
         ]);
 
         /** @var User $user */

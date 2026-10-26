@@ -61,6 +61,9 @@ class Listing extends Model
         'bedrooms',
         'showers',
         'area',
+        'floor',
+        'available_from',
+        'min_lease_months',
         'amenities',
         'features',
         'attributes',
@@ -111,6 +114,9 @@ class Listing extends Model
             'visit_fee' => 'decimal:2',
             'charges' => 'decimal:2',
             'area' => 'decimal:2',
+            'floor' => 'integer',
+            'available_from' => 'date',
+            'min_lease_months' => 'integer',
             'lat' => 'float',
             'lng' => 'float',
             'deposit_months' => 'integer',
@@ -512,6 +518,36 @@ class Listing extends Model
                 ->whereBetween('lng', [min($west, $east), max($west, $east)]);
         }
 
+        // 11. Étage (floor_min, floor_max)
+        $floorMin = $filters['floor_min'] ?? ($filters['floorMin'] ?? null);
+        if ($floorMin !== null && is_numeric($floorMin)) {
+            $query->whereNotNull('floor')->where('floor', '>=', (int) $floorMin);
+        }
+
+        $floorMax = $filters['floor_max'] ?? ($filters['floorMax'] ?? null);
+        if ($floorMax !== null && is_numeric($floorMax)) {
+            $query->whereNotNull('floor')->where('floor', '<=', (int) $floorMax);
+        }
+
+        // 12. Date de disponibilité (available_before : disponible avant ou à la date demandée, ou disponible immédiatement si null)
+        $availableBefore = $filters['available_before'] ?? ($filters['availableBefore'] ?? null);
+        if (! empty($availableBefore)) {
+            $date = is_string($availableBefore) ? substr($availableBefore, 0, 10) : $availableBefore;
+            $query->where(function (Builder $q) use ($date) {
+                $q->whereNull('available_from')
+                    ->orWhere('available_from', '<=', $date);
+            });
+        }
+
+        // 13. Durée de bail (max_lease_months : biens dont la durée minimale requise n'excède pas le souhait du locataire, ou libre si null)
+        $maxLeaseMonths = $filters['max_lease_months'] ?? ($filters['maxLeaseMonths'] ?? null);
+        if ($maxLeaseMonths !== null && is_numeric($maxLeaseMonths)) {
+            $query->where(function (Builder $q) use ($maxLeaseMonths) {
+                $q->whereNull('min_lease_months')
+                    ->orWhere('min_lease_months', '<=', (int) $maxLeaseMonths);
+            });
+        }
+
         return $query;
     }
 
@@ -577,6 +613,64 @@ class Listing extends Model
     public function campaigns(): MorphMany
     {
         return $this->morphMany(Campaign::class, 'boostable');
+    }
+
+    /**
+     * Campagne active en cours de diffusion pour cette annonce.
+     */
+    public function activeCampaign(): ?Campaign
+    {
+        if ($this->relationLoaded('campaigns')) {
+            return $this->campaigns->first(fn (Campaign $c) => $c->canBeServed());
+        }
+
+        return $this->campaigns()->active()->first();
+    }
+
+    /**
+     * Détermine si l'annonce bénéficie actuellement d'une campagne de sponsoring active.
+     */
+    public function isSponsored(): bool
+    {
+        if ($this->is_sponsored !== null) {
+            return (bool) $this->is_sponsored;
+        }
+
+        return $this->activeCampaign() !== null;
+    }
+
+    /**
+     * Identifiant de la campagne de sponsoring active.
+     */
+    public function campaignId(): ?string
+    {
+        if ($this->campaign_id !== null) {
+            return (string) $this->campaign_id;
+        }
+
+        return $this->activeCampaign()?->id ? (string) $this->activeCampaign()->id : null;
+    }
+
+    /**
+     * Nom du sponsor / de l'annonceur de la campagne active (Agent ou Page).
+     */
+    public function sponsoredBy(): ?string
+    {
+        if ($this->sponsored_by !== null) {
+            return $this->sponsored_by;
+        }
+
+        $campaign = $this->activeCampaign();
+        if (! $campaign) {
+            return null;
+        }
+
+        if ($campaign->page) {
+            return "Sponsorisé par {$campaign->page->name}";
+        }
+
+        return $campaign->metadata['sponsored_by']
+            ?? ($campaign->user?->name ?? 'Sponsorisé');
     }
 
     /**

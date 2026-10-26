@@ -173,3 +173,39 @@ test('un invité peut accepter ou refuser son invitation', function () {
 
     expect($this->page->hasMember($invitedUser, PageRole::Editor))->toBeTrue();
 });
+
+test('invitation envoie notification page_invitation avec member_id et apparait dans GET /me/page-invitations', function () {
+    $invitedUser = User::factory()->create([
+        'name' => 'jeanpaul',
+        'display_name' => 'Jean-Paul Kamga',
+    ]);
+
+    Passport::actingAs($this->owner);
+    $resInvite = $this->postJson("/api/pages/{$this->page->id}/members/invite", [
+        'user_id' => $invitedUser->id,
+        'role' => PageRole::Editor->value,
+    ]);
+    $resInvite->assertStatus(201)
+        ->assertJsonPath('data.user.name', 'Jean-Paul Kamga');
+
+    $memberId = $resInvite->json('data.id');
+
+    // Vérifier la notification reçue en base
+    $notification = $invitedUser->notifications()->first();
+    expect($notification)->not->toBeNull();
+    expect($notification->data['type'])->toBe('page_invitation');
+    expect($notification->data['member_id'])->toBe($memberId);
+    expect($notification->data['page_id'])->toBe($this->page->id);
+    expect($notification->data['page_name'])->toBe($this->page->name);
+    expect($notification->data['role'])->toBe('editor');
+
+    // Vérifier GET /api/me/page-invitations
+    Passport::actingAs($invitedUser);
+    $resInvitations = $this->getJson('/api/me/page-invitations');
+    $resInvitations->assertOk()
+        ->assertJsonCount(1, 'data')
+        ->assertJsonPath('data.0.id', $memberId)
+        ->assertJsonPath('data.0.page_id', $this->page->id)
+        ->assertJsonPath('data.0.role', 'editor')
+        ->assertJsonPath('data.0.user.name', 'Jean-Paul Kamga');
+});

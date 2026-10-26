@@ -10,6 +10,7 @@ use App\Http\Middleware\EnsureActiveSubscription;
 use App\Http\Middleware\EnsureAdminPermission;
 use App\Http\Middleware\EnsureAdminSession;
 use App\Http\Middleware\EnsureTermsAccepted;
+use App\Http\Middleware\UpdateUserLastSeen;
 use App\Services\System\IncidentTrackerService;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
@@ -20,6 +21,7 @@ use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
@@ -35,6 +37,10 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->encryptCookies(except: [
             'bango_admin_session',
             'bango_admin_csrf',
+        ]);
+
+        $middleware->appendToGroup('api', [
+            UpdateUserLastSeen::class,
         ]);
 
         $middleware->alias([
@@ -83,6 +89,49 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $exceptions->render(function (ResourceLockedException $e, Request $request) {
             return $e->render($request);
+        });
+
+        $exceptions->render(function (AuthorizationException $e, Request $request) {
+            $code = $e->getCode() ?: $e->response()?->code();
+
+            if (! empty($code)) {
+                return response()->json([
+                    'message' => $e->getMessage(),
+                    'kind' => (string) $code,
+                ], $e->status() ?? 403);
+            }
+
+            return null;
+        });
+
+        $exceptions->render(function (AccessDeniedHttpException $e, Request $request) {
+            $prev = $e->getPrevious();
+            if ($prev instanceof AuthorizationException) {
+                $code = $prev->getCode() ?: $prev->response()?->code();
+                if (! empty($code)) {
+                    return response()->json([
+                        'message' => $prev->getMessage(),
+                        'kind' => (string) $code,
+                    ], $prev->status() ?? 403);
+                }
+            }
+
+            return null;
+        });
+
+        $exceptions->render(function (HttpException $e, Request $request) {
+            $prev = $e->getPrevious();
+            if ($prev instanceof AuthorizationException) {
+                $code = $prev->getCode() ?: $prev->response()?->code();
+                if (! empty($code)) {
+                    return response()->json([
+                        'message' => $prev->getMessage(),
+                        'kind' => (string) $code,
+                    ], $e->getStatusCode());
+                }
+            }
+
+            return null;
         });
 
         $exceptions->render(function (Throwable $e, Request $request) {

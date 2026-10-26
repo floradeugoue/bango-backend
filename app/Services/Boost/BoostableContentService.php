@@ -3,6 +3,7 @@
 namespace App\Services\Boost;
 
 use App\Enums\Reel\ReelStatus;
+use App\Models\Boost\Campaign;
 use App\Models\Page\Page;
 use App\Models\Reel\Reel;
 use App\Models\Square\Post;
@@ -47,13 +48,11 @@ class BoostableContentService
         // 1. Récupération des publications Square et Reels éligibles
         $postsQuery = Post::query()
             ->active()
-            ->whereNull('deleted_at')
-            ->with(['media', 'campaigns' => fn ($q) => $q->whereIn('status', ['running', 'paused', 'pending_approval'])]);
+            ->whereNull('deleted_at');
 
         $reelsQuery = Reel::query()
             ->where('status', ReelStatus::Ready)
-            ->whereNull('deleted_at')
-            ->with(['campaigns' => fn ($q) => $q->whereIn('status', ['running', 'paused', 'pending_approval'])]);
+            ->whereNull('deleted_at');
 
         if ($page !== null) {
             $postsQuery->where('page_id', $page->id);
@@ -63,8 +62,41 @@ class BoostableContentService
             $reelsQuery->where('user_id', $user->id)->whereNull('page_id');
         }
 
-        $allPosts = $postsQuery->get();
+        $allPosts = $postsQuery->with('media')->get();
         $allReels = $reelsQuery->get();
+
+        // Récupérer les campagnes actives associées en convertissant les IDs en chaînes
+        // (évite l'erreur PostgreSQL 42883 : character varying = integer sur boostable_id)
+        $postIds = $allPosts->pluck('id')->map(fn ($id) => (string) $id);
+        $activePostCampaigns = $postIds->isNotEmpty()
+            ? Campaign::query()
+                ->where('boostable_type', Post::class)
+                ->whereIn('boostable_id', $postIds)
+                ->whereIn('status', ['running', 'paused', 'pending_approval'])
+                ->get()
+                ->groupBy('boostable_id')
+            : collect();
+
+        $reelIds = $allReels->pluck('id')->map(fn ($id) => (string) $id);
+        $activeReelCampaigns = $reelIds->isNotEmpty()
+            ? Campaign::query()
+                ->where('boostable_type', Reel::class)
+                ->whereIn('boostable_id', $reelIds)
+                ->whereIn('status', ['running', 'paused', 'pending_approval'])
+                ->get()
+                ->groupBy('boostable_id')
+            : collect();
+
+        // Associer manuellement la relation campaigns sous forme de Collection
+        foreach ($allPosts as $post) {
+            $campaigns = $activePostCampaigns->get((string) $post->id, collect());
+            $post->setRelation('campaigns', $campaigns);
+        }
+
+        foreach ($allReels as $reel) {
+            $campaigns = $activeReelCampaigns->get((string) $reel->id, collect());
+            $reel->setRelation('campaigns', $campaigns);
+        }
 
         // 2. Fusion et calcul des scores d'engagement de la population de référence
         $unifiedItems = collect();

@@ -55,7 +55,77 @@ class MessageResource extends JsonResource
             'reactions' => $this->metadata['reactions'] ?? [],
             'is_retracted' => (bool) $this->is_retracted,
             'retracted_at' => $this->retracted_at?->toIso8601String(),
+            ...$this->resolveDeliveryAndReadStatus($request),
             'created_at' => $this->created_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * Calcule le statut d'envoi, de distribution et de lecture du message.
+     * Trois coches : 'sent' (simple), 'delivered' (double grise), 'read' (double bleue).
+     *
+     * @return array<string, mixed>
+     */
+    protected function resolveDeliveryAndReadStatus(Request $request): array
+    {
+        $conversation = $this->relationLoaded('conversation') ? $this->conversation : null;
+
+        if (! $conversation) {
+            return [
+                'status' => 'sent',
+                'is_delivered' => false,
+                'is_read' => false,
+                'delivered_at' => null,
+                'read_at' => null,
+            ];
+        }
+
+        // Identifier les destinataires (les autres membres que l'expéditeur)
+        $members = $conversation->relationLoaded('members')
+            ? $conversation->members
+            : $conversation->members()->get();
+
+        $recipientMembers = $members->filter(fn ($m) => $m->user_id !== $this->sender_id);
+
+        if ($recipientMembers->isEmpty()) {
+            return [
+                'status' => 'sent',
+                'is_delivered' => false,
+                'is_read' => false,
+                'delivered_at' => null,
+                'read_at' => null,
+            ];
+        }
+
+        $createdAt = $this->created_at;
+
+        // Lu si au moins un destinataire a un last_read_at >= created_at
+        // (pour conversation directe, c'est l'autre membre ; pour groupe, au moins un membre l'a lu)
+        $readMembers = $recipientMembers->filter(fn ($m) => $m->last_read_at && $m->last_read_at->greaterThanOrEqualTo($createdAt));
+        $isRead = $readMembers->isNotEmpty();
+        $firstReadAt = $readMembers->min('last_read_at');
+
+        // Reçu si au moins un destinataire a un last_delivered_at >= created_at (ou last_read_at)
+        $deliveredMembers = $recipientMembers->filter(fn ($m) => (
+            ($m->last_delivered_at && $m->last_delivered_at->greaterThanOrEqualTo($createdAt)) ||
+            ($m->last_read_at && $m->last_read_at->greaterThanOrEqualTo($createdAt))
+        ));
+        $isDelivered = $deliveredMembers->isNotEmpty();
+        $firstDeliveredAt = $deliveredMembers->min('last_delivered_at') ?? $firstReadAt;
+
+        $status = 'sent';
+        if ($isRead) {
+            $status = 'read';
+        } elseif ($isDelivered) {
+            $status = 'delivered';
+        }
+
+        return [
+            'status' => $status,
+            'is_delivered' => $isDelivered,
+            'is_read' => $isRead,
+            'delivered_at' => $firstDeliveredAt?->toIso8601String(),
+            'read_at' => $firstReadAt?->toIso8601String(),
         ];
     }
 }

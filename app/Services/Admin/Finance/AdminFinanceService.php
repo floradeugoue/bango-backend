@@ -355,7 +355,7 @@ class AdminFinanceService
         $query = Subscription::with([
             'user:id,name,email,phone,handle,badge',
             'product:id,code,name',
-            'price:id,cadence,amount,currency',
+            'price:id,cadence,price_amount,currency',
         ])
             ->orderByDesc('created_at');
 

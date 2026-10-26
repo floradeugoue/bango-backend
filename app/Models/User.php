@@ -6,6 +6,8 @@ use App\Enums\AccountType;
 use App\Enums\Admin\AdminPermission;
 use App\Enums\Delegation\DelegationStatus;
 use App\Enums\Gender;
+use App\Enums\Listing\ListingStatus;
+use App\Enums\Reel\ReelStatus;
 use App\Models\Auth\OAuthAccount;
 use App\Models\Auth\Role;
 use App\Models\Boost\Campaign;
@@ -76,6 +78,7 @@ class User extends Authenticatable
         'display_name',
         'avatar_url',
         'bio',
+        'website',
         'birth_date',
         'gender',
         'gender_hidden',
@@ -114,6 +117,7 @@ class User extends Authenticatable
         'restricted_until',
         'terms_accepted_at',
         'accepted_terms_version',
+        'last_seen_at',
     ];
 
     protected $hidden = [
@@ -150,6 +154,7 @@ class User extends Authenticatable
             'verification_lapsed' => 'boolean',
             'restricted_until' => 'datetime',
             'terms_accepted_at' => 'datetime',
+            'last_seen_at' => 'datetime',
         ];
     }
 
@@ -407,6 +412,15 @@ class User extends Authenticatable
     }
 
     /**
+     * Publications Square aimées par cet utilisateur.
+     */
+    public function likedPosts(): BelongsToMany
+    {
+        return $this->belongsToMany(Post::class, 'post_likes', 'user_id', 'post_id')
+            ->withTimestamps();
+    }
+
+    /**
      * Commentaires rédigés par cet utilisateur sur Square.
      */
     public function postComments(): HasMany
@@ -570,6 +584,18 @@ class User extends Authenticatable
     }
 
     /**
+     * Compte total des publications visibles du compte :
+     * posts Square actifs (non archivés et non supprimés) + Reels publiés (status ready et non supprimés).
+     */
+    public function publishedPostsAndReelsCount(): int
+    {
+        $postsCount = $this->posts()->where('is_archived', false)->count();
+        $reelsCount = $this->reels()->where('status', ReelStatus::Ready)->count();
+
+        return $postsCount + $reelsCount;
+    }
+
+    /**
      * Réactions (likes et dislikes) de cet utilisateur sur des Reels.
      */
     public function reelReactions(): HasMany
@@ -600,6 +626,16 @@ class User extends Authenticatable
     public function savedReels(): BelongsToMany
     {
         return $this->belongsToMany(Reel::class, 'user_saved_reels', 'user_id', 'reel_id')
+            ->withTimestamps();
+    }
+
+    /**
+     * Reels aimés par cet utilisateur (réaction de type 'like').
+     */
+    public function likedReels(): BelongsToMany
+    {
+        return $this->belongsToMany(Reel::class, 'reel_reactions', 'user_id', 'reel_id')
+            ->wherePivot('type', '=', 'like')
             ->withTimestamps();
     }
 
@@ -775,6 +811,25 @@ class User extends Authenticatable
     }
 
     /**
+     * Nombre de biens distincts publiés sous délégation active gérés par l'agent.
+     */
+    public function managedListingsCount(): int
+    {
+        return Listing::query()
+            ->where('status', ListingStatus::Published->value)
+            ->whereHas('delegations', function ($q) {
+                $q->where('agent_id', $this->id)
+                    ->where('status', DelegationStatus::Active->value)
+                    ->whereNull('revoked_at')
+                    ->where(function ($sub) {
+                        $sub->whereNull('expires_at')->orWhere('expires_at', '>', now());
+                    });
+            })
+            ->distinct('id')
+            ->count('id');
+    }
+
+    /**
      * Dossiers et soumissions KYC de l'utilisateur.
      */
     public function kycSubmissions(): HasMany
@@ -796,7 +851,7 @@ class User extends Authenticatable
     public function conversations(): BelongsToMany
     {
         return $this->belongsToMany(Conversation::class, 'conversation_members', 'user_id', 'conversation_id')
-            ->withPivot(['role', 'is_muted', 'last_read_message_id', 'last_read_at', 'joined_at', 'left_at'])
+            ->withPivot(['role', 'is_muted', 'last_read_message_id', 'last_read_at', 'last_delivered_at', 'joined_at', 'left_at'])
             ->withTimestamps();
     }
 

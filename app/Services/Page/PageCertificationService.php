@@ -371,6 +371,51 @@ class PageCertificationService
         return Storage::disk('local')->download($filePath, $originalName);
     }
 
+    /**
+     * Annule la demande de certification en cours tant qu'elle est au statut pending (frais non remboursés).
+     */
+    public function cancelPending(Page $page, User $user): void
+    {
+        if (! $page->isOwner($user) && ! $user->isAdmin()) {
+            throw new AuthorizationException('Seul le propriétaire de la page peut annuler cette demande de certification.');
+        }
+
+        DB::transaction(function () use ($page, $user) {
+            /** @var Page $lockedPage */
+            $lockedPage = Page::where('id', $page->id)->lockForUpdate()->firstOrFail();
+
+            /** @var PageCertification|null $pendingCert */
+            $pendingCert = PageCertification::where('page_id', $lockedPage->id)
+                ->where('status', PageCertificationStatus::Pending)
+                ->latest()
+                ->lockForUpdate()
+                ->first();
+
+            if (! $pendingCert) {
+                throw ValidationException::withMessages([
+                    'certification' => ['Aucune demande de certification en attente (pending) ne peut être annulée.'],
+                ]);
+            }
+
+            $pendingCert->recordHistory(
+                'cancelled_by_user',
+                $user->id,
+                'Demande de certification annulée par le demandeur (frais non remboursés).'
+            );
+            $pendingCert->delete(); // Soft-delete du dossier
+
+            // Réinitialiser le statut de certification de la page si elle était pending
+            $hasOtherApproved = PageCertification::where('page_id', $lockedPage->id)
+                ->where('status', PageCertificationStatus::Approved)
+                ->exists();
+
+            $lockedPage->certification_status = $hasOtherApproved
+                ? PageCertificationStatus::Approved
+                : PageCertificationStatus::None;
+            $lockedPage->save();
+        });
+    }
+
     protected function validateFile(UploadedFile $file): void
     {
         if ($file->getSize() > 10 * 1024 * 1024) {

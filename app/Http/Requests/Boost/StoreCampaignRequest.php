@@ -20,7 +20,7 @@ class StoreCampaignRequest extends FormRequest
             'page_id' => ['nullable', 'integer', 'exists:pages,id'],
             'boostable_type' => ['required', 'string', 'in:post,posts,reel,reels,listing,listings'],
             'boostable_id' => ['required', 'string'],
-            'objective' => ['nullable', 'string', 'in:reach,profile_visits,messages,engagement'],
+            'objective' => ['nullable', 'string', 'in:reach,profile_visits,followers,messages,engagement'],
             'budget' => ['required', 'numeric', 'min:100'],
             'currency' => ['nullable', 'string', 'size:3'],
             'duration_days' => ['required', 'integer', 'min:1', 'max:30'],

@@ -7,6 +7,7 @@ use App\Http\Requests\Message\StoreMessageRequest;
 use App\Http\Resources\Message\MessageResource;
 use App\Models\Message\Conversation;
 use App\Models\Message\Message;
+use App\Services\Boost\CampaignAttributionService;
 use App\Services\Message\MessageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -57,6 +58,12 @@ class MessageController extends Controller
             sender: $request->user(),
             data: $request->validated()
         );
+
+        // Attribution publicitaire automatique (Boost) si message post-impression < 24h
+        $recipientId = $thread->page?->owner_id ?: $thread->members()->where('user_id', '!=', $request->user()->id)->value('user_id');
+        if ($recipientId) {
+            app(CampaignAttributionService::class)->attributeMessage($request->user(), $recipientId, $thread->listing_id);
+        }
 
         return (new MessageResource($message))
             ->response()
