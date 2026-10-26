@@ -31,6 +31,45 @@ class ListingLikeController extends Controller
     }
 
     /**
+     * Liste paginée des annonces aimées d'un utilisateur cible (onglet Immo du profil PR-07).
+     * Accessible selon les règles de visibilité du profil (privé non suivi -> 403).
+     *
+     * GET /api/profile/{id}/listings/liked
+     */
+    public function userLiked(Request $request, string|int $id): AnonymousResourceCollection|JsonResponse
+    {
+        /** @var User|null $actor */
+        $actor = $request->user();
+
+        /** @var User $target */
+        $target = User::findOrFail($id);
+
+        if ($actor && (int) $actor->id !== (int) $target->id && ! $actor->canViewContentOf($target)) {
+            return response()->json([
+                'kind' => 'private_profile',
+                'message' => 'Ce compte est privé ou inaccessible.',
+            ], 403);
+        }
+
+        if (! $actor && $target->is_private) {
+            return response()->json([
+                'kind' => 'private_profile',
+                'message' => 'Ce compte est privé ou inaccessible.',
+            ], 403);
+        }
+
+        $perPage = max(1, min(50, $request->integer('per_page', 15)));
+
+        $paginator = $target->likedListings()
+            ->publiclyVisible()
+            ->with(['owner', 'agent', 'photos', 'videos', 'saves', 'likes'])
+            ->orderByDesc('listing_likes.created_at')
+            ->paginate($perPage);
+
+        return ListingResource::collection($paginator);
+    }
+
+    /**
      * Aimer une annonce (idempotent : un seul « j'aime » par compte).
      */
     public function store(Request $request, string $id): JsonResponse

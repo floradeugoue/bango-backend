@@ -37,6 +37,7 @@ class ConversationMember extends Model
         'is_muted',
         'last_read_message_id',
         'last_read_at',
+        'last_delivered_at',
         'joined_at',
         'left_at',
     ];
@@ -47,6 +48,7 @@ class ConversationMember extends Model
             'role' => ConversationMemberRole::class,
             'is_muted' => 'boolean',
             'last_read_at' => 'datetime',
+            'last_delivered_at' => 'datetime',
             'joined_at' => 'datetime',
             'left_at' => 'datetime',
         ];
@@ -81,9 +83,21 @@ class ConversationMember extends Model
      */
     public function markAsRead(?string $messageId = null): void
     {
+        $now = Carbon::now();
         $this->update([
             'last_read_message_id' => $messageId ?? $this->last_read_message_id,
-            'last_read_at' => Carbon::now(),
+            'last_read_at' => $now,
+            'last_delivered_at' => $this->last_delivered_at ? max($this->last_delivered_at, $now) : $now,
+        ]);
+    }
+
+    /**
+     * Mark conversation messages as delivered to this member's device.
+     */
+    public function markAsDelivered(): void
+    {
+        $this->update([
+            'last_delivered_at' => Carbon::now(),
         ]);
     }
 }

@@ -139,4 +139,19 @@ class PageCertificationController extends Controller
 
         return $this->certificationService->downloadDocument($certification, $key, $request->user());
     }
+
+    /**
+     * Annule la demande de certification en cours tant qu'elle est au statut pending (PG-06, frais non remboursés).
+     * DELETE /api/pages/{page}/certification
+     */
+    public function destroy(Request $request, Page $page): JsonResponse
+    {
+        Gate::authorize('submitCertification', $page);
+
+        $this->certificationService->cancelPending($page, $request->user());
+
+        return response()->json([
+            'message' => 'Votre demande de certification a été annulée avec succès (frais de traitement non remboursés).',
+        ]);
+    }
 }

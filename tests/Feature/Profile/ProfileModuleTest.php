@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Listing\Listing;
 use App\Models\Profile\FollowRequest;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -338,4 +339,167 @@ it('authenticates PR routes using real Passport Bearer access tokens', function 
     $this->withHeader('Authorization', 'Bearer '.$accessToken)
         ->getJson('/api/profile')
         ->assertStatus(401);
+});
+
+it('PUT /api/profile/identity updates website and renders it in GET /profile and public profile', function () {
+    $user = User::factory()->create([
+        'handle' => 'mon.site',
+        'neighbourhood' => 'Akwa',
+        'city' => 'Douala',
+    ]);
+    Passport::actingAs($user);
+
+    // Rejet d'un website invalide (> 120 chars ou format non URL)
+    $badUrl = putJson('/api/profile/identity', [
+        'handle' => 'mon.site',
+        'website' => 'not-a-valid-url',
+    ]);
+    $badUrl->assertStatus(422)->assertJsonValidationErrors(['website']);
+
+    $tooLongUrl = putJson('/api/profile/identity', [
+        'handle' => 'mon.site',
+        'website' => 'https://example.com/'.str_repeat('a', 120),
+    ]);
+    $tooLongUrl->assertStatus(422)->assertJsonValidationErrors(['website']);
+
+    // Succès avec une URL valide <= 120 caractères
+    $validUrl = 'https://monportail-immo.cm/me';
+    $response = putJson('/api/profile/identity', [
+        'handle' => 'mon.site',
+        'displayName' => 'Site Owner',
+        'website' => $validUrl,
+    ]);
+    $response->assertStatus(200)->assertJson(['success' => true]);
+
+    $user->refresh();
+    expect($user->website)->toBe($validUrl);
+
+    // Rendu dans GET /api/profile
+    $getProfile = getJson('/api/profile');
+    $getProfile->assertStatus(200)
+        ->assertJsonPath('data.website', $validUrl);
+
+    // Rendu dans profil public
+    $publicProfile = getJson('/api/profile/public/mon.site');
+    $publicProfile->assertStatus(200)
+        ->assertJsonPath('data.website', $validUrl);
+});
+
+it('GET/PUT /api/profile/privacy handles showNeighbourhood and showFollowing (true by default)', function () {
+    $user = User::factory()->create();
+    Passport::actingAs($user);
+
+    // GET par défaut : showNeighbourhood et showFollowing valent true
+    $getRes = getJson('/api/profile/privacy');
+    $getRes->assertStatus(200)
+        ->assertJsonPath('showNeighbourhood', true)
+        ->assertJsonPath('showFollowing', true);
+
+    // PUT pour basculer les deux réglages
+    $putRes = putJson('/api/profile/privacy', [
+        'showNeighbourhood' => false,
+        'showFollowing' => false,
+    ]);
+    $putRes->assertStatus(200)
+        ->assertJsonPath('showNeighbourhood', false)
+        ->assertJsonPath('showFollowing', false);
+
+    $user->refresh();
+    expect($user->privacy_settings['showNeighbourhood'])->toBeFalse()
+        ->and($user->privacy_settings['showFollowing'])->toBeFalse();
+});
+
+it('masque le quartier sur le profil public quand showNeighbourhood est faux', function () {
+    $user = User::factory()->create([
+        'handle' => 'quartier.cache',
+        'city' => 'Douala',
+        'neighbourhood' => 'Bonapriso',
+        'privacy_settings' => [
+            'showNeighbourhood' => false,
+        ],
+    ]);
+    Passport::actingAs($user);
+
+    $res = getJson('/api/profile/public/quartier.cache');
+    $res->assertStatus(200)
+        ->assertJsonPath('data.city', 'Douala')
+        ->assertJsonPath('data.neighbourhood', null)
+        ->assertJsonPath('data.place', 'Douala'); // Bonapriso ne doit pas apparaître dans place non plus
+});
+
+it('interdit l accès à /profile/{id}/following avec 403 following_hidden quand showFollowing est faux pour un tiers', function () {
+    $target = User::factory()->create([
+        'handle' => 'target.user',
+        'privacy_settings' => [
+            'showFollowing' => false,
+        ],
+    ]);
+    $followed = User::factory()->create();
+    $target->following()->attach($followed->id);
+
+    $viewer = User::factory()->create();
+
+    // 1. Un utilisateur tiers reçoit 403 {"kind":"following_hidden"}
+    Passport::actingAs($viewer);
+    $response = getJson("/api/profile/{$target->id}/following");
+    $response->assertStatus(403)
+        ->assertJsonPath('kind', 'following_hidden');
+
+    // 2. Le titulaire du compte peut toujours voir sa propre liste d abonnements
+    Passport::actingAs($target);
+    $ownerResponse = getJson("/api/profile/{$target->id}/following");
+    $ownerResponse->assertStatus(200);
+    expect($ownerResponse->json('data'))->toHaveCount(1);
+    expect($ownerResponse->json('data.0.id'))->toBe($followed->id);
+
+    // 3. GET /api/profile/following pour le titulaire fonctionne également
+    $ownerSelfResponse = getJson('/api/profile/following');
+    $ownerSelfResponse->assertStatus(200);
+    expect($ownerSelfResponse->json('data'))->toHaveCount(1);
+});
+
+it('GET /api/profile/{id}/listings/liked retourne les biens aimés selon la visibilité du profil', function () {
+    $owner = User::factory()->create();
+    $listing1 = Listing::factory()->published()->create(['owner_id' => $owner->id, 'title' => 'Villa Bonamoussadi']);
+    $listing2 = Listing::factory()->published()->create(['owner_id' => $owner->id, 'title' => 'Studio Bali']);
+    $savedListing = Listing::factory()->published()->create(['owner_id' => $owner->id, 'title' => 'Bien Secret Seulement Enregistre']);
+
+    // Compte public avec 2 likes et 1 save
+    $simpleUser = User::factory()->create(['is_private' => false]);
+    $simpleUser->likedListings()->attach([$listing1->id, $listing2->id]);
+    $simpleUser->savedListings()->attach([$savedListing->id]);
+
+    $viewer = User::factory()->create();
+    Passport::actingAs($viewer);
+
+    // 1. Consultation des biens aimés du compte public : retourne les 2 biens aimés, PAS le bien seulement enregistré
+    $resPublic = getJson("/api/profile/{$simpleUser->id}/listings/liked");
+    $resPublic->assertStatus(200)
+        ->assertJsonStructure(['data', 'links', 'meta']);
+    $data = $resPublic->json('data');
+    expect($data)->toHaveCount(2);
+    $titles = collect($data)->pluck('title');
+    expect($titles)->toContain('Villa Bonamoussadi')
+        ->and($titles)->toContain('Studio Bali')
+        ->and($titles)->not->toContain('Bien Secret Seulement Enregistre');
+
+    // 2. Compte privé non suivi : renvoie 403
+    $privateUser = User::factory()->create(['is_private' => true]);
+    $privateUser->likedListings()->attach([$listing1->id]);
+
+    $resPrivate = getJson("/api/profile/{$privateUser->id}/listings/liked");
+    $resPrivate->assertStatus(403);
+
+    // 3. Compte privé suivi par le viewer : renvoie 200 avec le contenu
+    $viewer->following()->attach($privateUser->id);
+    $resFollowed = getJson("/api/profile/{$privateUser->id}/listings/liked");
+    $resFollowed->assertStatus(200);
+    expect($resFollowed->json('data'))->toHaveCount(1);
+    expect($resFollowed->json('data.0.title'))->toBe('Villa Bonamoussadi');
+
+    // 4. Le titulaire du compte privé peut toujours voir ses propres biens aimés
+    Passport::actingAs($privateUser);
+    $resSelf = getJson("/api/profile/{$privateUser->id}/listings/liked");
+    $resSelf->assertStatus(200);
+    expect($resSelf->json('data'))->toHaveCount(1);
 });

@@ -87,10 +87,71 @@ class ReportController extends Controller
     public function mine(Request $request): AnonymousResourceCollection
     {
         $reports = Report::where('reporter_id', $request->user()->id)
+            ->with(['decisions', 'reportable'])
             ->latest()
             ->paginate((int) $request->query('per_page', 20));
 
         return ReportResource::collection($reports);
+    }
+
+    /**
+     * Demande un réexamen d'un signalement traité ou classé (SUP-14).
+     *
+     * POST /api/reports/{id}/reexamine
+     */
+    public function reexamine(Request $request, string|int $id): JsonResponse
+    {
+        $user = $request->user();
+
+        /** @var Report $report */
+        $report = Report::where('id', is_numeric($id) ? (int) $id : 0)
+            ->orWhere('reference', (string) $id)
+            ->firstOrFail();
+
+        // 1. Contrôle d'accès : seul le déclarant d'origine peut demander un réexamen
+        if ((int) $report->reporter_id !== (int) $user->id) {
+            return response()->json([
+                'message' => 'Non autorisé. Vous n\'êtes pas l\'auteur de ce signalement.',
+            ], 403);
+        }
+
+        // 2. Validation du message
+        $validated = $request->validate([
+            'message' => ['required', 'string', 'min:3', 'max:2000'],
+        ]);
+
+        $meta = $report->metadata ?? [];
+
+        // 3. Règle métier : une seule demande de réexamen par signalement
+        if (! empty($meta['reexamination_requested'])) {
+            return response()->json([
+                'message' => 'Une demande de réexamen a déjà été enregistrée pour ce signalement.',
+            ], 422);
+        }
+
+        // 4. Mise à jour du dossier : remise en file avec mention « réexamen demandé »
+        $meta['reexamination_requested'] = true;
+        $meta['reexamined_at'] = now()->toIso8601String();
+        $meta['reexamination_message'] = $validated['message'];
+        $meta['reexamination_history'] = array_merge($meta['reexamination_history'] ?? [], [
+            [
+                'message' => $validated['message'],
+                'requested_at' => now()->toIso8601String(),
+                'previous_status' => $report->status->value,
+                'previous_action' => $report->action_taken,
+            ],
+        ]);
+
+        $report->status = ReportStatus::Pending;
+        $report->priority = 'high'; // Prioriser le réexamen dans la file de modération
+        $report->escalation_reason = 'réexamen demandé : '.$validated['message'];
+        $report->assigned_to = null; // Remis dans le pool non assigné pour réattribution
+        $report->metadata = $meta;
+        $report->save();
+
+        return (new ReportResource($report))
+            ->response()
+            ->setStatusCode(201);
     }
 
     /**

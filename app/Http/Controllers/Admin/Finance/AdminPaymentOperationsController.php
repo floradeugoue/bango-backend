@@ -144,7 +144,8 @@ class AdminPaymentOperationsController extends Controller
                 ] : null,
                 'price' => $sub->price ? [
                     'cadence' => $sub->price->cadence,
-                    'amount' => (float) $sub->price->amount,
+                    'amount' => (float) ($sub->price->price_amount ?? $sub->price->amount),
+                    'price_amount' => (float) ($sub->price->price_amount ?? $sub->price->amount),
                     'currency' => $sub->price->currency,
                 ] : null,
                 'badge_type' => $sub->badge_type,

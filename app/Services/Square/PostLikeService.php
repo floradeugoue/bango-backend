@@ -123,4 +123,18 @@ class PostLikeService
             ->orderByDesc('users.id')
             ->paginate($perPage);
     }
+
+    /**
+     * Récupère la liste paginée des publications aimées par un utilisateur (les plus récentes d'abord).
+     */
+    public function getLikedPosts(User $user, int $perPage = 15): LengthAwarePaginator
+    {
+        $perPage = min(max($perPage, 1), 50);
+
+        return $user->likedPosts()
+            ->with(['media.tags.user', 'hashtags', 'user'])
+            ->with(['likes' => fn ($q) => $q->where('user_id', $user->id)])
+            ->orderByDesc('post_likes.created_at')
+            ->paginate($perPage);
+    }
 }

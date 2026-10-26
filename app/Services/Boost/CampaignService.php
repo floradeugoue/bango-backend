@@ -9,7 +9,10 @@ use App\Exceptions\Boost\InvalidBoostableContentException;
 use App\Exceptions\Boost\InvalidCampaignTransitionException;
 use App\Exceptions\Boost\UnauthorizedContentPromotionException;
 use App\Models\Boost\Campaign;
+use App\Models\Boost\CampaignClick;
+use App\Models\Boost\CampaignImpression;
 use App\Models\Boost\CampaignMetric;
+use App\Models\Delegation\Delegation;
 use App\Models\Listing\Listing;
 use App\Models\Page\Page;
 use App\Models\Payment\PaymentTransaction;
@@ -21,12 +24,14 @@ use App\Notifications\Boost\CampaignSuspendedNotification;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use InvalidArgumentException;
 
 class CampaignService
 {
     public function __construct(
-        protected CreditWalletService $creditWalletService
+        protected CreditWalletService $creditWalletService,
+        protected CampaignEstimateService $estimateService
     ) {}
 
     /**
@@ -101,7 +106,11 @@ class CampaignService
                 }
                 $isPageManager = $page->canUserPublish($user);
             }
-            if (! $isOwner && ! $isAgent && ! $isPageManager) {
+            $hasActiveDelegation = Delegation::where('listing_id', $content->id)
+                ->where('agent_id', $user->id)
+                ->active()
+                ->exists();
+            if (! $isOwner && ! $isAgent && ! $hasActiveDelegation && ! $isPageManager) {
                 throw new UnauthorizedContentPromotionException('Vous n\'avez pas les droits pour promouvoir cette annonce immobilière.');
             }
             if ($content->status->value === 'taken') {
@@ -281,6 +290,66 @@ class CampaignService
     }
 
     /**
+     * Augmente le budget d'une campagne en cours ou active en débitant le Crédit BANGO (BO-07).
+     *
+     * @param  Campaign  $campaign  Campagne à recharger
+     * @param  User  $user  Utilisateur propriétaire
+     * @param  float|int  $amount  Montant à ajouter au budget_amount
+     * @param  string|null  $idempotencyKey  Clé d'idempotence unique
+     *
+     * @throws UnauthorizedContentPromotionException
+     * @throws InvalidArgumentException
+     * @throws InsufficientCreditException
+     */
+    public function topUpCampaign(Campaign $campaign, User $user, float|int $amount, ?string $idempotencyKey = null): Campaign
+    {
+        if ((int) $campaign->user_id !== (int) $user->id) {
+            throw new UnauthorizedContentPromotionException('Vous ne pouvez pas augmenter le budget d\'une campagne appartenant à un tiers.');
+        }
+
+        $floatAmount = (float) $amount;
+        if ($floatAmount <= 0) {
+            throw new InvalidArgumentException('Le montant à ajouter au budget doit être strictement positif.');
+        }
+
+        // Seules les campagnes actives ou en pause peuvent être rechargées en cours de route
+        if (! in_array($campaign->status, [CampaignStatus::Active, CampaignStatus::Paused], true)) {
+            throw new InvalidCampaignTransitionException($campaign->status, CampaignStatus::Active, 'Seule une campagne active ou en pause peut être rechargée.');
+        }
+
+        return DB::transaction(function () use ($campaign, $user, $floatAmount, $idempotencyKey) {
+            /** @var Campaign $lockedCampaign */
+            $lockedCampaign = Campaign::where('id', $campaign->id)->lockForUpdate()->firstOrFail();
+
+            $debitKey = $idempotencyKey ?? Str::uuid()->toString();
+            $campaignShortId = substr((string) $lockedCampaign->id, 0, 8);
+
+            // Débite le crédit BANGO du portefeuille de l'utilisateur (lève InsufficientCreditException si solde insuffisant)
+            $this->creditWalletService->debit(
+                account: $user,
+                amount: $floatAmount,
+                source: 'boost',
+                reference: $lockedCampaign,
+                description: sprintf('Recharge budget campagne boost #%s (+%s FCFA)', $campaignShortId, number_format($floatAmount, 0, ',', ' ')),
+                idempotencyKey: $debitKey,
+                referenceModel: $lockedCampaign,
+                metadata: [
+                    'campaign_id' => (string) $lockedCampaign->id,
+                    'top_up_amount' => $floatAmount,
+                    'budget_before' => (float) $lockedCampaign->budget_amount,
+                ],
+                type: CreditTransactionType::CampaignDebit
+            );
+
+            // Ajoute le montant au budget existant
+            $lockedCampaign->budget_amount = (float) $lockedCampaign->budget_amount + $floatAmount;
+            $lockedCampaign->save();
+
+            return $lockedCampaign;
+        });
+    }
+
+    /**
      * Fulfiller appelé lorsque la transaction de paiement externe (PAY) est confirmée.
      */
     public function confirmPaymentFromTransaction(PaymentTransaction $transaction): Campaign
@@ -377,7 +446,28 @@ class CampaignService
             $lockedCampaign->stopped_reason = $reason;
             $lockedCampaign->save();
 
-            // Règle CB immuable : consommation définitive, aucune restitution automatique de crédits lors de l'annulation
+            // Restitution automatique du reliquat non consommé en Crédit BANGO (BO-08 / EDGE-04)
+            if ($unspent > 0) {
+                $targetUser = $lockedCampaign->user ?? User::findOrFail($lockedCampaign->user_id);
+                $campaignShortId = substr((string) $lockedCampaign->id, 0, 8);
+
+                $this->creditWalletService->credit(
+                    account: $targetUser,
+                    amount: $unspent,
+                    type: CreditTransactionType::CampaignRefund,
+                    description: "Remboursement campagne boost #{$campaignShortId}",
+                    idempotencyKey: "campaign_cancel_refund_{$lockedCampaign->id}",
+                    reference: $lockedCampaign,
+                    metadata: [
+                        'campaign_id' => (string) $lockedCampaign->id,
+                        'reason' => $reason,
+                        'budget_amount' => (float) $lockedCampaign->budget_amount,
+                        'spent_amount' => (float) $lockedCampaign->spent_amount,
+                        'refunded_amount' => $unspent,
+                    ],
+                    source: 'boost'
+                );
+            }
 
             return $lockedCampaign;
         });
@@ -385,6 +475,7 @@ class CampaignService
 
     /**
      * Suspend une campagne active en cas de modération, indisponibilité de bien ou inéligibilité.
+     * Restitue également le reliquat budgétaire en Crédit BANGO au commanditaire.
      */
     public function suspendCampaign(Campaign $campaign, string $reason = 'moderation'): Campaign
     {
@@ -396,9 +487,34 @@ class CampaignService
                 throw new InvalidCampaignTransitionException($lockedCampaign->status, CampaignStatus::Suspended);
             }
 
+            $unspent = max(0.0, (float) $lockedCampaign->budget_amount - (float) $lockedCampaign->spent_amount);
+
             $lockedCampaign->status = CampaignStatus::Suspended;
             $lockedCampaign->stopped_reason = $reason;
             $lockedCampaign->save();
+
+            // Restitution automatique du reliquat non consommé en Crédit BANGO
+            if ($unspent > 0) {
+                $targetUser = $lockedCampaign->user ?? User::findOrFail($lockedCampaign->user_id);
+                $campaignShortId = substr((string) $lockedCampaign->id, 0, 8);
+
+                $this->creditWalletService->credit(
+                    account: $targetUser,
+                    amount: $unspent,
+                    type: CreditTransactionType::CampaignRefund,
+                    description: "Remboursement campagne boost #{$campaignShortId}",
+                    idempotencyKey: "campaign_suspend_refund_{$lockedCampaign->id}",
+                    reference: $lockedCampaign,
+                    metadata: [
+                        'campaign_id' => (string) $lockedCampaign->id,
+                        'reason' => $reason,
+                        'budget_amount' => (float) $lockedCampaign->budget_amount,
+                        'spent_amount' => (float) $lockedCampaign->spent_amount,
+                        'refunded_amount' => $unspent,
+                    ],
+                    source: 'boost'
+                );
+            }
 
             $lockedCampaign->user?->notify(new CampaignSuspendedNotification($lockedCampaign, $reason));
 
@@ -407,7 +523,7 @@ class CampaignService
     }
 
     /**
-     * Enregistre ou agrège des métriques quotidiennes pour une campagne.
+     * Enregistre ou agrège des métriques quotidiennes pour une campagne, avec traçabilité unitaire.
      */
     public function recordDailyMetric(
         Campaign $campaign,
@@ -415,11 +531,48 @@ class CampaignService
         int $impressions,
         int $clicks,
         int $reach,
-        float $spent
+        float $spent,
+        ?User $user = null
     ): CampaignMetric {
-        return DB::transaction(function () use ($campaign, $date, $impressions, $clicks, $reach, $spent) {
-            /** @var CampaignMetric|null $metric */
+        return DB::transaction(function () use ($campaign, $date, $impressions, $clicks, $reach, $spent, $user) {
             $dateString = Carbon::parse($date)->toDateString();
+
+            // 1. Détermination si cette impression concerne une NOUVELLE personne distincte
+            $isNewPerson = false;
+            if ($impressions > 0) {
+                if ($user) {
+                    $hasSeenBefore = CampaignImpression::where('campaign_id', $campaign->id)
+                        ->where('user_id', $user->id)
+                        ->exists();
+                    $isNewPerson = ! $hasSeenBefore;
+                } else {
+                    $isNewPerson = true;
+                }
+
+                CampaignImpression::create([
+                    'campaign_id' => $campaign->id,
+                    'user_id' => $user?->id,
+                    'shown_at' => now(),
+                ]);
+            }
+
+            // 2. Enregistrement unitaire de clic
+            if ($clicks > 0) {
+                CampaignClick::create([
+                    'campaign_id' => $campaign->id,
+                    'user_id' => $user?->id,
+                    'clicked_at' => now(),
+                ]);
+            }
+
+            // 3. Calcul de la dépense : à chaque impression d'une nouvelle personne, dépenser CPM / 1000
+            $calculatedSpent = $spent;
+            if ($calculatedSpent <= 0 && $isNewPerson) {
+                $cpm = $this->estimateService->resolveCpmPrice();
+                $calculatedSpent = round($cpm / 1000.0, 4);
+            }
+
+            /** @var CampaignMetric|null $metric */
             $metric = CampaignMetric::where('campaign_id', $campaign->id)
                 ->whereDate('metric_date', $dateString)
                 ->lockForUpdate()
@@ -436,17 +589,64 @@ class CampaignService
                 ]);
             }
 
+            // Calcul du reach quotidien distinct
+            $distinctUsersToday = CampaignImpression::query()
+                ->where('campaign_id', $campaign->id)
+                ->whereDate('shown_at', $dateString)
+                ->whereNotNull('user_id')
+                ->distinct('user_id')
+                ->count('user_id');
+
+            // Nombre d'impressions anonymes du jour (sans user_id)
+            $anonymousImpressionsToday = CampaignImpression::query()
+                ->where('campaign_id', $campaign->id)
+                ->whereDate('shown_at', $dateString)
+                ->whereNull('user_id')
+                ->count();
+
+            $totalReachToday = $distinctUsersToday + $anonymousImpressionsToday;
+
             $metric->impressions += $impressions;
             $metric->clicks += $clicks;
-            $metric->reach += $reach;
-            $metric->spent = number_format((float) $metric->spent + $spent, 2, '.', '');
+            $metric->reach = max($metric->reach + $reach, $totalReachToday);
+            $metric->spent = number_format((float) $metric->spent + $calculatedSpent, 2, '.', '');
             $metric->save();
 
-            // Mise à jour des compteurs globaux de la campagne
-            $campaign->increment('impressions_count', $impressions);
-            $campaign->increment('clicks_count', $clicks);
-            $campaign->increment('reach_count', $reach);
-            $campaign->increment('spent_amount', $spent);
+            // Mise à jour des totaux de la campagne
+            if ($impressions > 0) {
+                $campaign->increment('impressions_count', $impressions);
+            }
+            if ($clicks > 0) {
+                $campaign->increment('clicks_count', $clicks);
+            }
+            if ($calculatedSpent > 0) {
+                $campaign->increment('spent_amount', $calculatedSpent);
+            }
+
+            // Calcul strict de reach_count : personnes distinctes tracées ou incrément batch fourni
+            $distinctUsersAllTime = CampaignImpression::query()
+                ->where('campaign_id', $campaign->id)
+                ->whereNotNull('user_id')
+                ->distinct('user_id')
+                ->count('user_id');
+
+            $anonymousAllTime = CampaignImpression::query()
+                ->where('campaign_id', $campaign->id)
+                ->whereNull('user_id')
+                ->count();
+
+            $totalDistinctImpressions = $distinctUsersAllTime + $anonymousAllTime;
+
+            if ($reach > 0 && $impressions > 1) {
+                // Appel batch agrégé (ex: simulation de lot ou synchronisation de lot de métriques)
+                $campaign->increment('reach_count', $reach);
+            } else {
+                $campaign->update(['reach_count' => $totalDistinctImpressions]);
+            }
+
+            // Vérification et clôture automatique si budget épuisé ou end_at dépassé
+            $campaign->refresh();
+            $campaign->checkAndMarkCompleted();
 
             return $metric->fresh();
         });

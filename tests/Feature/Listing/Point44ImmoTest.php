@@ -171,3 +171,99 @@ test('point 44: visit reservation resource exposes neighborhood, cover_image_url
     expect($data['listing'])->toHaveKey('cover_image_url');
     expect($data['status_label'])->toBe('Confirmée');
 });
+
+test('cr-44 & im-03: floor, available_from and min_lease_months in creation, draft, resource, and filters', function () {
+    $owner = User::factory()->create(['badge' => 'landlord', 'is_verified' => true]);
+
+    // 1. Création avec floor, available_from et min_lease_months
+    $createRes = $this->actingAs($owner, 'api')->postJson('/api/listings', [
+        'title' => 'Appartement 2e étage Akwa',
+        'mode' => 'rent',
+        'kind' => 'flat',
+        'price' => 200000,
+        'bedrooms' => 2,
+        'showers' => 1,
+        'area' => 65,
+        'city' => 'Douala',
+        'neighbourhood' => 'Akwa',
+        'floor' => 2,
+        'available_from' => '2026-11-01',
+        'min_lease_months' => 6,
+    ]);
+    $createRes->assertCreated();
+    expect($createRes->json('data.floor'))->toBe(2);
+    expect($createRes->json('data.available_from'))->toBe('2026-11-01');
+    expect($createRes->json('data.min_lease_months'))->toBe(6);
+
+    // 2. Brouillon avec rez-de-chaussée (0), disponible tout de suite (null) et durée libre (null)
+    $draftRes = $this->actingAs($owner, 'api')->postJson('/api/listings/form/draft', [
+        'title' => 'Maison RDC Bonapriso',
+        'mode' => 'rent',
+        'kind' => 'villa',
+        'price' => 450000,
+        'floor' => 0,
+        'available_from' => null,
+        'min_lease_months' => null,
+        'submission_key' => 'draft-test-floor-123',
+    ]);
+    $draftRes->assertOk();
+    expect($draftRes->json('data.floor'))->toBe(0);
+    expect($draftRes->json('data.available_from'))->toBeNull();
+    expect($draftRes->json('data.min_lease_months'))->toBeNull();
+
+    // 3. Tests des filtres scopeFilter
+    // l1: 2e étage, dispo 2026-11-01, min 6 mois
+    $l1 = Listing::find($createRes->json('data.id'));
+
+    // l2: 5e étage, dispo 2026-12-15, min 12 mois
+    $l2 = Listing::factory()->published()->create([
+        'owner_id' => $owner->id,
+        'title' => 'Penthouse 5e étage',
+        'city' => 'Douala',
+        'floor' => 5,
+        'available_from' => '2026-12-15',
+        'min_lease_months' => 12,
+    ]);
+
+    // l3: Villa (floor null), disponible immédiatement (available_from null), bail libre (min_lease_months null)
+    $l3 = Listing::factory()->published()->create([
+        'owner_id' => $owner->id,
+        'title' => 'Villa avec jardin',
+        'city' => 'Douala',
+        'floor' => null,
+        'available_from' => null,
+        'min_lease_months' => null,
+    ]);
+
+    // Filtre floor_min = 3 : seul l2 (5e étage)
+    $resFloorMin = $this->getJson('/api/listings?floor_min=3');
+    $resFloorMin->assertOk();
+    $idsFloorMin = collect($resFloorMin->json('data'))->pluck('id')->all();
+    expect($idsFloorMin)->toContain($l2->id);
+    expect($idsFloorMin)->not->toContain($l1->id);
+    expect($idsFloorMin)->not->toContain($l3->id);
+
+    // Filtre floor_max = 2 : seul l1 (2e étage, l3 null exclu)
+    $resFloorMax = $this->getJson('/api/listings?floor_max=2');
+    $resFloorMax->assertOk();
+    $idsFloorMax = collect($resFloorMax->json('data'))->pluck('id')->all();
+    expect($idsFloorMax)->toContain($l1->id);
+    expect($idsFloorMax)->not->toContain($l2->id);
+    expect($idsFloorMax)->not->toContain($l3->id);
+
+    // Filtre available_before = '2026-11-15' : l1 (2026-11-01) et l3 (dispo tout de suite/null) doivent matcher, l2 (2026-12-15) exclu
+    $resAvail = $this->getJson('/api/listings?available_before=2026-11-15');
+    $resAvail->assertOk();
+    $idsAvail = collect($resAvail->json('data'))->pluck('id')->all();
+    expect($idsAvail)->toContain($l1->id);
+    expect($idsAvail)->toContain($l3->id);
+    expect($idsAvail)->not->toContain($l2->id);
+
+    // Filtre max_lease_months = 6 : l1 (6 mois) et l3 (libre/null) doivent matcher, l2 (12 mois) exclu
+    $resLease = $this->getJson('/api/listings?max_lease_months=6');
+    $resLease->assertOk();
+    $idsLease = collect($resLease->json('data'))->pluck('id')->all();
+    expect($idsLease)->toContain($l1->id);
+    expect($idsLease)->toContain($l3->id);
+    expect($idsLease)->not->toContain($l2->id);
+});

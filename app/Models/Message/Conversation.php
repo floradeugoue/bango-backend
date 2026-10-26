@@ -104,7 +104,7 @@ class Conversation extends Model
     public function users(): BelongsToMany
     {
         return $this->belongsToMany(User::class, 'conversation_members', 'conversation_id', 'user_id')
-            ->withPivot(['role', 'is_muted', 'last_read_message_id', 'last_read_at', 'joined_at', 'left_at'])
+            ->withPivot(['role', 'is_muted', 'last_read_message_id', 'last_read_at', 'last_delivered_at', 'joined_at', 'left_at'])
             ->withTimestamps();
     }
 

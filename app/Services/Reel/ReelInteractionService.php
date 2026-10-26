@@ -241,6 +241,17 @@ class ReelInteractionService
     }
 
     /**
+     * Liste des Reels aimés par l'utilisateur (les plus récents d'abord).
+     */
+    public function listLikedReels(User $user, int $perPage = 20): LengthAwarePaginator
+    {
+        return $user->likedReels()
+            ->with(['user', 'sound'])
+            ->orderByDesc('reel_reactions.created_at')
+            ->paginate($perPage);
+    }
+
+    /**
      * Marque un Reel comme "Ça ne m'intéresse pas" pour l'utilisateur.
      *
      * @return array{not_interested: bool}

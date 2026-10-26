@@ -4,6 +4,7 @@ namespace App\Services\Delegation;
 
 use App\Enums\Delegation\DelegationCapability;
 use App\Enums\Delegation\DelegationStatus;
+use App\Enums\Listing\ListingStatus;
 use App\Models\Delegation\Delegation;
 use App\Models\Listing\Listing;
 use App\Models\User;
@@ -625,5 +626,25 @@ class DelegationService
         }
 
         return $query->latest('created_at')->paginate(max(1, min(50, $perPage)));
+    }
+
+    /**
+     * Liste publique des biens immobiliers publiés gérés par un agent sous délégation active.
+     */
+    public function getAgentManagedListings(User $agent, int $perPage = 15): LengthAwarePaginator
+    {
+        return Listing::query()
+            ->where('status', ListingStatus::Published->value)
+            ->whereHas('delegations', function (Builder $q) use ($agent) {
+                $q->where('agent_id', $agent->id)
+                    ->where('status', DelegationStatus::Active->value)
+                    ->whereNull('revoked_at')
+                    ->where(function (Builder $sub) {
+                        $sub->whereNull('expires_at')->orWhere('expires_at', '>', now());
+                    });
+            })
+            ->with(['photos', 'videos', 'owner'])
+            ->latest('created_at')
+            ->paginate(max(1, min(50, $perPage)));
     }
 }

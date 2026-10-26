@@ -2,6 +2,8 @@
 
 namespace App\Services\Boost;
 
+use App\Models\Delegation\Delegation;
+use App\Models\Listing\Listing;
 use App\Models\Page\Page;
 use App\Models\User;
 use App\Services\Subscription\BadgeResolutionService;
@@ -74,22 +76,71 @@ class CampaignEligibilityService
     }
 
     /**
+     * Vérifie si un utilisateur dispose du badge Agent actif et certifié.
+     */
+    public function hasActiveAgentBadge(User $agent): bool
+    {
+        if ($agent->isAdmin()) {
+            return true;
+        }
+
+        if ($agent->locked_until && $agent->locked_until->isFuture()) {
+            return false;
+        }
+
+        if ($agent->suspended_until && $agent->suspended_until->isFuture()) {
+            return false;
+        }
+
+        if ($agent->verification_lapsed || ! $agent->is_verified) {
+            return false;
+        }
+
+        if (in_array($agent->badge, ['agent', 'double'], true)) {
+            return true;
+        }
+
+        $badgeStatus = $this->badgeResolutionService->resolveUserBadges($agent);
+
+        return (bool) ($badgeStatus['hasAgent'] ?? false);
+    }
+
+    /**
      * Vérifie l'éligibilité au boost d'un compte personnel (règle produit : le boost cible du contenu).
      */
     public function checkPersonalEligibility(User $user, ?Model $content = null): Response
     {
         // Règle produit BANGO : Le boost cible un contenu (annonce, publication, reel),
-        // et n'est pas restreint aux seuls professionnels certifiés.
+        // et n'est pas restreint aux seuls professionnels certifiés pour posts et reels.
         // Tout utilisateur actif et non suspendu peut promouvoir ses propres contenus.
         if ($user->status === 'suspended') {
             return Response::deny('Votre compte utilisateur est suspendu. Vous ne pouvez pas lancer de campagne.');
         }
 
-        // Si un contenu est fourni, vérifier la propriété directe
+        // Si un contenu est fourni
         if ($content !== null) {
-            $contentUserId = (int) ($content->user_id ?? $content->owner_id ?? 0);
-            if ($contentUserId !== (int) $user->id) {
-                return Response::deny('Vous ne pouvez promouvoir que vos propres contenus.');
+            if ($content instanceof Listing) {
+                // Pour boostable_type = listing : autoriser si badge Agent actif ET (propriétaire OU délégation active sur le bien)
+                $hasAgentBadge = $this->hasActiveAgentBadge($user);
+
+                if (! $hasAgentBadge) {
+                    return Response::denyWithStatus(403, 'Seuls les agents immobiliers actifs peuvent booster une annonce immobilière.', 'listing_boost_agents_only');
+                }
+
+                $isOwner = (int) $content->owner_id === (int) $user->id;
+                $hasActiveDelegation = Delegation::where('listing_id', $content->id)
+                    ->where('agent_id', $user->id)
+                    ->active()
+                    ->exists();
+
+                if (! $isOwner && ! $hasActiveDelegation) {
+                    return Response::denyWithStatus(403, 'Vous ne pouvez booster que vos propres annonces ou les biens qui vous sont confiés en mandat actif.', 'listing_boost_agents_only');
+                }
+            } else {
+                $contentUserId = (int) ($content->user_id ?? $content->owner_id ?? 0);
+                if ($contentUserId !== (int) $user->id) {
+                    return Response::deny('Vous ne pouvez promouvoir que vos propres contenus.');
+                }
             }
         }
 

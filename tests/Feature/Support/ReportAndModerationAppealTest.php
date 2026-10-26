@@ -254,6 +254,137 @@ test('GET /api/reports/mine liste uniquement les signalements de l\'utilisateur 
         ->assertJsonCount(1, 'data');
 });
 
+test('SUP-14 : GET /api/reports/mine retourne target et decision (action, decided_at, rule, consequences) sans identité du modérateur', function () {
+    $this->seed(\Database\Seeders\ModerationRuleSeeder::class);
+    Passport::actingAs($this->reporter);
+
+    $operator = User::factory()->create([
+        'name' => 'Agent Modérateur Secret',
+        'email' => 'secret.mod@bango.app',
+    ]);
+
+    $post = Post::factory()->create([
+        'user_id' => $this->targetUser->id,
+        'body' => 'Contenu suspect avec un lien frauduleux',
+    ]);
+
+    \App\Models\Square\PostMedia::create([
+        'post_id' => $post->id,
+        'media_url' => 'https://res.cloudinary.com/bango/image/upload/v1234/reported_post.jpg',
+        'media_type' => \App\Enums\Square\PostMediaKind::Photo,
+        'display_order' => 0,
+    ]);
+
+    $report = Report::create([
+        'reporter_id' => $this->reporter->id,
+        'reportable_type' => Post::class,
+        'reportable_id' => (string) $post->id,
+        'reason' => ReportReason::Fraud,
+        'status' => ReportStatus::Resolved,
+        'action_taken' => 'suspend_author',
+        'resolved_by' => $operator->id,
+        'resolved_at' => now(),
+    ]);
+
+    \App\Models\Support\ModerationDecision::create([
+        'report_id' => $report->id,
+        'operator_id' => $operator->id,
+        'action' => 'suspend_author',
+        'justification' => 'Arnaque confirmée par le modérateur.',
+        'metadata' => [
+            'rule_code' => 'fraud',
+            'consequences' => [
+                'badge Agent suspendu 30 jours',
+                '11 personnes en contact prévenues',
+            ],
+        ],
+        'created_at' => now(),
+    ]);
+
+    $response = $this->getJson('/api/reports/mine');
+
+    $response->assertOk();
+    $data = $response->json('data.0');
+
+    // 1. Cible vérifiée avec label et vignette
+    expect($data)->toHaveKey('target')
+        ->and($data['target']['label'])->toBe('Contenu suspect avec un lien frauduleux')
+        ->and($data['target']['thumbnail_url'])->toBe('https://res.cloudinary.com/bango/image/upload/v1234/reported_post.jpg');
+
+    // 2. Décision vérifiée avec action, decided_at, rule, consequences
+    expect($data)->toHaveKey('decision')
+        ->and($data['decision']['action'])->toBe('suspend_author')
+        ->and($data['decision']['decided_at'])->not->toBeNull()
+        ->and($data['decision']['rule'])->toMatchArray([
+            'label' => 'Arnaque & Tentative de fraude',
+            'body' => 'Demande d\'argent hors plateforme, phishing, escroquerie financière.',
+        ])
+        ->and($data['decision']['consequences'])->toBe([
+            'badge Agent suspendu 30 jours',
+            '11 personnes en contact prévenues',
+        ]);
+
+    // 3. Règle absolue de sécurité : NE JAMAIS divulguer l'identité du modérateur
+    $rawResponseText = $response->getContent();
+    expect($rawResponseText)->not->toContain('Agent Modérateur Secret')
+        ->not->toContain('secret.mod@bango.app');
+    expect($data)->not->toHaveKey('resolved_by')
+        ->not->toHaveKey('operator')
+        ->and($data['decision'])->not->toHaveKey('operator')
+        ->and($data['decision'])->not->toHaveKey('operator_id');
+});
+
+test('SUP-14 : POST /reports/{id}/reexamine {message} -> 201 remet le dossier en file avec mention réexamen demandé', function () {
+    Passport::actingAs($this->reporter);
+
+    $post = Post::factory()->create(['user_id' => $this->targetUser->id]);
+
+    $report = Report::create([
+        'reporter_id' => $this->reporter->id,
+        'reportable_type' => Post::class,
+        'reportable_id' => (string) $post->id,
+        'reason' => ReportReason::InappropriateContent,
+        'status' => ReportStatus::Dismissed,
+        'action_taken' => 'keep_online',
+        'resolved_at' => now()->subDay(),
+    ]);
+
+    // 1. Demande de réexamen avec message explicatif
+    $response = $this->postJson("/api/reports/{$report->id}/reexamine", [
+        'message' => 'Ce n\'est pas suffisant. L\'image à la 3ème seconde montre clairement des propos haineux passés inaperçus.',
+    ]);
+
+    $response->assertStatus(201)
+        ->assertJsonPath('data.id', $report->id)
+        ->assertJsonPath('data.status.value', ReportStatus::Pending->value)
+        ->assertJsonPath('data.reexamination_requested', true);
+
+    // Vérifier l'état en base de données
+    $refreshed = $report->fresh();
+    expect($refreshed->status)->toBe(ReportStatus::Pending)
+        ->and($refreshed->escalation_reason)->toContain('réexamen demandé')
+        ->and($refreshed->metadata['reexamination_requested'])->toBeTrue()
+        ->and($refreshed->metadata['reexamination_message'])->toBe('Ce n\'est pas suffisant. L\'image à la 3ème seconde montre clairement des propos haineux passés inaperçus.');
+
+    // 2. Règle métier : une seule fois par signalement -> 422
+    $secondAttempt = $this->postJson("/api/reports/{$report->id}/reexamine", [
+        'message' => 'Je relance encore une fois.',
+    ]);
+
+    $secondAttempt->assertStatus(422)
+        ->assertJsonPath('message', 'Une demande de réexamen a déjà été enregistrée pour ce signalement.');
+
+    // 3. Contrôle d'accès : un tiers ne peut pas réexaminer le signalement d'autrui
+    $otherUser = User::factory()->create();
+    Passport::actingAs($otherUser);
+
+    $unauthorizedAttempt = $this->postJson("/api/reports/{$report->id}/reexamine", [
+        'message' => 'Tentative non autorisée',
+    ]);
+
+    $unauthorizedAttempt->assertStatus(403);
+});
+
 // =========================================================================
 // 2. RECOURS DE MODÉRATION (POST /api/moderation/appeals)
 // =========================================================================

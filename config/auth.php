@@ -119,4 +119,16 @@ return [
 
     'password_timeout' => env('AUTH_PASSWORD_TIMEOUT', 10800),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Domaines email autorisés pour les demandes d'accès Back-office
+    |--------------------------------------------------------------------------
+    |
+    | Liste séparée par des virgules de domaines autorisés pour les demandes
+    | d'accès admin. Si vide ou null, toutes les adresses email valides sont
+    | acceptées (la validation par un administrateur restant obligatoire).
+    |
+    */
+    'admin_allowed_email_domains' => env('ADMIN_ALLOWED_EMAIL_DOMAINS', '@bango.app'),
+
 ];

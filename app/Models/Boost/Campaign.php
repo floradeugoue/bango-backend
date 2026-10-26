@@ -10,6 +10,7 @@ use App\Models\Payment\PaymentTransaction;
 use App\Models\Reel\Reel;
 use App\Models\Square\Post;
 use App\Models\User;
+use App\Notifications\Boost\CampaignCompletedNotification;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -122,6 +123,30 @@ class Campaign extends Model
     }
 
     /**
+     * Impressions individuelles horodatées avec utilisateur.
+     */
+    public function impressions(): HasMany
+    {
+        return $this->hasMany(CampaignImpression::class, 'campaign_id');
+    }
+
+    /**
+     * Clics individuels horodatés avec utilisateur.
+     */
+    public function clicks(): HasMany
+    {
+        return $this->hasMany(CampaignClick::class, 'campaign_id');
+    }
+
+    /**
+     * Résultats et conversions attribuées.
+     */
+    public function results(): HasMany
+    {
+        return $this->hasMany(CampaignResult::class, 'campaign_id');
+    }
+
+    /**
      * Transaction de paiement externe éventuelle (PAY).
      */
     public function paymentTransaction(): BelongsTo
@@ -157,6 +182,8 @@ class Campaign extends Model
      */
     public function canBeServed(): bool
     {
+        $this->checkAndMarkCompleted();
+
         if ($this->status !== CampaignStatus::Active) {
             return false;
         }
@@ -174,6 +201,32 @@ class Campaign extends Model
         }
 
         return true;
+    }
+
+    /**
+     * Vérifie si la campagne doit passer en statut Completed (budget atteint ou date de fin dépassée).
+     */
+    public function checkAndMarkCompleted(): bool
+    {
+        if ($this->status !== CampaignStatus::Active) {
+            return false;
+        }
+
+        $budgetExhausted = (float) $this->spent_amount >= (float) $this->budget_amount;
+        $periodEnded = $this->end_at && $this->end_at->isPast();
+
+        if ($budgetExhausted || $periodEnded) {
+            if ($this->canTransitionTo(CampaignStatus::Completed)) {
+                $this->status = CampaignStatus::Completed;
+                $this->save();
+
+                $this->user?->notify(new CampaignCompletedNotification($this));
+
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

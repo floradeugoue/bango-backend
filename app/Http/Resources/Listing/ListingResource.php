@@ -66,6 +66,9 @@ class ListingResource extends JsonResource
             'bedrooms' => (int) $this->bedrooms,
             'showers' => (int) $this->showers,
             'area' => (float) $this->area,
+            'floor' => $this->floor !== null ? (int) $this->floor : null,
+            'available_from' => $this->available_from?->toDateString(),
+            'min_lease_months' => $this->min_lease_months !== null ? (int) $this->min_lease_months : null,
             'amenities' => $this->amenities ?? [],
             'attributes' => $this->attributes ?? [],
             'location' => $this->location,
@@ -90,6 +93,9 @@ class ListingResource extends JsonResource
             'visit_fee' => (float) $this->visit_fee,
             'uses_agenda' => $this->usesAgenda(),
             'sponsored' => (bool) $this->sponsored,
+            'is_sponsored' => $this->isSponsored(),
+            'campaign_id' => $this->campaignId(),
+            'sponsored_by' => $this->sponsoredBy(),
             'media_count' => $this->photos->count() + $this->videos->count(),
         ];
     }

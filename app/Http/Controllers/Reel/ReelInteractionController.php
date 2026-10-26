@@ -155,6 +155,16 @@ class ReelInteractionController extends Controller
     }
 
     /**
+     * Lister les Reels aimés par l'utilisateur connecté.
+     */
+    public function listLiked(Request $request): AnonymousResourceCollection
+    {
+        $reels = $this->interactionService->listLikedReels($request->user(), (int) $request->query('per_page', 20));
+
+        return ReelResource::collection($reels);
+    }
+
+    /**
      * Marquer un Reel comme "Ça ne m'intéresse pas" (RL-06).
      */
     public function markNotInterested(Reel $reel, Request $request): JsonResponse

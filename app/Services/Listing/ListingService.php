@@ -271,6 +271,15 @@ class ListingService
             if (isset($data['area'])) {
                 $listing->area = (float) $data['area'];
             }
+            if (array_key_exists('floor', $data)) {
+                $listing->floor = $data['floor'] !== null ? (int) $data['floor'] : null;
+            }
+            if (array_key_exists('available_from', $data)) {
+                $listing->available_from = ! empty($data['available_from']) ? $data['available_from'] : null;
+            }
+            if (array_key_exists('min_lease_months', $data)) {
+                $listing->min_lease_months = $data['min_lease_months'] !== null ? (int) $data['min_lease_months'] : null;
+            }
             if (isset($data['amenities']) && is_array($data['amenities'])) {
                 $listing->amenities = $data['amenities'];
             }
@@ -378,6 +387,9 @@ class ListingService
             $listing->bedrooms = (int) ($data['bedrooms'] ?? 0);
             $listing->showers = (int) ($data['showers'] ?? 0);
             $listing->area = (float) ($data['area'] ?? 0);
+            $listing->floor = array_key_exists('floor', $data) && $data['floor'] !== null ? (int) $data['floor'] : null;
+            $listing->available_from = ! empty($data['available_from']) ? $data['available_from'] : null;
+            $listing->min_lease_months = array_key_exists('min_lease_months', $data) && $data['min_lease_months'] !== null ? (int) $data['min_lease_months'] : null;
             $listing->amenities = is_array($data['amenities'] ?? null) ? $data['amenities'] : [];
 
             $listing->city = trim((string) ($data['city'] ?? ''));
@@ -462,8 +474,20 @@ class ListingService
             if (isset($patch['utilities_included'])) {
                 $listing->utilities_included = (bool) $patch['utilities_included'];
             }
+            if (array_key_exists('floor', $patch)) {
+                $listing->floor = $patch['floor'] !== null ? (int) $patch['floor'] : null;
+            }
+            if (array_key_exists('available_from', $patch)) {
+                $listing->available_from = ! empty($patch['available_from']) ? $patch['available_from'] : null;
+            }
+            if (array_key_exists('min_lease_months', $patch)) {
+                $listing->min_lease_months = $patch['min_lease_months'] !== null ? (int) $patch['min_lease_months'] : null;
+            }
             if (isset($patch['landmark'])) {
                 $listing->location = trim((string) $patch['landmark']);
+            }
+            if (array_key_exists('amenities', $patch)) {
+                $listing->amenities = is_array($patch['amenities']) ? array_values($patch['amenities']) : [];
             }
 
             $listing->attributes = $this->composeAttributes($listing);

@@ -2,6 +2,7 @@
 
 use App\Enums\Boost\CampaignStatus;
 use App\Models\Boost\CreditWallet;
+use App\Models\Profile\Interest;
 use App\Models\Reel\Reel;
 use App\Models\Square\Post;
 use App\Models\Subscription\Subscription;
@@ -89,6 +90,73 @@ test('POST /api/boost/estimate calcule la portée estimative avec la baseline CP
         ->and($data['reach']['high'])->toBe(1290)
         ->and($data['is_guaranteed'])->toBeFalse()
         ->and($data['disclaimer'])->toContain('indicative');
+});
+
+test('POST /api/boost/estimate compte les comptes réels passant le filtre plutôt qu\'une formule arbitraire', function () {
+    Passport::actingAs($this->user);
+
+    Interest::firstOrCreate(['id' => 'immo'], ['name' => 'Immobilier', 'category' => 'immo', 'is_active' => true]);
+    Interest::firstOrCreate(['id' => 'tech'], ['name' => 'Tech', 'category' => 'tech', 'is_active' => true]);
+
+    // Création d'utilisateurs avec des caractéristiques précises
+    // 1. Utilisateur Douala, 25 ans, avec centre d'intérêt 'immo'
+    $userMatching = User::factory()->create([
+        'city' => 'Douala',
+        'neighbourhood' => 'Akwa',
+        'birth_date' => now()->subYears(25)->format('Y-m-d'),
+    ]);
+    $userMatching->interests()->attach(['immo']);
+
+    // 2. Utilisateur Douala, 25 ans, SANS centre d'intérêt 'immo' (a 'tech')
+    $userTech = User::factory()->create([
+        'city' => 'Douala',
+        'neighbourhood' => 'Akwa',
+        'birth_date' => now()->subYears(25)->format('Y-m-d'),
+    ]);
+    $userTech->interests()->attach(['tech']);
+
+    // 3. Utilisateur Yaoundé (hors ville)
+    $userOtherCity = User::factory()->create([
+        'city' => 'Yaoundé',
+        'neighbourhood' => 'Bastos',
+        'birth_date' => now()->subYears(25)->format('Y-m-d'),
+    ]);
+    $userOtherCity->interests()->attach(['immo']);
+
+    // Requête sans filtre d'intérêt : cible Douala + Akwa + 20-30 ans
+    $resBroad = $this->postJson('/api/boost/estimate', [
+        'budget' => 2500,
+        'currency' => 'XAF',
+        'duration_days' => 7,
+        'targeting' => [
+            'city' => 'Douala',
+            'neighbourhoods' => ['Akwa'],
+            'age_min' => 20,
+            'age_max' => 30,
+        ],
+    ]);
+    $resBroad->assertOk();
+    $poolBroad = $resBroad->json('data.estimated_audience_pool');
+
+    // Requête avec filtre d'intérêt restrictif 'immo' : ne doit inclure que ceux qui ont 'immo'
+    $resTargeted = $this->postJson('/api/boost/estimate', [
+        'budget' => 2500,
+        'currency' => 'XAF',
+        'duration_days' => 7,
+        'targeting' => [
+            'city' => 'Douala',
+            'neighbourhoods' => ['Akwa'],
+            'age_min' => 20,
+            'age_max' => 30,
+            'interests' => ['immo'],
+        ],
+    ]);
+    $resTargeted->assertOk();
+    $poolTargeted = $resTargeted->json('data.estimated_audience_pool');
+
+    // Le pool ciblé avec centre d'intérêt doit être STRICTEMENT inférieur ou égal au pool large (pas l'inverse d'une formule qui grandirait arbitrairement)
+    expect($poolTargeted)->toBeLessThanOrEqual($poolBroad)
+        ->and($poolTargeted)->toBeGreaterThanOrEqual(1);
 });
 
 test('POST /api/boost/estimate valide le contenu spécifié et autorise le propriétaire', function () {

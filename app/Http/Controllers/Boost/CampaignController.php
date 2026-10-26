@@ -74,7 +74,10 @@ class CampaignController extends Controller
     {
         /** @var Campaign $campaign */
         $campaign = Campaign::query()
-            ->with(['metrics' => fn ($q) => $q->orderBy('metric_date')])
+            ->with([
+                'metrics' => fn ($q) => $q->orderBy('metric_date'),
+                'results',
+            ])
             ->findOrFail($id);
 
         Gate::authorize('view', $campaign);
@@ -102,6 +105,33 @@ class CampaignController extends Controller
         );
 
         return new CampaignResource($funded);
+    }
+
+    /**
+     * Augmente le budget d'une campagne en cours ou active (BO-07).
+     *
+     * POST /api/boost/campaigns/{id}/top-up
+     */
+    public function topUp(string $id, Request $request): CampaignResource
+    {
+        $validated = $request->validate([
+            'amount' => ['required', 'numeric', 'min:1'],
+            'idempotency_key' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        /** @var Campaign $campaign */
+        $campaign = Campaign::query()->findOrFail($id);
+
+        Gate::authorize('update', $campaign);
+
+        $toppedUp = $this->campaignService->topUpCampaign(
+            campaign: $campaign,
+            user: $request->user(),
+            amount: (float) $validated['amount'],
+            idempotencyKey: $validated['idempotency_key'] ?? null
+        );
+
+        return new CampaignResource($toppedUp);
     }
 
     /**
@@ -176,19 +206,26 @@ class CampaignController extends Controller
             ], 422);
         }
 
+        $user = $request->user();
+
         $this->campaignService->recordDailyMetric(
             campaign: $campaign,
             date: now()->toDateString(),
             impressions: 1,
             clicks: 0,
             reach: 1,
-            spent: 0.00
+            spent: 0.00,
+            user: $user
         );
+
+        $fresh = $campaign->fresh();
 
         return response()->json([
             'message' => 'Impression enregistrée.',
             'campaign_id' => $campaign->id,
-            'impressions_count' => (int) $campaign->fresh()->impressions_count,
+            'impressions_count' => (int) $fresh->impressions_count,
+            'reach_count' => (int) $fresh->reach_count,
+            'spent_amount' => (float) $fresh->spent_amount,
         ]);
     }
 
@@ -208,13 +245,16 @@ class CampaignController extends Controller
             ], 422);
         }
 
+        $user = $request->user();
+
         $this->campaignService->recordDailyMetric(
             campaign: $campaign,
             date: now()->toDateString(),
             impressions: 0,
             clicks: 1,
             reach: 0,
-            spent: 0.00
+            spent: 0.00,
+            user: $user
         );
 
         return response()->json([

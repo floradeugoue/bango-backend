@@ -120,3 +120,29 @@ test('un utilisateur peut marquer un reel comme pas interesse', function () {
 
     expect($this->user->notInterestedReels()->where('reel_id', $this->reel->id)->exists())->toBeTrue();
 });
+
+test('un utilisateur peut lister ses reels aimes les plus recents d abord', function () {
+    $creator = User::factory()->create();
+
+    $reel1 = Reel::factory()->create(['user_id' => $creator->id]);
+    $reel2 = Reel::factory()->create(['user_id' => $creator->id]);
+
+    // Aimer reel1
+    $this->postJson("/api/reels/{$reel1->id}/like")->assertStatus(200);
+
+    // Avancer le temps et aimer reel2
+    $this->travel(10)->minutes();
+    $this->postJson("/api/reels/{$reel2->id}/like")->assertStatus(200);
+
+    // Lister ses reels aimés
+    $response = $this->getJson('/api/reels/user/liked');
+    $response->assertStatus(200)
+        ->assertJsonCount(2, 'data');
+
+    $data = $response->json('data');
+    // Le plus récent d'abord : reel2 puis reel1
+    expect($data[0]['id'])->toBe((string) $reel2->id);
+    expect($data[0]['liked'])->toBeTrue();
+    expect($data[1]['id'])->toBe((string) $reel1->id);
+    expect($data[1]['liked'])->toBeTrue();
+});

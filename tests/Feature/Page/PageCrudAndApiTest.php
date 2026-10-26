@@ -2,10 +2,15 @@
 
 use App\Enums\Listing\ListingStatus;
 use App\Enums\Page\PageCertificationStatus;
+use App\Enums\Page\PageMemberStatus;
 use App\Enums\Page\PageRole;
 use App\Enums\Page\PageSector;
+use App\Enums\Reel\ReelStatus;
 use App\Models\Listing\Listing;
 use App\Models\Page\Page;
+use App\Models\Page\PageMember;
+use App\Models\Reel\Reel;
+use App\Models\Square\Post;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -240,4 +245,136 @@ test('GET /api/pages/{page}/listings expose la vitrine immobilière de l\'agence
     $response->assertOk()
         ->assertJsonCount(2, 'data')
         ->assertJsonPath('data.0.title', $listing2->title);
+});
+
+test('GET /pages/{page}/posts liste les publications Square de la page', function () {
+    $page = Page::factory()->create([
+        'owner_id' => $this->user->id,
+    ]);
+
+    Post::factory()->create([
+        'user_id' => $this->user->id,
+        'page_id' => $page->id,
+        'body' => 'Première publication de la page',
+        'is_archived' => false,
+        'created_at' => now()->subMinute(),
+    ]);
+
+    Post::factory()->create([
+        'user_id' => $this->user->id,
+        'page_id' => $page->id,
+        'body' => 'Deuxième publication de la page',
+        'is_archived' => false,
+        'created_at' => now(),
+    ]);
+
+    // Post archivé (ne doit pas apparaître)
+    Post::factory()->create([
+        'user_id' => $this->user->id,
+        'page_id' => $page->id,
+        'body' => 'Publication archivée',
+        'is_archived' => true,
+    ]);
+
+    $response = $this->getJson("/api/pages/{$page->id}/posts");
+    $response->assertOk()
+        ->assertJsonCount(2, 'data')
+        ->assertJsonPath('data.0.body', 'Deuxième publication de la page')
+        ->assertJsonPath('data.0.page_id', $page->id)
+        ->assertJsonPath('data.0.is_page_post', true);
+});
+
+test('GET /pages/{page}/reels liste les Reels publiés de la page', function () {
+    $page = Page::factory()->create([
+        'owner_id' => $this->user->id,
+    ]);
+
+    Reel::factory()->create([
+        'user_id' => $this->user->id,
+        'page_id' => $page->id,
+        'caption' => 'Reel officiel de l agence',
+        'status' => ReelStatus::Ready,
+        'published_at' => now(),
+    ]);
+
+    Reel::factory()->create([
+        'user_id' => $this->user->id,
+        'page_id' => $page->id,
+        'caption' => 'Reel en cours de traitement',
+        'status' => ReelStatus::Processing,
+    ]);
+
+    $response = $this->getJson("/api/pages/{$page->id}/reels");
+    $response->assertOk()
+        ->assertJsonCount(1, 'data')
+        ->assertJsonPath('data.0.caption', 'Reel officiel de l agence')
+        ->assertJsonPath('data.0.page_id', $page->id)
+        ->assertJsonPath('data.0.is_page_reel', true);
+});
+
+test('PageResource expose posts_count, listings_count et agents_count pour real_estate_agency', function () {
+    $agency = Page::factory()->create([
+        'owner_id' => $this->user->id,
+        'sector' => PageSector::RealEstateAgency,
+    ]);
+
+    // 2 posts
+    Post::factory()->count(2)->create([
+        'user_id' => $this->user->id,
+        'page_id' => $agency->id,
+    ]);
+
+    // 3 listings (2 published, 1 draft)
+    Listing::factory()->count(2)->create([
+        'owner_id' => $this->user->id,
+        'page_id' => $agency->id,
+        'status' => ListingStatus::Published,
+    ]);
+    Listing::factory()->create([
+        'owner_id' => $this->user->id,
+        'page_id' => $agency->id,
+        'status' => ListingStatus::Draft,
+    ]);
+
+    // 2 membres agents avec badge agent + 1 membre simple
+    $agentUser1 = User::factory()->create(['badge' => 'agent']);
+    $agentUser2 = User::factory()->create(['badge' => 'agent']);
+    $normalUser = User::factory()->create(['badge' => 'none']);
+
+    PageMember::create([
+        'page_id' => $agency->id,
+        'user_id' => $agentUser1->id,
+        'role' => PageRole::Editor,
+        'status' => PageMemberStatus::Accepted,
+    ]);
+    PageMember::create([
+        'page_id' => $agency->id,
+        'user_id' => $agentUser2->id,
+        'role' => PageRole::Editor,
+        'status' => PageMemberStatus::Accepted,
+    ]);
+    PageMember::create([
+        'page_id' => $agency->id,
+        'user_id' => $normalUser->id,
+        'role' => PageRole::Moderator,
+        'status' => PageMemberStatus::Accepted,
+    ]);
+
+    $response = $this->getJson("/api/pages/{$agency->id}");
+    $response->assertOk()
+        ->assertJsonPath('data.posts_count', 2)
+        ->assertJsonPath('data.listings_count', 2)
+        ->assertJsonPath('data.agents_count', 2);
+
+    // Pour un autre secteur (ex: Commerce), agents_count doit être null
+    $commerce = Page::factory()->create([
+        'owner_id' => $this->user->id,
+        'sector' => PageSector::Commerce,
+    ]);
+
+    $responseCommerce = $this->getJson("/api/pages/{$commerce->id}");
+    $responseCommerce->assertOk()
+        ->assertJsonPath('data.posts_count', 0)
+        ->assertJsonPath('data.listings_count', 0)
+        ->assertJsonPath('data.agents_count', null);
 });

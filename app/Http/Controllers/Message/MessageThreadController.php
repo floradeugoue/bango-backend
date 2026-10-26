@@ -102,6 +102,29 @@ class MessageThreadController extends Controller
     }
 
     /**
+     * Marque les messages de la conversation comme reçus / délivrés.
+     *
+     * POST /api/messages/threads/{id}/delivered
+     */
+    public function markAsDelivered(string $id, Request $request): JsonResponse
+    {
+        /** @var Conversation $thread */
+        $thread = Conversation::query()->findOrFail($id);
+
+        Gate::authorize('view', $thread);
+
+        $this->messageService->markAsDelivered(
+            conversation: $thread,
+            user: $request->user()
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Conversation marquée comme reçue.',
+        ]);
+    }
+
+    /**
      * Indique que l'utilisateur est en train d'écrire.
      *
      * POST /api/messages/threads/{id}/typing

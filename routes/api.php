@@ -240,6 +240,8 @@ Route::get('/genders', [GenderController::class, 'index'])->name('api.genders');
 Route::get('/agents/search', [AgentDirectoryController::class, 'search'])->name('api.agents.search');
 // Alias de recherche d'agents dans l'annuaire public BANGO
 Route::get('/search/agents', [AgentDirectoryController::class, 'search'])->name('api.search.agents');
+// Liste publique des biens gérés par un agent sous délégation active (onglet Immo du profil)
+Route::get('/agents/{id}/listings', [AgentDirectoryController::class, 'listings'])->name('api.agents.listings');
 
 // --------------------------------------------------------------------------
 // WEBHOOKS (Publics avec contrôle d'intégrité et signature cryptographique)
@@ -284,6 +286,10 @@ Route::prefix('listings')->group(function () {
 Route::get('/search/pages', [PageSearchController::class, 'index'])->name('api.search.pages');
 // Consulter les annonces immobilières publiées par une page professionnelle
 Route::get('/pages/{page}/listings', [PageController::class, 'listings'])->name('api.pages.listings');
+// Consulter les publications Square publiées par une page professionnelle
+Route::get('/pages/{page}/posts', [PageController::class, 'posts'])->name('api.pages.posts');
+// Consulter les Reels publiés par une page professionnelle
+Route::get('/pages/{page}/reels', [PageController::class, 'reels'])->name('api.pages.reels');
 // Consulter la vitrine publique d'une page professionnelle par son identifiant ou slug
 Route::get('/pages/{identifier}', [PageController::class, 'show'])->where('identifier', '^(?!my-pages$)[a-zA-Z0-9_\-]+$')->name('api.pages.show');
 
@@ -403,6 +409,8 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/{id}/followers', [FollowController::class, 'followers']);
         // Obtenir la liste des abonnements d'un utilisateur cible
         Route::get('/{id}/following', [FollowController::class, 'following']);
+        // Obtenir la liste des annonces aimées d'un utilisateur (onglet Immo du profil PR-07)
+        Route::get('/{id}/listings/liked', [ListingLikeController::class, 'userLiked'])->name('api.profile.listings.liked');
         // Suivre un utilisateur ou soumettre une demande d'abonnement
         Route::post('/{id}/follow', [FollowController::class, 'follow']);
         // Ne plus suivre un utilisateur (verbe DELETE)
@@ -847,7 +855,7 @@ Route::middleware('auth:api')->group(function () {
     // Alias racine pour consulter le fil d'actualité Square
     Route::get('/square/feed', [PostFeedController::class, 'index'])->name('api.square.feed.alias');
     // Alias racine pour afficher une publication Square spécifique
-    Route::get('/posts/{post}', [PostController::class, 'show'])->name('api.posts.show.alias');
+    Route::get('/posts/{post}', [PostController::class, 'show'])->whereNumber('post')->name('api.posts.show.alias');
     // Enregistrer une vue de publication (au plus une par compte et par 24 h)
     Route::post('/posts/{post}/view', [PostViewController::class, 'store'])->name('api.posts.view');
     // Alias racine pour lister les mentions « J'aime » d'une publication
@@ -872,8 +880,11 @@ Route::middleware('auth:api')->group(function () {
         // Créer une nouvelle publication avec texte, médias, tags, lieu et options (CR-01 à CR-12)
         Route::post('/posts', [PostController::class, 'store'])->name('api.posts.store');
 
+        // Publications aimées par l'utilisateur connecté (les plus récentes d'abord)
+        Route::get('/posts/liked', [PostLikeController::class, 'likedPosts'])->name('api.posts.liked.list');
+
         // Afficher les détails d'une publication spécifique selon les règles d'audience
-        Route::get('/posts/{post}', [PostController::class, 'show'])->name('api.posts.show');
+        Route::get('/posts/{post}', [PostController::class, 'show'])->whereNumber('post')->name('api.posts.show');
 
         // Enregistrer une vue de publication (au plus une par compte et par 24 h)
         Route::post('/posts/{post}/view', [PostViewController::class, 'store'])->name('api.square.posts.view');
@@ -1053,6 +1064,8 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/{reel}/save', [ReelInteractionController::class, 'toggleSave'])->name('api.reels.save');
         // Lister tous les Reels sauvegardés dans les favoris de l'utilisateur
         Route::get('/user/saved', [ReelInteractionController::class, 'listSaved'])->name('api.reels.saved.list');
+        // Lister tous les Reels aimés par l'utilisateur connecté
+        Route::get('/user/liked', [ReelInteractionController::class, 'listLiked'])->name('api.reels.liked.list');
 
         // Pas intéressé (RL-06)
         // Masquer un Reel et le marquer comme « Ça ne m'intéresse pas »
@@ -1187,6 +1200,8 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/threads/{id}', [MessageThreadController::class, 'show'])->name('api.messages.threads.show');
         // Marquer tous les messages d'un fil de discussion comme lus
         Route::match(['post', 'put'], '/threads/{id}/read', [MessageThreadController::class, 'markAsRead'])->name('api.messages.threads.read');
+        // Marquer la réception / livraison des messages d'un fil (double coche grise)
+        Route::match(['post', 'put'], '/threads/{id}/delivered', [MessageThreadController::class, 'markAsDelivered'])->name('api.messages.threads.delivered');
 
         // Boîte des demandes de messages provenant d'inconnus (MS-05)
         // Lister les demandes de messages en attente (contacts non suivis)
@@ -1271,6 +1286,8 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/campaigns/{id}', [CampaignController::class, 'show'])->whereUuid('id')->name('api.boost.campaigns.show');
         // Allouer des crédits ou financer une campagne de boost
         Route::post('/campaigns/{id}/fund', [CampaignController::class, 'fund'])->whereUuid('id')->name('api.boost.campaigns.fund');
+        // Augmenter le budget d'une campagne en cours (BO-07)
+        Route::post('/campaigns/{id}/top-up', [CampaignController::class, 'topUp'])->whereUuid('id')->name('api.boost.campaigns.top-up');
         // Mettre en pause une campagne active
         Route::post('/campaigns/{id}/pause', [CampaignController::class, 'pause'])->whereUuid('id')->name('api.boost.campaigns.pause');
         // Reprendre la diffusion d'une campagne en pause
@@ -1343,10 +1360,14 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/{page}/certification', [PageCertificationController::class, 'store'])->name('api.pages.certification.store');
         // Régler les frais de traitement du dossier de certification entreprise
         Route::post('/{page}/certification/payment', [PageCertificationController::class, 'initiatePayment'])->name('api.pages.certification.payment');
+        // Annuler une demande de certification en cours (PG-06, tant que le dossier est en attente)
+        Route::delete('/{page}/certification', [PageCertificationController::class, 'destroy'])->name('api.pages.certification.destroy');
     });
 
     // Alias profil utilisateur pour retrouver ses pages
     Route::get('/me/pages', [PageController::class, 'myPages'])->name('api.me.pages');
+    // Consulter la liste des invitations en attente reçues pour rejoindre des pages
+    Route::get('/me/page-invitations', [PageMemberController::class, 'myInvitations'])->name('api.me.page_invitations');
 
     // Réponse aux invitations de membres
     // Accepter l'invitation à rejoindre l'équipe d'une page professionnelle
@@ -1386,6 +1407,8 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/', [ReportController::class, 'store'])->name('api.reports.store');
         // Consulter l'historique et le suivi de mes signalements
         Route::get('/mine', [ReportController::class, 'mine'])->name('api.reports.mine');
+        // Demander le réexamen d'un signalement classé ou traité (SUP-14)
+        Route::post('/{id}/reexamine', [ReportController::class, 'reexamine'])->name('api.reports.reexamine');
     });
 
     Route::prefix('moderation/appeals')->group(function () {

@@ -3,6 +3,7 @@
 use App\Models\Square\Post;
 use App\Models\Square\PostLike;
 use App\Models\User;
+use App\Services\Square\PostLikeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Laravel\Passport\Passport;
@@ -168,4 +169,50 @@ it('affiche letat liked et likes_count dans la ressource du post et dans le feed
     expect($item)->not->toBeNull()
         ->and($item['liked'])->toBeTrue()
         ->and($item['likes_count'])->toBe(1);
+});
+
+it('retourne la liste paginee de mes publications aimees les plus recentes d abord', function () {
+    $author = User::factory()->create();
+    $me = User::factory()->create();
+
+    $post1 = Post::create([
+        'user_id' => $author->id,
+        'body' => 'Premier post aimé',
+        'audience' => 'public',
+        'likes_count' => 1,
+    ]);
+
+    $post2 = Post::create([
+        'user_id' => $author->id,
+        'body' => 'Deuxième post aimé',
+        'audience' => 'public',
+        'likes_count' => 1,
+    ]);
+
+    $postNonAime = Post::create([
+        'user_id' => $author->id,
+        'body' => 'Post non aimé',
+        'audience' => 'public',
+        'likes_count' => 0,
+    ]);
+
+    // Aimer post1 puis post2
+    app(PostLikeService::class)->like($post1, $me);
+    // Avancer le temps pour que post2 soit plus récent
+    $this->travel(5)->minutes();
+    app(PostLikeService::class)->like($post2, $me);
+
+    Passport::actingAs($me);
+
+    $response = getJson('/api/square-cr1/posts/liked');
+
+    $response->assertStatus(200);
+    $data = $response->json('data');
+
+    expect(count($data))->toBe(2);
+    // Plus récent d'abord (post2 puis post1)
+    expect((int) $data[0]['id'])->toBe($post2->id);
+    expect($data[0]['liked'])->toBeTrue();
+    expect((int) $data[1]['id'])->toBe($post1->id);
+    expect($data[1]['liked'])->toBeTrue();
 });

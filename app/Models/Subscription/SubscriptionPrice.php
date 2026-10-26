@@ -44,6 +44,11 @@ class SubscriptionPrice extends Model
         return $this->hasMany(Subscription::class, 'price_id');
     }
 
+    public function getAmountAttribute(): mixed
+    {
+        return $this->attributes['price_amount'] ?? null;
+    }
+
     public function isEffective(): bool
     {
         if (! $this->is_active) {

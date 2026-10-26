@@ -41,6 +41,21 @@ class PageMemberController extends Controller
     }
 
     /**
+     * Liste des invitations reçues par l'utilisateur connecté (GET /api/me/page-invitations).
+     */
+    public function myInvitations(Request $request): AnonymousResourceCollection
+    {
+        $invitations = PageMember::query()
+            ->where('user_id', $request->user()->id)
+            ->where('status', PageMemberStatus::Pending)
+            ->with(['page', 'inviter', 'user'])
+            ->orderByDesc('invited_at')
+            ->paginate($request->integer('per_page', 20));
+
+        return PageMemberResource::collection($invitations);
+    }
+
+    /**
      * Invite un utilisateur à rejoindre l'équipe.
      */
     public function invite(InvitePageMemberRequest $request, Page $page): JsonResponse

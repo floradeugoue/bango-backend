@@ -2,6 +2,7 @@
 
 use App\Enums\Delegation\DelegationCapability;
 use App\Enums\Delegation\DelegationStatus;
+use App\Enums\Listing\ListingStatus;
 use App\Enums\Visit\VisitReservationStatus;
 use App\Enums\Visit\VisitSlotStatus;
 use App\Models\Delegation\Delegation;
@@ -538,4 +539,101 @@ test('revoking a mandate whose listing is already deleted does not crash', funct
     $this->deleteJson("/api/landlord/delegations/{$delegation->id}")
         ->assertOk()
         ->assertJsonPath('data.status', DelegationStatus::Revoked->value);
+});
+
+test('public endpoint GET /agents/{id}/listings returns only published listings under active delegation', function (): void {
+    $landlord = ($this->createLandlord)();
+    $agent = ($this->createAgent)();
+
+    // 1. Bien publié sous délégation active -> DOIT apparaître
+    $publishedListing = Listing::factory()->published()->create([
+        'owner_id' => $landlord->id,
+        'title' => 'Villa Bonapriso',
+    ]);
+    Delegation::create([
+        'bailleur_id' => $landlord->id,
+        'agent_id' => $agent->id,
+        'listing_id' => $publishedListing->id,
+        'status' => DelegationStatus::Active,
+        'capabilities' => [DelegationCapability::Visits->value],
+        'invited_at' => now()->subDay(),
+        'answered_at' => now()->subHours(10),
+    ]);
+
+    // 2. Bien draft sous délégation active -> NE DOIT PAS apparaître
+    $draftListing = Listing::factory()->create([
+        'owner_id' => $landlord->id,
+        'status' => ListingStatus::Draft,
+        'title' => 'Studio Akwa',
+    ]);
+    Delegation::create([
+        'bailleur_id' => $landlord->id,
+        'agent_id' => $agent->id,
+        'listing_id' => $draftListing->id,
+        'status' => DelegationStatus::Active,
+        'capabilities' => [DelegationCapability::Visits->value],
+        'invited_at' => now()->subDay(),
+        'answered_at' => now()->subHours(10),
+    ]);
+
+    // 3. Bien publié sous délégation expirée -> NE DOIT PAS apparaître
+    $expiredListing = Listing::factory()->published()->create([
+        'owner_id' => $landlord->id,
+        'title' => 'Duplex Makepe Expiré',
+    ]);
+    Delegation::create([
+        'bailleur_id' => $landlord->id,
+        'agent_id' => $agent->id,
+        'listing_id' => $expiredListing->id,
+        'status' => DelegationStatus::Active,
+        'capabilities' => [DelegationCapability::Visits->value],
+        'invited_at' => now()->subMonths(2),
+        'answered_at' => now()->subMonths(2),
+        'expires_at' => now()->subDay(),
+    ]);
+
+    // 4. Bien publié sous délégation révoquée -> NE DOIT PAS apparaître
+    $revokedListing = Listing::factory()->published()->create([
+        'owner_id' => $landlord->id,
+        'title' => 'Appartement Kotto Révoqué',
+    ]);
+    Delegation::create([
+        'bailleur_id' => $landlord->id,
+        'agent_id' => $agent->id,
+        'listing_id' => $revokedListing->id,
+        'status' => DelegationStatus::Revoked,
+        'capabilities' => [DelegationCapability::Visits->value],
+        'invited_at' => now()->subDay(),
+        'revoked_at' => now()->subHours(2),
+    ]);
+
+    // Appel public non authentifié
+    $response = $this->getJson("/api/agents/{$agent->id}/listings");
+
+    $response->assertOk()
+        ->assertJsonStructure([
+            'data' => [
+                '*' => [
+                    'id',
+                    'title',
+                    'status',
+                    'mode',
+                    'price',
+                ],
+            ],
+            'links',
+            'meta',
+        ]);
+
+    $data = $response->json('data');
+    expect($data)->toHaveCount(1);
+    expect($data[0]['id'])->toBe($publishedListing->id);
+    expect($data[0]['title'])->toBe('Villa Bonapriso');
+
+    // Vérifier également AgentDirectoryResource avec managed_listings_count
+    $directoryResponse = $this->getJson("/api/agents/search?q={$agent->name}");
+    $directoryResponse->assertOk()
+        ->assertJsonPath('data.0.id', $agent->id)
+        ->assertJsonPath('data.0.active_mandates_count', 2) // published + draft ont des délégations actives
+        ->assertJsonPath('data.0.managed_listings_count', 1); // seul 1 bien publié sous délégation active
 });

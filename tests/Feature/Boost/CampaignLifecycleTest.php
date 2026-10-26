@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\Boost\CampaignObjective;
 use App\Enums\Boost\CampaignStatus;
 use App\Models\Boost\Campaign;
 use App\Models\Boost\CreditWallet;
@@ -97,6 +98,10 @@ test('GET /api/boost/campaigns/{id} retourne les détails complets de la campagn
                 'metrics' => [
                     '*' => ['metric_date', 'impressions', 'clicks', 'reach', 'spent'],
                 ],
+                'results' => ['followers', 'messages', 'profile_visits', 'engagements'],
+                'daily' => [
+                    '*' => ['date', 'reach', 'impressions', 'results', 'spent'],
+                ],
             ],
         ]);
 
@@ -104,7 +109,10 @@ test('GET /api/boost/campaigns/{id} retourne les détails complets de la campagn
     expect($data['id'])->toBe($campaign->id)
         ->and((float) $data['budget'])->toBe(12000.0)
         ->and((float) $data['unspent'])->toBe(8000.0)
-        ->and($data['metrics'])->toHaveCount(2);
+        ->and($data['metrics'])->toHaveCount(2)
+        ->and($data['daily'])->toHaveCount(2)
+        ->and($data['daily'][0])->toHaveKeys(['date', 'reach', 'impressions', 'results', 'spent'])
+        ->and($data['results'])->toHaveKeys(['followers', 'messages', 'profile_visits', 'engagements']);
 });
 
 test('GET /api/boost/campaigns/{id} refuse strictement l\'accès à un utilisateur non propriétaire (IDOR)', function () {
@@ -181,11 +189,11 @@ test('POST /api/boost/campaigns/{id}/resume reprend une campagne en pause', func
     expect($campaign->fresh()->status)->toBe(CampaignStatus::Active);
 });
 
-test('POST /api/boost/campaigns/{id}/cancel annule la campagne sans restitution de crédits (règle consommation définitive)', function () {
+test('POST /api/boost/campaigns/{id}/cancel annule la campagne et restitue le reliquat en Crédit BANGO (BO-08 / EDGE-04)', function () {
     Passport::actingAs($this->user);
 
     // Initial: solde portefeuille = 30 000
-    // Campagne budget = 15 000, dépensé = 5 000 -> aucun remboursement de crédits
+    // Campagne budget = 15 000, dépensé = 5 000 -> reliquat de 10 000 restitué en Crédit BANGO
     $campaign = Campaign::factory()->create([
         'user_id' => $this->user->id,
         'budget_amount' => '15000.00',
@@ -204,14 +212,17 @@ test('POST /api/boost/campaigns/{id}/cancel annule la campagne sans restitution 
 
     expect($campaign->fresh()->status)->toBe(CampaignStatus::Cancelled);
 
-    // Règle CB immuable : les crédits dépensés sont définitivement consommés (solde reste à 30 000)
-    expect((int) $this->walletService->getBalance($this->user))->toBe(30000);
+    // Décision Marie (25/10) : le reliquat (10 000) est restitué sur le portefeuille de crédits
+    expect((int) $this->walletService->getBalance($this->user))->toBe(40000);
 
-    // Aucune transaction de remboursement n'est créée
-    $this->assertDatabaseMissing('credit_transactions', [
+    // Une transaction de type campaign_refund est enregistrée
+    $campaignShortId = substr((string) $campaign->id, 0, 8);
+    $this->assertDatabaseHas('credit_transactions', [
         'wallet_id' => $this->wallet->id,
         'user_id' => $this->user->id,
         'type' => 'campaign_refund',
+        'amount' => 10000,
+        'description' => "Remboursement campagne boost #{$campaignShortId}",
     ]);
 });
 
@@ -247,6 +258,70 @@ test('POST /api/boost/campaigns/{id}/fund permet de financer une campagne pendin
         ->and($this->walletService->getBalance($this->user))->toBe(22000.0); // 30 000 - 8 000
 });
 
+test('POST /api/boost/campaigns/{id}/top-up augmente le budget d\'une campagne active et débite le crédit BANGO (BO-07)', function () {
+    Passport::actingAs($this->user);
+
+    // Initial: solde portefeuille = 30 000
+    // Campagne active avec budget = 10 000
+    $campaign = Campaign::factory()->create([
+        'user_id' => $this->user->id,
+        'budget_amount' => '10000.00',
+        'spent_amount' => '4000.00',
+        'status' => CampaignStatus::Active,
+        'payment_method' => 'credit',
+    ]);
+
+    $response = $this->postJson("/api/boost/campaigns/{$campaign->id}/top-up", [
+        'amount' => 5000,
+        'idempotency_key' => "top_up_test_{$campaign->id}",
+    ]);
+
+    $response->assertOk()
+        ->assertJsonPath('data.id', $campaign->id)
+        ->assertJsonPath('data.budget', 15000);
+
+    // Le budget de la campagne est passé à 15 000
+    expect((float) $campaign->fresh()->budget_amount)->toBe(15000.0);
+
+    // Le portefeuille a été débité de 5 000 (30 000 - 5 000 = 25 000)
+    expect((int) $this->walletService->getBalance($this->user))->toBe(25000);
+
+    // Une transaction de débit a été enregistrée
+    $this->assertDatabaseHas('credit_transactions', [
+        'wallet_id' => $this->wallet->id,
+        'user_id' => $this->user->id,
+        'type' => 'campaign_debit',
+        'amount' => 5000,
+        'idempotency_key' => "top_up_test_{$campaign->id}",
+    ]);
+});
+
+test('POST /api/boost/campaigns/{id}/top-up échoue en 422 avec kind insufficient_credit si solde insuffisant (BO-07)', function () {
+    Passport::actingAs($this->user);
+
+    // Initial: solde portefeuille = 30 000
+    $campaign = Campaign::factory()->create([
+        'user_id' => $this->user->id,
+        'budget_amount' => '10000.00',
+        'status' => CampaignStatus::Active,
+    ]);
+
+    // Tentative de recharger 50 000 avec seulement 30 000 de solde
+    $response = $this->postJson("/api/boost/campaigns/{$campaign->id}/top-up", [
+        'amount' => 50000,
+    ]);
+
+    $response->assertStatus(422)
+        ->assertJson([
+            'kind' => 'insufficient_credit',
+            'error' => 'INSUFFICIENT_CREDIT',
+        ]);
+
+    // Le budget n'a pas bougé et le solde n'a pas été débité
+    expect((float) $campaign->fresh()->budget_amount)->toBe(10000.0)
+        ->and((int) $this->walletService->getBalance($this->user))->toBe(30000);
+});
+
 test('recordDailyMetric agrège les impressions, clics, portée et dépense sans écraser les métriques', function () {
     $campaign = Campaign::factory()->create([
         'user_id' => $this->user->id,
@@ -276,4 +351,26 @@ test('recordDailyMetric agrège les impressions, clics, portée et dépense sans
         ->and($freshCampaign->clicks_count)->toBe(60)
         ->and($freshCampaign->reach_count)->toBe(1000)
         ->and((float) $freshCampaign->spent_amount)->toBe(2500.0);
+});
+
+test('POST /api/boost/campaigns accepte l\'objectif followers (Nouveaux abonnés)', function () {
+    Passport::actingAs($this->user);
+
+    $post = Post::factory()->create(['user_id' => $this->user->id]);
+
+    $response = $this->postJson('/api/boost/campaigns', [
+        'boostable_type' => 'post',
+        'boostable_id' => (string) $post->id,
+        'objective' => 'followers',
+        'budget' => 5000,
+        'duration_days' => 7,
+        'payment_method' => 'credit',
+    ]);
+
+    $response->assertStatus(201)
+        ->assertJsonPath('data.objective.value', 'followers')
+        ->assertJsonPath('data.objective.label', 'Nouveaux abonnés');
+
+    expect(CampaignObjective::Followers->value)->toBe('followers')
+        ->and(CampaignObjective::Followers->label())->toBe('Nouveaux abonnés');
 });

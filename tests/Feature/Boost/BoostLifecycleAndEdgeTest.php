@@ -142,17 +142,19 @@ test('Règle EDGE IM : Une annonce immobilière marquée taken n\'est plus diffu
         'status' => CampaignStatus::Active,
         'start_at' => now()->subDay(),
         'end_at' => now()->addDays(5),
+        'targeting' => ['city' => 'Douala'],
     ]);
 
-    // 1. Initialement éligible
-    $eligible = $this->adDeliveryService->getEligibleCampaigns(Listing::class, $this->user);
+    // 1. Initialement éligible pour un tiers spectateur
+    $viewer = User::factory()->create(['city' => 'Douala']);
+    $eligible = $this->adDeliveryService->getEligibleCampaigns(Listing::class, $viewer);
     expect($eligible->pluck('id'))->toContain($campaign->id);
 
     // 2. Le bien devient loué / indisponible (taken)
     $listing->update(['status' => ListingStatus::Taken]);
 
     // 3. Le moteur publicitaire exclut immédiatement la campagne
-    $eligibleAfter = $this->adDeliveryService->getEligibleCampaigns(Listing::class, $this->user);
+    $eligibleAfter = $this->adDeliveryService->getEligibleCampaigns(Listing::class, $viewer);
     expect($eligibleAfter->pluck('id'))->not->toContain($campaign->id);
 });
 
@@ -176,15 +178,17 @@ test('Règle EDGE SUP : Une Page Pro suspendue entraîne l\'exclusion immédiate
         'status' => CampaignStatus::Active,
         'start_at' => now()->subDay(),
         'end_at' => now()->addDays(5),
+        'targeting' => ['city' => 'Douala'],
     ]);
 
-    $eligible = $this->adDeliveryService->getEligibleCampaigns(Post::class, $this->user);
+    $viewer = User::factory()->create(['city' => 'Douala']);
+    $eligible = $this->adDeliveryService->getEligibleCampaigns(Post::class, $viewer);
     expect($eligible->pluck('id'))->toContain($campaign->id);
 
     // Suspension de la Page par la modération
     $page->update(['status' => PageStatus::Suspended]);
 
-    $eligibleAfter = $this->adDeliveryService->getEligibleCampaigns(Post::class, $this->user);
+    $eligibleAfter = $this->adDeliveryService->getEligibleCampaigns(Post::class, $viewer);
     expect($eligibleAfter->pluck('id'))->not->toContain($campaign->id);
 });
 

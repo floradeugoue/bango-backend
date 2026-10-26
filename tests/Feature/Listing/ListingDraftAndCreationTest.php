@@ -454,3 +454,43 @@ test('un utilisateur sans badge direct mais avec abonnement actif landlord peut 
 
     $response->assertStatus(201);
 });
+
+test('PATCH /listings/{id} accepte amenities sans relancer la verification', function () {
+    $listing = Listing::factory()->create([
+        'owner_id' => $this->landlord->id,
+        'status' => ListingStatus::Published,
+        'title' => 'Bel appartement',
+        'price' => 200000,
+        'amenities' => ['furnished'],
+    ]);
+
+    Passport::actingAs($this->landlord);
+
+    $response = $this->patchJson("/api/listings/{$listing->id}", [
+        'amenities' => ['furnished', 'generator', 'fenced'],
+    ]);
+
+    $response->assertStatus(200)
+        ->assertJsonPath('data.amenities', ['furnished', 'generator', 'fenced'])
+        ->assertJsonPath('data.status', 'published');
+
+    $listing->refresh();
+    expect($listing->amenities)->toBe(['furnished', 'generator', 'fenced']);
+    expect($listing->status)->toBe(ListingStatus::Published);
+});
+
+test('PATCH /listings/{id} valide que amenities est un tableau de chaines max 50 caracteres', function () {
+    $listing = Listing::factory()->create([
+        'owner_id' => $this->landlord->id,
+        'status' => ListingStatus::Published,
+    ]);
+
+    Passport::actingAs($this->landlord);
+
+    $response = $this->patchJson("/api/listings/{$listing->id}", [
+        'amenities' => [str_repeat('a', 51)],
+    ]);
+
+    $response->assertStatus(422)
+        ->assertJsonValidationErrors(['amenities.0']);
+});

@@ -4,6 +4,7 @@ namespace App\Http\Resources\Page;
 
 use App\Enums\Page\PageCertificationStatus;
 use App\Enums\Page\PageRole;
+use App\Enums\Page\PageSector;
 use App\Models\Page\Page;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -49,6 +50,11 @@ class PageResource extends JsonResource
             'status' => $this->status->value,
             'is_hidden' => (bool) $this->is_hidden,
             'followers_count' => (int) ($this->followers_count ?? $this->followers()->count()),
+            'posts_count' => (int) ($this->posts_count ?? $this->posts()->count()),
+            'listings_count' => (int) ($this->listings_count ?? $this->listings()->publiclyVisible()->count()),
+            'agents_count' => $this->sector === PageSector::RealEstateAgency
+                ? (int) ($this->agents_count ?? $this->activeMembers()->whereHas('user', fn ($u) => $u->where('badge', 'agent'))->count())
+                : null,
             'is_following' => $viewer ? $this->isFollowedBy($viewer) : false,
             'inbox_assigned_to' => $this->inbox_assigned_to_id ? [
                 'id' => (int) $this->inbox_assigned_to_id,

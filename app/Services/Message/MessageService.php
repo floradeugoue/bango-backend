@@ -31,8 +31,11 @@ class MessageService
             throw new AccessDeniedHttpException('Vous n\'êtes pas membre de cette conversation.');
         }
 
+        $member = $conversation->member($user->id);
+        $member?->markAsDelivered();
+
         return $conversation->messages()
-            ->with(['sender:id,name,handle,avatar_url', 'replyTo'])
+            ->with(['sender:id,name,handle,avatar_url', 'replyTo', 'conversation.members'])
             ->orderBy('created_at', 'desc')
             ->paginate($perPage);
     }
@@ -175,6 +178,19 @@ class MessageService
         $member->markAsRead($messageId);
 
         event(new MessageRead($conversation, $user->id, $messageId));
+    }
+
+    /**
+     * Marque la conversation comme reçue/distribuée pour un utilisateur (son appareil a récupéré les messages).
+     */
+    public function markAsDelivered(Conversation $conversation, User $user): void
+    {
+        $member = $conversation->member($user->id);
+        if (! $member) {
+            throw new AccessDeniedHttpException('Vous n\'êtes pas membre de cette conversation.');
+        }
+
+        $member->markAsDelivered();
     }
 
     /**

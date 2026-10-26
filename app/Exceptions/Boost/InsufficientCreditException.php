@@ -20,6 +20,7 @@ class InsufficientCreditException extends Exception
         return response()->json([
             'message' => $this->getMessage(),
             'error' => 'INSUFFICIENT_CREDIT',
+            'kind' => 'insufficient_credit',
             'current_balance' => $this->currentBalance,
             'required_amount' => $this->requiredAmount,
         ], 422);

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Page;
 
+use App\Enums\Reel\ReelStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Page\CreatePageRequest;
 use App\Http\Requests\Page\TransferOwnershipRequest;
@@ -9,6 +10,8 @@ use App\Http\Requests\Page\UpdatePageRequest;
 use App\Http\Resources\Listing\ListingResource;
 use App\Http\Resources\Message\ConversationResource;
 use App\Http\Resources\Page\PageResource;
+use App\Http\Resources\Reel\ReelResource;
+use App\Http\Resources\Square\PostResource;
 use App\Models\Page\Page;
 use App\Models\User;
 use App\Services\Page\PageService;
@@ -165,6 +168,52 @@ class PageController extends Controller
             ->paginate($request->integer('per_page', 20));
 
         return ListingResource::collection($listings);
+    }
+
+    /**
+     * Publications Square publiées par la Page Professionnelle.
+     * GET /api/pages/{page}/posts
+     */
+    public function posts(Request $request, Page $page): AnonymousResourceCollection
+    {
+        $viewer = $request->user();
+        $query = $page->posts()
+            ->with(['media.tags.user', 'hashtags', 'user', 'page'])
+            ->where('is_archived', false)
+            ->orderByDesc('created_at');
+
+        if ($viewer) {
+            $query->with(['likes' => fn ($q) => $q->where('user_id', $viewer->id)]);
+        }
+
+        $posts = $query->paginate($request->integer('per_page', 15));
+
+        return PostResource::collection($posts);
+    }
+
+    /**
+     * Reels publiés au nom de la Page Professionnelle.
+     * GET /api/pages/{page}/reels
+     */
+    public function reels(Request $request, Page $page): AnonymousResourceCollection
+    {
+        $viewer = $request->user();
+        $query = $page->reels()
+            ->with(['user', 'sound', 'page'])
+            ->where('status', ReelStatus::Ready)
+            ->orderByDesc('published_at')
+            ->orderByDesc('created_at');
+
+        if ($viewer) {
+            $query->with([
+                'reactions' => fn ($q) => $q->where('user_id', $viewer->id),
+                'savedByUsers' => fn ($q) => $q->where('users.id', $viewer->id),
+            ]);
+        }
+
+        $reels = $query->paginate($request->integer('per_page', 10));
+
+        return ReelResource::collection($reels);
     }
 
     /**

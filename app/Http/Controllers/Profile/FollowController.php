@@ -7,6 +7,7 @@ use App\Http\Resources\FollowUserResource;
 use App\Models\Profile\FollowRequest;
 use App\Models\User;
 use App\Notifications\Social\SocialNotification;
+use App\Services\Boost\CampaignAttributionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -60,6 +61,9 @@ class FollowController extends Controller
         $actor->following()->syncWithoutDetaching([$target->id]);
 
         $target->notify(new SocialNotification('follow', $actor));
+
+        // Attribution publicitaire automatique (Boost) si impression < 24h
+        app(CampaignAttributionService::class)->attributeFollow($actor, $target);
 
         return response()->json([
             'status' => 'followed',
@@ -145,12 +149,22 @@ class FollowController extends Controller
      */
     public function following(Request $request, ?string $id = null): AnonymousResourceCollection|JsonResponse
     {
-        /** @var User $actor */
+        /** @var User|null $actor */
         $actor = $request->user();
         /** @var User $target */
         $target = $id ? User::findOrFail($id) : $actor;
 
-        if ($actor->id !== $target->id && ! $actor->canViewContentOf($target)) {
+        if ($target && (! $actor || (int) $actor->id !== (int) $target->id)) {
+            $showFollowing = (bool) data_get($target->privacy_settings, 'showFollowing', true);
+            if (! $showFollowing) {
+                return response()->json([
+                    'kind' => 'following_hidden',
+                    'message' => 'La liste des abonnements de cet utilisateur est masquée.',
+                ], 403);
+            }
+        }
+
+        if ($actor && $actor->id !== $target->id && ! $actor->canViewContentOf($target)) {
             return response()->json(['message' => 'Ce compte est privé ou inaccessible.'], 403);
         }
 
