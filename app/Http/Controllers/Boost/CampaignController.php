@@ -28,7 +28,11 @@ class CampaignController extends Controller
     {
         $campaigns = Campaign::query()
             ->where('user_id', $request->user()->id)
-            ->with(['metrics' => fn ($q) => $q->orderByDesc('metric_date')->take(7)])
+            ->with([
+                'boostable',
+                'impressions.user',
+                'metrics' => fn ($q) => $q->orderByDesc('metric_date')->take(7),
+            ])
             ->orderByDesc('created_at')
             ->paginate((int) $request->input('per_page', 15));
 
@@ -75,6 +79,8 @@ class CampaignController extends Controller
         /** @var Campaign $campaign */
         $campaign = Campaign::query()
             ->with([
+                'boostable',
+                'impressions.user',
                 'metrics' => fn ($q) => $q->orderBy('metric_date'),
                 'results',
             ])
