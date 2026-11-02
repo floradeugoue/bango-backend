@@ -10,6 +10,8 @@ use App\Http\Middleware\EnsureActiveSubscription;
 use App\Http\Middleware\EnsureAdminPermission;
 use App\Http\Middleware\EnsureAdminSession;
 use App\Http\Middleware\EnsureTermsAccepted;
+use App\Http\Middleware\ResolveOptionalApiUser;
+use App\Http\Middleware\SetPageContext;
 use App\Http\Middleware\UpdateUserLastSeen;
 use App\Services\System\IncidentTrackerService;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -40,7 +42,9 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
 
         $middleware->appendToGroup('api', [
+            ResolveOptionalApiUser::class,
             UpdateUserLastSeen::class,
+            SetPageContext::class,
         ]);
 
         $middleware->alias([

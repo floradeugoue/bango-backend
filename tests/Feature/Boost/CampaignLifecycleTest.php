@@ -2,6 +2,7 @@
 
 use App\Enums\Boost\CampaignObjective;
 use App\Enums\Boost\CampaignStatus;
+use App\Enums\Boost\CreditTransactionType;
 use App\Models\Boost\Campaign;
 use App\Models\Boost\CreditWallet;
 use App\Models\Square\Post;
@@ -202,6 +203,20 @@ test('POST /api/boost/campaigns/{id}/cancel annule la campagne et restitue le re
         'payment_method' => 'credit',
     ]);
 
+    // Débit initial de financement de la campagne (prend la référence de la campagne : source='boost', reference=$campaign->id)
+    $this->walletService->debit(
+        account: $this->user,
+        amount: 15000,
+        source: 'boost',
+        reference: $campaign,
+        idempotencyKey: "campaign_debit_{$campaign->id}",
+        type: CreditTransactionType::CampaignDebit
+    );
+
+    // Le solde après débit initial est à 15 000 (30 000 - 15 000)
+    expect((int) $this->walletService->getBalance($this->user))->toBe(15000);
+
+    // Annuler la campagne : restitue le reliquat de 10 000 sans rompre la contrainte unique credit_transactions_source_reference_unique
     $response = $this->postJson("/api/boost/campaigns/{$campaign->id}/cancel", [
         'reason' => 'manual',
     ]);
@@ -212,16 +227,17 @@ test('POST /api/boost/campaigns/{id}/cancel annule la campagne et restitue le re
 
     expect($campaign->fresh()->status)->toBe(CampaignStatus::Cancelled);
 
-    // Décision Marie (25/10) : le reliquat (10 000) est restitué sur le portefeuille de crédits
-    expect((int) $this->walletService->getBalance($this->user))->toBe(40000);
+    // Décision Marie (25/10) : le reliquat (10 000) est restitué sur le portefeuille (15 000 + 10 000 = 25 000)
+    expect((int) $this->walletService->getBalance($this->user))->toBe(25000);
 
-    // Une transaction de type campaign_refund est enregistrée
+    // Une transaction de type campaign_refund est enregistrée avec sa référence distincte
     $campaignShortId = substr((string) $campaign->id, 0, 8);
     $this->assertDatabaseHas('credit_transactions', [
         'wallet_id' => $this->wallet->id,
         'user_id' => $this->user->id,
         'type' => 'campaign_refund',
         'amount' => 10000,
+        'reference' => "campaign:{$campaign->id}:refund:cancel",
         'description' => "Remboursement campagne boost #{$campaignShortId}",
     ]);
 });
@@ -262,7 +278,7 @@ test('POST /api/boost/campaigns/{id}/top-up augmente le budget d\'une campagne a
     Passport::actingAs($this->user);
 
     // Initial: solde portefeuille = 30 000
-    // Campagne active avec budget = 10 000
+    // Campagne active financée par crédit (un débit initial existe déjà pour cette campagne avec reference = campaign->id)
     $campaign = Campaign::factory()->create([
         'user_id' => $this->user->id,
         'budget_amount' => '10000.00',
@@ -271,6 +287,20 @@ test('POST /api/boost/campaigns/{id}/top-up augmente le budget d\'une campagne a
         'payment_method' => 'credit',
     ]);
 
+    // Débit initial de création/financement de la campagne
+    $this->walletService->debit(
+        account: $this->user,
+        amount: 10000,
+        source: 'boost',
+        reference: $campaign,
+        idempotencyKey: "campaign_debit_{$campaign->id}",
+        type: CreditTransactionType::CampaignDebit
+    );
+
+    // Le solde après financement initial est à 20 000 (30 000 - 10 000)
+    expect((int) $this->walletService->getBalance($this->user))->toBe(20000);
+
+    // Augmenter le budget de 5 000
     $response = $this->postJson("/api/boost/campaigns/{$campaign->id}/top-up", [
         'amount' => 5000,
         'idempotency_key' => "top_up_test_{$campaign->id}",
@@ -283,16 +313,17 @@ test('POST /api/boost/campaigns/{id}/top-up augmente le budget d\'une campagne a
     // Le budget de la campagne est passé à 15 000
     expect((float) $campaign->fresh()->budget_amount)->toBe(15000.0);
 
-    // Le portefeuille a été débité de 5 000 (30 000 - 5 000 = 25 000)
-    expect((int) $this->walletService->getBalance($this->user))->toBe(25000);
+    // Le portefeuille a été débité de 5 000 supplémentaires (20 000 - 5 000 = 15 000)
+    expect((int) $this->walletService->getBalance($this->user))->toBe(15000);
 
-    // Une transaction de débit a été enregistrée
+    // La transaction de débit de top-up a bien été enregistrée sans collision d'idempotence
     $this->assertDatabaseHas('credit_transactions', [
         'wallet_id' => $this->wallet->id,
         'user_id' => $this->user->id,
         'type' => 'campaign_debit',
         'amount' => 5000,
         'idempotency_key' => "top_up_test_{$campaign->id}",
+        'reference' => "campaign:{$campaign->id}:topup:top_up_test_{$campaign->id}",
     ]);
 });
 

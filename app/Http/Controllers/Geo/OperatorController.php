@@ -19,6 +19,15 @@ class OperatorController extends Controller
             $query->where('country_id', $request->country_id);
         }
 
+        if ($request->filled('country') || $request->filled('country_code')) {
+            $countryCode = strtoupper(trim((string) ($request->input('country') ?? $request->input('country_code'))));
+            $query->whereHas('country', function ($q) use ($countryCode) {
+                $q->where('code', $countryCode)
+                    ->orWhere('iso2', $countryCode)
+                    ->orWhere('iso3', $countryCode);
+            });
+        }
+
         if ($request->has('is_active')) {
             $query->where('is_active', filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN));
         }

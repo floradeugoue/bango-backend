@@ -6,6 +6,7 @@ use App\Enums\Square\PostMediaKind;
 use App\Models\Page\Page;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\Auth;
 
 class PostResource extends JsonResource
 {
@@ -39,7 +40,7 @@ class PostResource extends JsonResource
                         'accountId' => (string) $tag->user_id,
                         'account_id' => (string) $tag->user_id,
                         'handle' => $tag->user?->handle ?? '',
-                        'name' => $tag->user?->display_name ?? $tag->user?->name ?? '',
+                        'name' => ($tag->user?->display_name ?: $tag->user?->name) ?? '',
                         'x' => (float) $tag->x,
                         'y' => (float) $tag->y,
                         'mediaIndex' => (int) $mediaItem->display_order,
@@ -48,7 +49,7 @@ class PostResource extends JsonResource
             }
         }
 
-        $currentUser = $request->user();
+        $currentUser = $request->user() ?: Auth::guard('api')->user();
         $isMine = $currentUser ? ((int) $currentUser->id === (int) $this->user_id) : false;
 
         $audienceVal = is_object($this->audience) ? $this->audience->value : $this->audience;
@@ -56,7 +57,7 @@ class PostResource extends JsonResource
 
         $page = $this->page_id ? ($this->relationLoaded('page') ? $this->page : Page::find($this->page_id)) : null;
 
-        $authorName = $page ? $page->name : ($this->user?->display_name ?? $this->user?->name ?? 'Utilisateur');
+        $authorName = $page ? $page->name : ($this->user?->display_name ?: ($this->user?->name ?? 'Utilisateur'));
         $authorAvatar = $page ? $page->logo_url : $this->user?->avatar_url;
         $authorVerified = $page ? $page->isCertified() : (bool) ($this->user?->is_verified ?? false);
         $authorBadge = $page ? ($page->isCertified() ? 'page_certified' : 'none') : ($this->user?->badge ?? 'none');
@@ -96,6 +97,7 @@ class PostResource extends JsonResource
             // Contenu
             'body' => (string) ($this->body ?? ''),
             'caption' => (string) ($this->body ?? ''),
+            'language' => (string) ($this->language ?? 'fr'),
 
             // Médias
             'media' => $firstMedia?->media_url,
@@ -121,9 +123,13 @@ class PostResource extends JsonResource
             'comments_count' => (int) $this->comments_count,
             'shares' => (int) $this->shares_count,
             'shares_count' => (int) $this->shares_count,
+            'saves' => (int) ($this->saves_count ?? 0),
+            'saves_count' => (int) ($this->saves_count ?? 0),
             'views' => (int) $this->views_count,
             'views_count' => (int) $this->views_count,
-            'liked' => $request->user() ? $this->isLikedBy($request->user()) : false,
+            'liked' => $currentUser ? $this->isLikedBy($currentUser) : false,
+            'saved' => $currentUser ? $this->isSavedBy($currentUser) : false,
+            'is_saved' => $currentUser ? $this->isSavedBy($currentUser) : false,
 
             // Paramètres de publication
             'audience' => $audienceVal,

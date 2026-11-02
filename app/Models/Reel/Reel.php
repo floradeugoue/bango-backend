@@ -27,6 +27,7 @@ class Reel extends Model
         'page_id',
         'sound_id',
         'caption',
+        'language',
         'topic',
         'status',
         'error_message',
@@ -50,6 +51,7 @@ class Reel extends Model
         'dislikes_count',
         'comments_count',
         'shares_count',
+        'saves_count',
         'published_at',
     ];
 
@@ -69,6 +71,7 @@ class Reel extends Model
             'dislikes_count' => 'integer',
             'comments_count' => 'integer',
             'shares_count' => 'integer',
+            'saves_count' => 'integer',
             'published_at' => 'datetime',
         ];
     }
@@ -167,6 +170,7 @@ class Reel extends Model
     public function savedByUsers(): BelongsToMany
     {
         return $this->belongsToMany(User::class, 'user_saved_reels', 'reel_id', 'user_id')
+            ->wherePivotNull('page_id')
             ->withTimestamps();
     }
 

@@ -39,11 +39,14 @@ class KycSubmittedNotification extends Notification implements ShouldQueue
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
+
         return [
             'type' => 'kyc_submitted',
             'submission_id' => $this->submission->id,
             'status' => $this->submission->status->value,
-            'message' => 'Votre dossier de vérification KYC a été soumis avec succès et est en cours d\'examen.',
+            'title' => trans('notifications.kyc_submitted.title', [], $locale),
+            'message' => trans('notifications.kyc_submitted.body', [], $locale),
         ];
     }
 }

@@ -140,6 +140,8 @@ class ReelInteractionController extends Controller
 
         return response()->json([
             'success' => true,
+            'saved' => $result['saved'],
+            'saves_count' => $result['saves_count'],
             'data' => $result,
         ]);
     }

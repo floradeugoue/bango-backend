@@ -41,11 +41,14 @@ class DeviceVerificationCodeNotification extends Notification
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
+
         return [
             'type' => 'device_verification_code',
             'code' => $this->code,
             'expires_in' => $this->expiresInSeconds,
-            'message' => "Votre code de confirmation d'appareil est {$this->code}.",
+            'title' => trans('notifications.device_verification_code.title', [], $locale),
+            'message' => trans('notifications.device_verification_code.body', ['code' => $this->code], $locale),
             'sent_at' => now()->toIso8601String(),
         ];
     }

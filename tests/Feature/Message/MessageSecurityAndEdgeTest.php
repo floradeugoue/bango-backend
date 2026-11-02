@@ -55,6 +55,23 @@ test('regle du blocage silencieux : un utilisateur bloque voit son envoi reussir
     // AUCUN événement broadcasté et AUCUNE notification pour Bob
     Event::assertNotDispatched(MessageSent::class);
     Notification::assertNothingSent();
+
+    // Alice voit son propre message envoyé
+    $aliceMessages = $this->getJson("/api/messages/threads/{$this->thread->id}/messages")
+        ->assertOk();
+    expect(collect($aliceMessages->json('data'))->pluck('id')->all())->toContain($messageId);
+
+    // Bob (le destinataire qui l'a bloquée) ne doit PAS voir le message undelivered
+    Passport::actingAs($this->bob);
+    $bobMessages = $this->getJson("/api/messages/threads/{$this->thread->id}/messages")
+        ->assertOk();
+    expect(collect($bobMessages->json('data'))->pluck('id')->all())->not->toContain($messageId);
+
+    // Vérifier également les détails du thread pour Bob (unread_count et latest_message)
+    $bobThread = $this->getJson("/api/messages/threads/{$this->thread->id}")
+        ->assertOk();
+    expect($bobThread->json('data.unread_count'))->toBe(0)
+        ->and($bobThread->json('data.latest_message'))->toBeNull();
 });
 
 test('seuls les membres actifs peuvent s authentifier sur le canal Reverb prive de la conversation', function (): void {

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Visit;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Visit\BookVisitRequest;
 use App\Http\Requests\Visit\CancelVisitRequest;
+use App\Http\Requests\Visit\RecordAttendanceRequest;
 use App\Http\Requests\Visit\RespondToProposalRequest;
 use App\Http\Resources\Visit\VisitReceiptResource;
 use App\Http\Resources\Visit\VisitReservationResource;
@@ -60,18 +61,47 @@ class ProspectVisitController extends Controller
             payload: $request->validated()
         );
 
-        return response()->json([
-            'message' => 'Réservation initiée avec succès. Veuillez finaliser le règlement dans les 15 minutes.',
-            'data' => new VisitReservationResource($result['reservation']),
-            'transaction' => $result['transaction'] ? [
+        $prompt = $result['prompt'] ?? null;
+        if (! $prompt && $result['transaction']) {
+            $latestAttempt = $result['transaction']->attempts()->latest('attempt_number')->first();
+            $ussdPrompt = $latestAttempt?->metadata['ussd_prompt'] ?? null;
+            if ($ussdPrompt) {
+                $timeoutSeconds = (int) config('payment.timeout_seconds', 120);
+                $prompt = [
+                    'ussd' => $ussdPrompt,
+                    'message' => $ussdPrompt,
+                    'timeout_seconds' => $timeoutSeconds,
+                    'expires_at' => $result['transaction']->created_at ? $result['transaction']->created_at->addSeconds($timeoutSeconds)->toIso8601String() : now()->addSeconds($timeoutSeconds)->toIso8601String(),
+                ];
+            }
+        }
+
+        $transactionData = null;
+        if ($result['transaction']) {
+            $transactionData = [
                 'id' => $result['transaction']->id,
                 'reference' => $result['transaction']->reference,
                 'status' => $result['transaction']->status->value,
                 'amount' => (float) $result['transaction']->amount,
                 'currency' => $result['transaction']->currency,
-            ] : null,
+            ];
+            if ($prompt) {
+                $transactionData['prompt'] = $prompt;
+            }
+        }
+
+        $responsePayload = [
+            'message' => 'Réservation initiée avec succès. Veuillez finaliser le règlement dans les 15 minutes.',
+            'data' => new VisitReservationResource($result['reservation']),
+            'transaction' => $transactionData,
             'quote' => $result['quote'],
-        ], 201);
+        ];
+
+        if ($prompt) {
+            $responsePayload['prompt'] = $prompt;
+        }
+
+        return response()->json($responsePayload, 201);
     }
 
     /**
@@ -90,6 +120,72 @@ class ProspectVisitController extends Controller
                 : 'Paiement en cours de vérification.',
             'data' => new VisitReservationResource($confirmed),
         ]);
+    }
+
+    /**
+     * Règle une réservation de visite existante (Crédit BANGO ou Mobile Money).
+     * POST /api/visits/{id}/pay
+     */
+    public function pay(Request $request, string $id): JsonResponse
+    {
+        $reservation = VisitReservation::with(['listing', 'slot'])->findOrFail($id);
+
+        $validated = $request->validate([
+            'payment_method' => ['nullable', 'string', 'in:credit,monetbil,credit_wallet,mobile_money'],
+            'channel' => ['nullable', 'string', 'in:credit_wallet,mobile_money,orange_money,mtn_momo'],
+            'phone' => ['nullable', 'string', 'max:20'],
+            'phone_number' => ['nullable', 'string', 'max:20'],
+            'operator' => ['nullable', 'string', 'in:orange,mtn,moov,wave'],
+            'idempotency_key' => ['nullable', 'string', 'max:128'],
+        ]);
+
+        $result = $this->reservationService->payReservation(
+            reservation: $reservation,
+            user: $request->user(),
+            payload: $validated
+        );
+
+        $prompt = $result['prompt'] ?? null;
+        if (! $prompt && $result['transaction']) {
+            $latestAttempt = $result['transaction']->attempts()->latest('attempt_number')->first();
+            $ussdPrompt = $latestAttempt?->metadata['ussd_prompt'] ?? null;
+            if ($ussdPrompt) {
+                $timeoutSeconds = (int) config('payment.timeout_seconds', 120);
+                $prompt = [
+                    'ussd' => $ussdPrompt,
+                    'message' => $ussdPrompt,
+                    'timeout_seconds' => $timeoutSeconds,
+                    'expires_at' => $result['transaction']->created_at ? $result['transaction']->created_at->addSeconds($timeoutSeconds)->toIso8601String() : now()->addSeconds($timeoutSeconds)->toIso8601String(),
+                ];
+            }
+        }
+
+        $transactionData = null;
+        if ($result['transaction']) {
+            $transactionData = [
+                'id' => $result['transaction']->id,
+                'reference' => $result['transaction']->reference,
+                'status' => $result['transaction']->status->value,
+                'amount' => (float) $result['transaction']->amount,
+                'currency' => $result['transaction']->currency,
+            ];
+            if ($prompt) {
+                $transactionData['prompt'] = $prompt;
+            }
+        }
+
+        $responsePayload = [
+            'message' => 'Paiement initié avec succès.',
+            'data' => new VisitReservationResource($result['reservation']),
+            'transaction' => $transactionData,
+            'quote' => $result['quote'],
+        ];
+
+        if ($prompt) {
+            $responsePayload['prompt'] = $prompt;
+        }
+
+        return response()->json($responsePayload, 200);
     }
 
     /**
@@ -216,6 +312,26 @@ class ProspectVisitController extends Controller
             'Content-Type' => 'application/pdf',
             'Content-Disposition' => "attachment; filename=\"{$filename}\"",
             'Cache-Control' => 'no-cache, private',
+        ]);
+    }
+
+    /**
+     * Enregistrer l'émargement / présence d'une visite.
+     * POST /api/visits/{id}/attendance
+     */
+    public function attendance(RecordAttendanceRequest $request, string $id): JsonResponse
+    {
+        $reservation = VisitReservation::with(['listing', 'slot', 'proposalSlot', 'prospect', 'owner', 'agent', 'paymentTransaction'])->findOrFail($id);
+
+        $updated = $this->reservationService->recordAttendance(
+            reservation: $reservation,
+            actor: $request->user(),
+            attendance: $request->validated('attendance')
+        );
+
+        return response()->json([
+            'message' => 'Présence enregistrée avec succès.',
+            'data' => new VisitReservationResource($updated),
         ]);
     }
 }

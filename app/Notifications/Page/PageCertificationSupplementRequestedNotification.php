@@ -40,6 +40,8 @@ class PageCertificationSupplementRequestedNotification extends Notification impl
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
+
         return [
             'type' => 'page_certification_supplement_requested',
             'certification_id' => $this->certification->id,
@@ -48,7 +50,8 @@ class PageCertificationSupplementRequestedNotification extends Notification impl
             'reason' => $this->certification->supplement_request_reason,
             'corrections_count' => $this->certification->corrections_count,
             'remaining_corrections' => max(0, PageCertification::MAX_ALLOWED_CORRECTIONS - $this->certification->corrections_count),
-            'message' => 'Des informations complémentaires sont requises pour votre dossier de certification.',
+            'title' => trans('notifications.page_certification_supplement.title', [], $locale),
+            'message' => trans('notifications.page_certification_supplement.body', [], $locale),
         ];
     }
 }

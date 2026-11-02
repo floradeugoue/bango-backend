@@ -119,12 +119,24 @@ class SubscriptionCatalogSeeder extends Seeder
         );
 
         SubscriptionPrice::updateOrCreate(
-            ['product_id' => $pagePro->id, 'cadence' => 'one_off'],
+            ['product_id' => $pagePro->id, 'cadence' => 'monthly'],
             [
                 'price_amount' => 15000.00,
                 'currency' => 'XAF',
+                'duration_days' => 30,
+                'savings_description' => null,
+                'is_active' => true,
+                'effective_from' => now()->subMonth(),
+            ]
+        );
+
+        SubscriptionPrice::updateOrCreate(
+            ['product_id' => $pagePro->id, 'cadence' => 'yearly'],
+            [
+                'price_amount' => 150000.00,
+                'currency' => 'XAF',
                 'duration_days' => 365,
-                'savings_description' => 'Frais d\'examen uniques avec 2 corrections incluses',
+                'savings_description' => 'Économisez 30 000 FCFA (2 mois offerts)',
                 'is_active' => true,
                 'effective_from' => now()->subMonth(),
             ]

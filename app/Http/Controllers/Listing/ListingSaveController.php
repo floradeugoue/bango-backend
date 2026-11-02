@@ -24,7 +24,25 @@ class ListingSaveController extends Controller
     public function index(Request $request): AnonymousResourceCollection
     {
         $user = $request->user();
+        $activePage = $request->attributes->get('acting_page') ?? $request->attributes->get('active_page');
         $perPage = max(1, min(50, $request->integer('per_page', 15)));
+
+        if ($activePage) {
+            $paginator = Listing::query()
+                ->join('listing_saves', 'listings.id', '=', 'listing_saves.listing_id')
+                ->where('listing_saves.page_id', $activePage->id)
+                ->whereIn('listings.status', [
+                    ListingStatus::Published->value,
+                    ListingStatus::Reserved->value,
+                    ListingStatus::Taken->value,
+                ])
+                ->select('listings.*')
+                ->with(['owner', 'agent', 'photos', 'videos', 'saves'])
+                ->orderByDesc('listing_saves.created_at')
+                ->paginate($perPage);
+
+            return ListingResource::collection($paginator);
+        }
 
         // Inclure les biens avec leur statut (published, reserved, taken) ; n'exclure que les supprimés/invalides
         $paginator = $user->savedListings()
@@ -66,12 +84,18 @@ class ListingSaveController extends Controller
     public function destroy(Request $request, string $id): JsonResponse
     {
         $user = $request->user();
+        $activePage = $request->attributes->get('acting_page') ?? $request->attributes->get('active_page');
         /** @var Listing $listing */
         $listing = Listing::findOrFail($id);
 
-        $existing = ListingSave::where('user_id', $user->id)
-            ->where('listing_id', $listing->id)
-            ->first();
+        $query = ListingSave::where('listing_id', $listing->id);
+        if ($activePage) {
+            $query->where('page_id', $activePage->id);
+        } else {
+            $query->where('user_id', $user->id)->whereNull('page_id');
+        }
+
+        $existing = $query->first();
 
         if ($existing) {
             $existing->delete();

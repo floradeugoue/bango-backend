@@ -31,9 +31,9 @@ class StoryHighlightResource extends JsonResource
             'stories' => StoryResource::collection($this->whenLoaded('stories')),
             'user' => [
                 'id' => $this->user->id,
-                'name' => $this->user->name,
+                'name' => $this->user->display_name ?: $this->user->name,
                 'handle' => $this->user->handle,
-                'display_name' => $this->user->display_name ?? $this->user->name,
+                'display_name' => $this->user->display_name ?: $this->user->name,
                 'avatar_url' => $this->user->avatar_url,
             ],
             'created_at' => $this->created_at?->toIso8601String(),

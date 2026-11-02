@@ -2,6 +2,7 @@
 
 namespace App\Models\Square;
 
+use App\Models\Page\Page;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -18,13 +19,20 @@ class PostComment extends Model
     protected $fillable = [
         'post_id',
         'user_id',
+        'page_id',
         'parent_id',
         'body',
+        'language',
         'likes_count',
         'dislikes_count',
         'replies_count',
         'is_edited',
     ];
+
+    public function page(): BelongsTo
+    {
+        return $this->belongsTo(Page::class);
+    }
 
     /**
      * @return array<string, string>

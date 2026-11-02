@@ -22,8 +22,8 @@ class MutedUserResource extends JsonResource
 
         return [
             'id' => (string) ($mutedUser?->id ?? $this->muted_user_id),
-            'name' => $mutedUser?->name ?? '',
-            'display_name' => $mutedUser?->display_name ?? $mutedUser?->name ?? '',
+            'name' => ($mutedUser?->display_name ?: $mutedUser?->name) ?? '',
+            'display_name' => ($mutedUser?->display_name ?: $mutedUser?->name) ?? '',
             'handle' => $mutedUser?->handle,
             'avatar_url' => $mutedUser?->avatar_url,
             'badge' => $mutedUser?->badge ?? 'none',

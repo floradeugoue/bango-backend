@@ -267,6 +267,21 @@ class CampaignResource extends JsonResource
             ->groupBy(fn ($res) => $res->occurred_at ? $res->occurred_at->toDateString() : $res->created_at->toDateString())
             ->map(fn ($group) => $group->count());
 
+        // Pré-groupement des impressions distinctes par date pour garantir que daily.reach = personnes distinctes de campaign_impressions ce jour-là
+        $impressionsCollection = $this->relationLoaded('impressions')
+            ? $this->impressions
+            : $this->impressions()->get();
+
+        $distinctReachByDate = [];
+        if ($impressionsCollection->isNotEmpty()) {
+            $impressionsByDate = $impressionsCollection->groupBy(fn ($imp) => $imp->shown_at?->toDateString() ?? $imp->created_at->toDateString());
+            foreach ($impressionsByDate as $dateKey => $impsOnDate) {
+                $uniqueUsers = $impsOnDate->whereNotNull('user_id')->unique('user_id')->count();
+                $anonymous = $impsOnDate->whereNull('user_id')->count();
+                $distinctReachByDate[$dateKey] = $uniqueUsers + $anonymous;
+            }
+        }
+
         $series = [];
         foreach ($metrics as $metric) {
             $dateString = $metric->metric_date?->toDateString();
@@ -277,9 +292,12 @@ class CampaignResource extends JsonResource
                 $dailyResultsCount = (int) $metric->clicks;
             }
 
+            // daily.reach = personnes distinctes de campaign_impressions ce jour-là, ou fallback sur metric->reach
+            $calculatedDailyReach = $distinctReachByDate[$dateString] ?? (int) $metric->reach;
+
             $series[] = [
                 'date' => $dateString,
-                'reach' => (int) $metric->reach,
+                'reach' => $calculatedDailyReach,
                 'impressions' => (int) $metric->impressions,
                 'results' => $dailyResultsCount,
                 'spent' => (float) $metric->spent,

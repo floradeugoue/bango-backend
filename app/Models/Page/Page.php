@@ -12,6 +12,7 @@ use App\Models\Listing\Listing;
 use App\Models\Message\Conversation;
 use App\Models\Reel\Reel;
 use App\Models\Square\Post;
+use App\Models\Subscription\Subscription;
 use App\Models\User;
 use Database\Factories\Page\PageFactory;
 use Illuminate\Database\Eloquent\Builder;
@@ -22,6 +23,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\Storage;
 
 class Page extends Model
 {
@@ -65,6 +67,54 @@ class Page extends Model
             'followers_count' => 'integer',
             'metadata' => 'array',
         ];
+    }
+
+    /**
+     * Retourne l'URL absolue du logo de la Page.
+     */
+    public function getLogoUrlAttribute(?string $value): ?string
+    {
+        if (empty($value)) {
+            return null;
+        }
+
+        if (str_starts_with($value, 'http://') || str_starts_with($value, 'https://')) {
+            return $value;
+        }
+
+        if (str_starts_with($value, '/storage/')) {
+            return url($value);
+        }
+
+        if (str_starts_with($value, 'storage/')) {
+            return url('/'.$value);
+        }
+
+        return Storage::disk('public')->url($value);
+    }
+
+    /**
+     * Retourne l'URL absolue de la couverture (cover_url) de la Page.
+     */
+    public function getCoverUrlAttribute(?string $value): ?string
+    {
+        if (empty($value)) {
+            return null;
+        }
+
+        if (str_starts_with($value, 'http://') || str_starts_with($value, 'https://')) {
+            return $value;
+        }
+
+        if (str_starts_with($value, '/storage/')) {
+            return url($value);
+        }
+
+        if (str_starts_with($value, 'storage/')) {
+            return url('/'.$value);
+        }
+
+        return Storage::disk('public')->url($value);
     }
 
     /**
@@ -147,6 +197,32 @@ class Page extends Model
     public function campaigns(): HasMany
     {
         return $this->hasMany(Campaign::class);
+    }
+
+    /**
+     * Abonnements de la Page Professionnelle (ex: Certification Page Pro).
+     */
+    public function subscriptions(): HasMany
+    {
+        return $this->hasMany(Subscription::class, 'page_id')->orderByDesc('created_at');
+    }
+
+    /**
+     * Dernier abonnement actif ou utilisable de la Page.
+     */
+    public function activeSubscription(): HasOne
+    {
+        return $this->hasOne(Subscription::class, 'page_id')
+            ->where(function ($query) {
+                $query->where(function ($q) {
+                    $q->where('state', 'active')
+                        ->where('current_period_end', '>', now());
+                })->orWhere(function ($q) {
+                    $q->where('state', 'grace')
+                        ->where('grace_until', '>', now());
+                });
+            })
+            ->latestOfMany();
     }
 
     /**

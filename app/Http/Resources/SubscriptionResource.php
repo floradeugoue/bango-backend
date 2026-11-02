@@ -11,6 +11,14 @@ class SubscriptionResource extends JsonResource
     {
         return [
             'id' => $this->id,
+            'pageId' => $this->page_id,
+            'page' => $this->whenLoaded('page', function () {
+                return [
+                    'id' => $this->page->id,
+                    'name' => $this->page->name,
+                    'handle' => $this->page->handle,
+                ];
+            }),
             'badge' => $this->badge_type,
             'badgeType' => $this->badge_type,
             'state' => $this->state,
@@ -36,7 +44,7 @@ class SubscriptionResource extends JsonResource
                 return [
                     'id' => $this->user->id,
                     'handle' => $this->user->handle,
-                    'name' => $this->user->display_name ?? $this->user->name,
+                    'name' => $this->user->display_name ?: $this->user->name,
                     'email' => $this->user->email,
                     'phone' => $this->user->phone,
                     'isVerified' => (bool) $this->user->is_verified,

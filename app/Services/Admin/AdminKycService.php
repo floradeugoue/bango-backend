@@ -298,9 +298,12 @@ class AdminKycService
                     'rejection_reason' => null,
                 ]);
 
-                // 2. Mise à jour de l'utilisateur : validation d'identité uniquement
+                // 2. Mise à jour de l'utilisateur : validation d'identité et alignement du profil sur le nom de la pièce
                 $user->is_verified = true;
                 $user->verification_lapsed = false;
+                if (! empty($submission->full_name)) {
+                    $user->display_name = $submission->full_name;
+                }
                 $user->save();
 
                 // 3. Règle produit : les badges proviennent exclusivement des abonnements actifs.

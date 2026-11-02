@@ -23,7 +23,7 @@ class AgentProspectResource extends JsonResource
             'status' => $this->status->value,
             'prospect' => [
                 'id' => $this->prospect_id,
-                'name' => $this->prospect->name ?? $this->prospect->display_name ?? null,
+                'name' => $this->prospect?->display_name ?: $this->prospect?->name,
                 'handle' => $this->prospect->handle ?? null,
                 'avatar_url' => $this->prospect->avatar_url ?? null,
                 'phone' => $this->status->grantsPrivateAddressAccess() ? ($this->metadata['prospect_phone'] ?? $this->prospect->phone ?? null) : null,

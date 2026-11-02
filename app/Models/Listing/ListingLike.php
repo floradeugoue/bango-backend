@@ -2,6 +2,7 @@
 
 namespace App\Models\Listing;
 
+use App\Models\Page\Page;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -15,6 +16,7 @@ class ListingLike extends Model
 
     protected $fillable = [
         'user_id',
+        'page_id',
         'listing_id',
     ];
 
@@ -24,6 +26,14 @@ class ListingLike extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    /**
+     * Page ayant aimé l'annonce.
+     */
+    public function page(): BelongsTo
+    {
+        return $this->belongsTo(Page::class);
     }
 
     /**

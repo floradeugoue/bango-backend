@@ -7,6 +7,7 @@ use App\Models\Reel\Reel;
 use App\Models\Reel\Sound;
 use App\Models\User;
 use App\Services\Media\MediaStorageService;
+use App\Services\Translation\TranslationService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -88,7 +89,15 @@ class ReelDraftService
 
         $reel->status = ReelStatus::Draft;
         $reel->caption = $data['caption'] ?? $reel->caption;
-        $reel->topic = $data['topic'] ?? ($reel->topic ?: 'neighbourhood');
+        if (! empty($reel->caption)) {
+            $reel->language = app(TranslationService::class)->detectLanguage($reel->caption);
+        }
+        $reel->topic = app(ReelTopicResolver::class)->resolve(
+            topic: $data['topic'] ?? $reel->topic,
+            caption: $reel->caption,
+            listingId: $reel->listing_id,
+            user: $user
+        );
         $reel->sound_id = $soundId;
         $reel->allow_download = isset($data['allow_download']) ? (bool) $data['allow_download'] : ($reel->allow_download ?? true);
         $reel->comments_closed = isset($data['comments_closed']) ? (bool) $data['comments_closed'] : ($reel->comments_closed ?? false);

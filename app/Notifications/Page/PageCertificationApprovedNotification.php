@@ -39,13 +39,16 @@ class PageCertificationApprovedNotification extends Notification implements Shou
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
+
         return [
             'type' => 'page_certification_approved',
             'certification_id' => $this->certification->id,
             'page_id' => $this->certification->page_id,
             'page_name' => $this->certification->page->name ?? 'Page',
             'decided_at' => $this->certification->decided_at?->toIso8601String(),
-            'message' => 'Félicitations, votre Page Professionnelle a été officiellement certifiée !',
+            'title' => trans('notifications.page_certification_approved.title', [], $locale),
+            'message' => trans('notifications.page_certification_approved.body', [], $locale),
         ];
     }
 }

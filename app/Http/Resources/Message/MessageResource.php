@@ -3,6 +3,7 @@
 namespace App\Http\Resources\Message;
 
 use App\Models\Message\Message;
+use App\Models\Page\Page;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -21,7 +22,18 @@ class MessageResource extends JsonResource
             'conversation_id' => (string) $this->conversation_id,
             'thread_id' => (string) $this->conversation_id,
             'sender_id' => $this->sender_id,
-            'sender' => $this->whenLoaded('sender', function () {
+            'page_id' => $this->page_id ? (int) $this->page_id : null,
+            'sender' => ($page = $this->page_id ? ($this->relationLoaded('page') ? $this->page : Page::find($this->page_id)) : null) ? [
+                'id' => (string) $page->id,
+                'name' => $page->name,
+                'username' => $page->handle,
+                'handle' => '@'.$page->handle,
+                'avatar_url' => $page->logo_url,
+                'is_verified' => $page->isCertified(),
+                'certified' => $page->isCertified(),
+                'is_certified' => $page->isCertified(),
+                'badge' => $page->isCertified() ? 'page_certified' : 'none',
+            ] : $this->whenLoaded('sender', function () {
                 if (! $this->sender) {
                     return [
                         'id' => null,
@@ -33,10 +45,13 @@ class MessageResource extends JsonResource
 
                 return [
                     'id' => $this->sender->id,
-                    'name' => $this->sender->name,
+                    'name' => $this->sender->display_name ?: $this->sender->name,
+                    'handle' => $this->sender->handle,
                     'username' => $this->sender->username ?? $this->sender->handle,
                     'avatar_url' => $this->sender->avatar_url ?? $this->sender->avatar,
                     'is_verified' => (bool) $this->sender->is_verified,
+                    'certified' => (bool) ($this->sender->is_certified ?? false),
+                    'is_certified' => (bool) ($this->sender->is_certified ?? false),
                 ];
             }),
             'type' => $this->type->value,

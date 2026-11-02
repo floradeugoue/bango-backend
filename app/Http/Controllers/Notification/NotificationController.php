@@ -23,7 +23,21 @@ class NotificationController extends Controller
         $unreadOnly = $request->boolean('unread_only');
         $perPage = min(100, max(1, (int) $request->query('per_page', 20)));
 
+        $activePage = $request->attributes->get('acting_page') ?? $request->attributes->get('active_page');
+
         $query = $user->notifications()->latest();
+
+        if ($activePage) {
+            $query->where(function ($q) use ($activePage) {
+                $q->where('data', 'like', '%"page_id":'.$activePage->id.'%')
+                    ->orWhere('data', 'like', '%"page_id":"'.$activePage->id.'"%');
+            });
+        } else {
+            $query->where(function ($q) {
+                $q->where('data', 'not like', '%"page_id":%')
+                    ->orWhere('data', 'like', '%"page_id":null%');
+            });
+        }
 
         if ($unreadOnly) {
             $query->whereNull('read_at');
@@ -65,10 +79,33 @@ class NotificationController extends Controller
         }
 
         $notifications = $query->paginate($perPage);
-        $unreadCount = $user->unreadNotifications()->count();
+
+        // Calcul des compteurs non lus par identité (compte personnel et chacune des pages)
+        $unreadNotifications = $user->unreadNotifications()->get(['id', 'data']);
+
+        $accountUnread = 0;
+        $pagesUnread = [];
+
+        foreach ($unreadNotifications as $notif) {
+            $data = is_array($notif->data) ? $notif->data : json_decode((string) $notif->data, true);
+            $pageId = $data['page_id'] ?? null;
+
+            if ($pageId) {
+                $pid = (string) $pageId;
+                $pagesUnread[$pid] = ($pagesUnread[$pid] ?? 0) + 1;
+            } else {
+                $accountUnread++;
+            }
+        }
+
+        $activeUnreadCount = $activePage ? ($pagesUnread[(string) $activePage->id] ?? 0) : $accountUnread;
 
         return NotificationResource::collection($notifications)->additional([
-            'unread_count' => $unreadCount,
+            'unread_count' => $activeUnreadCount,
+            'unread_by_identity' => [
+                'account' => $accountUnread,
+                'pages' => $pagesUnread,
+            ],
         ]);
     }
 
@@ -80,6 +117,7 @@ class NotificationController extends Controller
     public function markAsRead(Request $request, string $id): JsonResponse
     {
         $user = $request->user();
+        $activePage = $request->attributes->get('acting_page') ?? $request->attributes->get('active_page');
 
         // Vérifier si la notification existe dans le système global pour détecter les tentatives d'accès interdit
         $globalNotification = DatabaseNotification::find($id);
@@ -99,22 +137,52 @@ class NotificationController extends Controller
             $globalNotification->markAsRead();
         }
 
+        // Compteur non lu restant dans le contexte actif
+        $unreadQuery = $user->unreadNotifications();
+        if ($activePage) {
+            $unreadQuery->where(function ($q) use ($activePage) {
+                $q->where('data', 'like', '%"page_id":'.$activePage->id.'%')
+                    ->orWhere('data', 'like', '%"page_id":"'.$activePage->id.'"%');
+            });
+        } else {
+            $unreadQuery->where(function ($q) {
+                $q->where('data', 'not like', '%"page_id":%')
+                    ->orWhere('data', 'like', '%"page_id":null%');
+            });
+        }
+
         return response()->json([
             'success' => true,
             'message' => 'Notification marquée comme lue.',
-            'unread_count' => $user->unreadNotifications()->count(),
+            'unread_count' => $unreadQuery->count(),
         ], 200);
     }
 
     /**
-     * Marque toutes les notifications de l'utilisateur comme lues.
+     * Marque toutes les notifications de l'utilisateur (dans le contexte actif) comme lues.
      *
      * POST /api/notifications/read ou POST /api/notifications/mark-all-read
      */
     public function markAllAsRead(Request $request): JsonResponse
     {
         $user = $request->user();
-        $user->unreadNotifications->markAsRead();
+        $activePage = $request->attributes->get('acting_page') ?? $request->attributes->get('active_page');
+
+        $unreadQuery = $user->unreadNotifications();
+
+        if ($activePage) {
+            $unreadQuery->where(function ($q) use ($activePage) {
+                $q->where('data', 'like', '%"page_id":'.$activePage->id.'%')
+                    ->orWhere('data', 'like', '%"page_id":"'.$activePage->id.'"%');
+            });
+        } else {
+            $unreadQuery->where(function ($q) {
+                $q->where('data', 'not like', '%"page_id":%')
+                    ->orWhere('data', 'like', '%"page_id":null%');
+            });
+        }
+
+        $unreadQuery->update(['read_at' => now()]);
 
         return response()->json([
             'success' => true,

@@ -95,6 +95,14 @@ class NotifyMatchingHousingSearches implements ShouldQueue
     {
         $query = ListingAlert::query()
             ->with('user')
+            ->where(function ($q) {
+                $q->where('enabled', true)
+                    ->orWhereNull('enabled');
+            })
+            ->where(function ($q) {
+                $q->where('is_active', true)
+                    ->orWhereNull('is_active');
+            })
             ->where('user_id', '!=', $listing->owner_id)
             ->where('frequency', 'instant');
 

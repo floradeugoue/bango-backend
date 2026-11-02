@@ -3,6 +3,8 @@
 namespace App\Services\Admin\Finance;
 
 use App\Enums\Visit\VisitReservationStatus;
+use App\Models\Delegation\VisitShare;
+use App\Models\Payment\AgentPayout;
 use App\Models\Payment\LandlordPayout;
 use App\Models\User;
 use App\Models\Visit\VisitReservation;
@@ -114,9 +116,10 @@ class AdminPayoutService
      */
     public function schedulePayoutForVisit(VisitReservation $reservation): LandlordPayout
     {
-        // Contrôle d'éligibilité : la visite doit être confirmée et payée
+        // Contrôle d'éligibilité : la visite doit être visitée/confirmée et payée
         $isEligible = in_array($reservation->status, [
             VisitReservationStatus::Confirmed,
+            VisitReservationStatus::Visited,
             'completed',
             'visited',
         ], true) && (float) $reservation->fee > 0;
@@ -137,12 +140,51 @@ class AdminPayoutService
             ->addDay()
             ->setTime(8, 0, 0);
 
+        $totalFee = (float) $reservation->fee;
+        $agentPercent = 0.0;
+        $agentId = $reservation->agent_id ?? $reservation->listing?->agent_id;
+
+        if ($agentId && $reservation->owner_id) {
+            $share = VisitShare::where('landlord_id', $reservation->owner_id)
+                ->where('agent_id', $agentId)
+                ->first();
+            if ($share && $share->agreed_percent !== null) {
+                $agentPercent = (float) $share->agreed_percent;
+            }
+        }
+
+        $agentAmount = round(($totalFee * $agentPercent) / 100, 2);
+        $landlordAmount = round($totalFee - $agentAmount, 2);
+
+        // Si l'agent a une part, planifier le versement de l'agent
+        if ($agentId && $agentAmount > 0) {
+            AgentPayout::firstOrCreate([
+                'visit_reservation_id' => $reservation->id,
+            ], [
+                'reference' => 'PAYOUT-AG-'.strtoupper(Str::random(10)),
+                'agent_id' => $agentId,
+                'landlord_id' => $reservation->owner_id,
+                'transaction_id' => $reservation->transaction_id,
+                'amount' => $agentAmount,
+                'percent' => $agentPercent,
+                'currency' => $reservation->currency ?: 'XAF',
+                'status' => AgentPayout::STATUS_SCHEDULED,
+                'scheduled_at' => $scheduledAt,
+                'provider' => 'monetbil',
+                'channel' => 'mobile_money',
+                'metadata' => [
+                    'rule' => 'Agent visit fee cut',
+                    'visit_slot_start' => $reservation->slot?->start_at?->toIso8601String(),
+                ],
+            ]);
+        }
+
         return LandlordPayout::create([
             'reference' => 'PAYOUT-'.strtoupper(Str::random(10)),
             'landlord_id' => $reservation->owner_id,
             'visit_reservation_id' => $reservation->id,
             'transaction_id' => $reservation->transaction_id,
-            'amount' => (float) $reservation->fee,
+            'amount' => $landlordAmount,
             'currency' => $reservation->currency ?: 'XAF',
             'status' => LandlordPayout::STATUS_SCHEDULED,
             'scheduled_at' => $scheduledAt,
@@ -152,6 +194,11 @@ class AdminPayoutService
                 'rule' => 'J+1 08:00 post-visit fee disbursement',
                 'visit_slot_start' => $reservation->slot?->start_at?->toIso8601String(),
                 'scheduled_time' => '08:00:00',
+                'agent_cut' => $agentId && $agentAmount > 0 ? [
+                    'agent_id' => (int) $agentId,
+                    'percent' => (float) $agentPercent,
+                    'amount' => (float) $agentAmount,
+                ] : null,
             ],
         ]);
     }
@@ -181,5 +228,37 @@ class AdminPayoutService
         }
 
         return $processed;
+    }
+
+    /**
+     * Annule les reversements programmés (bailleur et agent) associés à une réservation si elle est annulée/déclinée/remboursée.
+     */
+    public function cancelScheduledPayoutForVisit(VisitReservation $reservation): int
+    {
+        $cancelledCount = 0;
+
+        $landlordPayouts = LandlordPayout::where('visit_reservation_id', $reservation->id)
+            ->whereIn('status', [LandlordPayout::STATUS_SCHEDULED, LandlordPayout::STATUS_PROCESSING])
+            ->get();
+
+        foreach ($landlordPayouts as $payout) {
+            $payout->status = LandlordPayout::STATUS_CANCELLED;
+            $payout->last_error = 'Réservation annulée, refusée ou remboursée avant échéance.';
+            $payout->save();
+            $cancelledCount++;
+        }
+
+        $agentPayouts = AgentPayout::where('visit_reservation_id', $reservation->id)
+            ->whereIn('status', [AgentPayout::STATUS_SCHEDULED, AgentPayout::STATUS_PROCESSING])
+            ->get();
+
+        foreach ($agentPayouts as $payout) {
+            $payout->status = AgentPayout::STATUS_CANCELLED;
+            $payout->last_error = 'Réservation annulée, refusée ou remboursée avant échéance.';
+            $payout->save();
+            $cancelledCount++;
+        }
+
+        return $cancelledCount;
     }
 }

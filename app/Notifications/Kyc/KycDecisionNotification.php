@@ -41,6 +41,9 @@ class KycDecisionNotification extends Notification implements ShouldQueue
         if ($this->decision === 'approve') {
             $mail->line('Votre dossier de vérification d\'identité a été approuvé avec succès.')
                 ->line('Votre statut vérifié est désormais actif.');
+            if (! empty($this->submission->full_name)) {
+                $mail->line("Conformément à votre pièce d'identité validée, votre profil s'appelle désormais « {$this->submission->full_name} ».");
+            }
         } elseif ($this->decision === 'reject') {
             $mail->line('Votre dossier de vérification d\'identité n\'a pas pu être validé.')
                 ->line('Motif : '.($this->reason ?? 'Non conforme aux exigences de conformité.'));
@@ -57,10 +60,14 @@ class KycDecisionNotification extends Notification implements ShouldQueue
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
+
         $message = match ($this->decision) {
-            'approve' => 'Votre dossier de vérification d\'identité a été approuvé avec succès.',
-            'reject' => 'Votre dossier de vérification KYC a été refusé. Motif : '.($this->reason ?? 'Non conforme.'),
-            default => 'Des compléments sont nécessaires pour votre dossier KYC. Motif : '.($this->reason ?? 'Compléments demandés.'),
+            'approve' => ! empty($this->submission->full_name)
+                ? trans('notifications.kyc_decision.approved_name', ['name' => $this->submission->full_name], $locale)
+                : trans('notifications.kyc_decision.approved', [], $locale),
+            'reject' => trans('notifications.kyc_decision.rejected', ['reason' => $this->reason ?? ($locale === 'en' ? 'Non-compliant.' : 'Non conforme.')], $locale),
+            default => trans('notifications.kyc_decision.changes_requested', ['reason' => $this->reason ?? ($locale === 'en' ? 'Additional info requested.' : 'Compléments demandés.')], $locale),
         };
 
         return [
@@ -70,6 +77,8 @@ class KycDecisionNotification extends Notification implements ShouldQueue
             'decision' => $this->decision,
             'status' => $this->submission->status?->value ?? (string) $this->submission->status,
             'reason' => $this->reason,
+            'full_name' => $this->submission->full_name,
+            'title' => trans('notifications.kyc_decision.title', [], $locale),
             'message' => $message,
         ];
     }

@@ -62,6 +62,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Passport\HasApiTokens;
 
 class User extends Authenticatable
@@ -109,6 +110,7 @@ class User extends Authenticatable
         'scheduled_for_deletion_at',
         'is_private',
         'privacy_settings',
+        'payout_method',
         'badge',
         'is_certified',
         'certified_at',
@@ -140,6 +142,7 @@ class User extends Authenticatable
             'is_verified' => 'boolean',
             'is_certified' => 'boolean',
             'uses_agenda' => 'boolean',
+            'payout_method' => 'array',
             'certified_at' => 'datetime',
             'locked_until' => 'datetime',
             'suspended_from' => 'datetime',
@@ -171,6 +174,30 @@ class User extends Authenticatable
     public function role()
     {
         return $this->belongsTo(Role::class);
+    }
+
+    /**
+     * Retourne l'URL absolue de l'avatar de l'utilisateur.
+     */
+    public function getAvatarUrlAttribute(?string $value): ?string
+    {
+        if (empty($value)) {
+            return null;
+        }
+
+        if (str_starts_with($value, 'http://') || str_starts_with($value, 'https://')) {
+            return $value;
+        }
+
+        if (str_starts_with($value, '/storage/')) {
+            return url($value);
+        }
+
+        if (str_starts_with($value, 'storage/')) {
+            return url('/'.$value);
+        }
+
+        return Storage::disk('public')->url($value);
     }
 
     public function assignedReports(): HasMany
@@ -626,6 +653,7 @@ class User extends Authenticatable
     public function savedReels(): BelongsToMany
     {
         return $this->belongsToMany(Reel::class, 'user_saved_reels', 'user_id', 'reel_id')
+            ->wherePivotNull('page_id')
             ->withTimestamps();
     }
 
@@ -636,6 +664,7 @@ class User extends Authenticatable
     {
         return $this->belongsToMany(Reel::class, 'reel_reactions', 'user_id', 'reel_id')
             ->wherePivot('type', '=', 'like')
+            ->wherePivotNull('page_id')
             ->withTimestamps();
     }
 
@@ -944,5 +973,25 @@ class User extends Authenticatable
         }
 
         return true;
+    }
+
+    /**
+     * Seuil automatique d'attribution/retrait de la certification officielle à 600 000 abonnés.
+     * Si l'utilisateur atteint ou dépasse 600 000 abonnés, il devient certifié (certified_at renseigné).
+     * S'il passe sous ce seuil (et que la certification était liée à ce palier d'audience), elle est retirée.
+     */
+    public function syncFollowerCertificationThreshold(?int $overrideCount = null): void
+    {
+        $followersCount = $overrideCount ?? $this->followers()->count();
+
+        if ($followersCount >= 600000 && ! $this->is_certified) {
+            $this->is_certified = true;
+            $this->certified_at = now();
+            $this->save();
+        } elseif ($followersCount < 600000 && $this->is_certified) {
+            $this->is_certified = false;
+            $this->certified_at = null;
+            $this->save();
+        }
     }
 }

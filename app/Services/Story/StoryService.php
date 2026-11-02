@@ -76,8 +76,11 @@ class StoryService
                 $now = now();
                 $expiresAt = (clone $now)->addHours(24);
 
+                $activePage = request()?->attributes?->get('active_page');
+
                 $story = Story::create([
                     'user_id' => $user->id,
+                    'page_id' => $activePage?->id,
                     'audience' => $audience,
                     'allow_replies' => (bool) ($data['allow_replies'] ?? true),
                     'allow_archive' => (bool) ($data['allow_archive'] ?? true),
@@ -469,7 +472,6 @@ class StoryService
     public function getArchivedStories(User $user, int $perPage = 20): LengthAwarePaginator
     {
         return Story::where('user_id', $user->id)
-            ->archived()
             ->with(['slides.stickers', 'slides.sound'])
             ->orderByDesc('created_at')
             ->paginate($perPage);
@@ -853,8 +855,10 @@ class StoryService
 
         if ($story->user_id !== $user->id) {
             try {
+                $targetPageId = $story->page_id ?? null;
                 $story->user->notify(new SocialNotification('like', $user, [
                     'story_id' => (string) $story->id,
+                    'page_id' => $targetPageId,
                 ]));
             } catch (Throwable $e) {
                 Log::warning("Notification like story échouée : {$e->getMessage()}");

@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources\Message;
 
+use App\Enums\Message\ConversationMemberRole;
 use App\Models\Message\ConversationMember;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -20,6 +21,7 @@ class ConversationMemberResource extends JsonResource
             'id' => $this->id,
             'user_id' => $this->user_id,
             'role' => $this->role->value,
+            'is_admin' => $this->role === ConversationMemberRole::Admin,
             'is_muted' => (bool) $this->is_muted,
             'last_read_message_id' => $this->last_read_message_id,
             'last_read_at' => $this->last_read_at?->toIso8601String(),
@@ -50,10 +52,13 @@ class ConversationMemberResource extends JsonResource
 
                 return [
                     'id' => $this->user->id,
-                    'name' => $this->user->name,
+                    'name' => $this->user->display_name ?: $this->user->name,
+                    'handle' => $this->user->handle,
                     'username' => $this->user->username ?? $this->user->handle,
                     'avatar_url' => $this->user->avatar_url ?? $this->user->avatar,
                     'is_verified' => (bool) $this->user->is_verified,
+                    'certified' => (bool) ($this->user->is_certified ?? false),
+                    'is_certified' => (bool) ($this->user->is_certified ?? false),
                     'account_type' => $this->user->account_type?->value ?? 'personal',
                     'is_online' => $isOnline,
                     'last_seen_at' => $renderedLastSeen,

@@ -53,6 +53,7 @@ class PaymentFailedReminderNotification extends Notification implements ShouldQu
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
         $productName = $this->subscription->product->name ?? 'Abonnement BANGO';
 
         return [
@@ -65,8 +66,8 @@ class PaymentFailedReminderNotification extends Notification implements ShouldQu
             'amount' => (float) $this->failedTransaction->total_amount,
             'currency' => $this->failedTransaction->currency,
             'action_url' => "/subscriptions/{$this->subscription->id}/renewal",
-            'title' => "Échec de paiement — {$productName}",
-            'message' => "Le paiement pour {$productName} a échoué. Régularisez votre situation pour conserver votre badge actif.",
+            'title' => trans('notifications.payment_failed.title', ['product' => $productName], $locale),
+            'message' => trans('notifications.payment_failed.body', ['product' => $productName], $locale),
             'requires_manual_confirmation' => true,
         ];
     }

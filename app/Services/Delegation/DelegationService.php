@@ -6,6 +6,7 @@ use App\Enums\Delegation\DelegationCapability;
 use App\Enums\Delegation\DelegationStatus;
 use App\Enums\Listing\ListingStatus;
 use App\Models\Delegation\Delegation;
+use App\Models\Delegation\VisitShare;
 use App\Models\Listing\Listing;
 use App\Models\User;
 use App\Models\Visit\VisitReservation;
@@ -17,6 +18,7 @@ use App\Services\Subscription\BadgeResolutionService;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -190,6 +192,19 @@ class DelegationService
                 'expires_at' => now()->addDays(max(1, $ttlDays)),
             ]);
 
+            // Si un pourcentage a été proposé par le bailleur lors de l'invitation
+            if (isset($data['visit_share_percent'])) {
+                $percent = (float) $data['visit_share_percent'];
+                VisitShare::updateOrCreate(
+                    ['landlord_id' => $landlord->id, 'agent_id' => $agent->id],
+                    [
+                        'offer_percent' => $percent,
+                        'offer_by' => 'landlord',
+                        'offer_at' => now(),
+                    ]
+                );
+            }
+
             // Notification asynchrone sécurisée
             try {
                 $agent->notify(new AgentInvitationNotification($delegation));
@@ -214,7 +229,16 @@ class DelegationService
             throw new AuthorizationException('Un badge Agent actif est requis pour accepter un mandat de gestion.');
         }
 
-        return DB::transaction(function () use ($delegation, $agent) {
+        // Vérifier si l'agent attend une réponse du bailleur à sa propre contre-proposition de frais de visite
+        $visitShare = VisitShare::where('landlord_id', $delegation->bailleur_id)
+            ->where('agent_id', $agent->id)
+            ->first();
+
+        if ($visitShare && $visitShare->offer_by === 'agent' && $visitShare->agreed_percent === null) {
+            abort(409, 'Impossible d\'accepter l\'invitation tant que votre contre-proposition de partage des frais de visite est en attente de réponse du bailleur.');
+        }
+
+        return DB::transaction(function () use ($delegation, $agent, $visitShare) {
             /** @var Delegation $locked */
             $locked = Delegation::where('id', $delegation->id)->lockForUpdate()->firstOrFail();
 
@@ -238,6 +262,12 @@ class DelegationService
                 throw ValidationException::withMessages([
                     'delegation' => ['L\'annonce immobilière concernée n\'est plus disponible.'],
                 ]);
+            }
+
+            // Accepter automatiquement la proposition du bailleur si en attente
+            if ($visitShare && $visitShare->offer_by === 'landlord' && $visitShare->agreed_percent === null) {
+                $visitShare->agreed_percent = $visitShare->offer_percent;
+                $visitShare->save();
             }
 
             $locked->status = DelegationStatus::Active;
@@ -425,6 +455,38 @@ class DelegationService
         $delegation->save();
 
         return $delegation->load(['bailleur', 'agent', 'listing']);
+    }
+
+    /**
+     * Met à jour en masse les capacités d'un agent pour un ensemble de biens (ou tous les biens délégués).
+     *
+     * @param  array{capabilities: array<string>, listing_ids?: array<string>}  $data
+     * @return Collection<int, Delegation>
+     */
+    public function updateAgentDelegations(User $landlord, int|string $agentId, array $data): Collection
+    {
+        $valid = [DelegationCapability::Visits->value, DelegationCapability::Reply->value, DelegationCapability::Edit->value];
+        $caps = array_values(array_intersect($valid, $data['capabilities'] ?? []));
+        if (empty($caps)) {
+            $caps = [DelegationCapability::Visits->value];
+        }
+
+        $query = Delegation::where('bailleur_id', $landlord->id)
+            ->where('agent_id', $agentId)
+            ->whereIn('status', [DelegationStatus::Active, DelegationStatus::Pending]);
+
+        if (! empty($data['listing_ids']) && is_array($data['listing_ids'])) {
+            $query->whereIn('listing_id', $data['listing_ids']);
+        }
+
+        $delegations = $query->get();
+
+        foreach ($delegations as $delegation) {
+            $delegation->capabilities = $caps;
+            $delegation->save();
+        }
+
+        return $delegations->load(['bailleur', 'agent', 'listing']);
     }
 
     /**

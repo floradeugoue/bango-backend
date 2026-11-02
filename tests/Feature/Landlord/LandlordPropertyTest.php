@@ -7,6 +7,7 @@ use App\Enums\Visit\VisitReservationStatus;
 use App\Enums\Visit\VisitSlotStatus;
 use App\Models\Delegation\Delegation;
 use App\Models\Kyc\KycDocument;
+use App\Models\Kyc\KycSubmission;
 use App\Models\Listing\Listing;
 use App\Models\Subscription\Subscription;
 use App\Models\Subscription\SubscriptionPrice;
@@ -564,4 +565,150 @@ test('user can submit KYC documents securely to private storage', function (): v
 
     // Verify submitting KYC does NOT automatically verify user or activate badge
     expect($user->fresh()->is_verified)->toBeFalse();
+});
+
+it('accepts guided liveness frames, stores them and calculates face_match and liveness scores', function () {
+    Notification::fake();
+    Storage::fake('local');
+
+    $user = User::factory()->create([
+        'is_verified' => false,
+    ]);
+
+    Passport::actingAs($user);
+
+    $frontFile = UploadedFile::fake()->create('cni_front.jpg', 500, 'image/jpeg');
+    $backFile = UploadedFile::fake()->create('cni_back.jpg', 500, 'image/jpeg');
+    $selfieFront = UploadedFile::fake()->create('selfie_front.jpg', 600, 'image/jpeg');
+    $livenessLeft = UploadedFile::fake()->create('liveness_left.jpg', 600, 'image/jpeg');
+    $livenessRight = UploadedFile::fake()->create('liveness_right.jpg', 600, 'image/jpeg');
+
+    $response = $this->postJson('/api/landlord/kyc/submit', [
+        'id_type' => 'cni',
+        'id_number' => '1234567890',
+        'identity_front' => $frontFile,
+        'identity_back' => $backFile,
+        'selfie' => $selfieFront,
+        'liveness_frames' => [
+            $livenessLeft,
+            $livenessRight,
+        ],
+    ]);
+
+    $response->assertStatus(201)
+        ->assertJsonStructure([
+            'data' => [
+                'id',
+                'status',
+                'face_match' => ['score', 'passed'],
+                'liveness' => ['passed'],
+                'documents',
+            ],
+        ]);
+
+    expect($response->json('data.face_match.passed'))->toBeTrue();
+    expect($response->json('data.face_match.score'))->toBeGreaterThanOrEqual(80.0);
+    expect($response->json('data.liveness.passed'))->toBeTrue();
+
+    // 5 documents: front, back, selfie, 2 liveness frames
+    expect($response->json('data.documents'))->toHaveCount(5);
+
+    $submission = KycSubmission::findOrFail($response->json('data.id'));
+    expect($submission->documents()->where('kind', 'liveness_frame')->count())->toBe(2);
+    expect($submission->metadata['face_match']['passed'])->toBeTrue();
+    expect($submission->metadata['liveness']['passed'])->toBeTrue();
+});
+
+it('reopens closed future slots when listing transitions from taken back to published or reserved', function () {
+    $landlord = ($this->createLandlord)();
+    Passport::actingAs($landlord);
+
+    $listing = Listing::factory()->create([
+        'owner_id' => $landlord->id,
+        'created_by_id' => $landlord->id,
+        'status' => ListingStatus::Published,
+        'uses_agenda' => true,
+        'auto_confirm' => true,
+    ]);
+
+    // Créer des créneaux futurs pour le bien
+    $slot1 = VisitSlot::create([
+        'listing_id' => $listing->id,
+        'owner_id' => $landlord->id,
+        'start_at' => now()->addDays(2),
+        'end_at' => now()->addDays(2)->addMinutes(30),
+        'capacity' => 2,
+        'booked_count' => 0,
+        'status' => VisitSlotStatus::Open,
+    ]);
+    $slot2 = VisitSlot::create([
+        'listing_id' => $listing->id,
+        'owner_id' => $landlord->id,
+        'start_at' => now()->addDays(3),
+        'end_at' => now()->addDays(3)->addMinutes(30),
+        'capacity' => 2,
+        'booked_count' => 0,
+        'status' => VisitSlotStatus::Open,
+    ]);
+
+    // 1. Passer en taken ferme les créneaux futurs
+    $this->patchJson("/api/landlord/properties/{$listing->id}/status", [
+        'status' => 'taken',
+    ])->assertStatus(200);
+
+    $slot1->refresh();
+    $slot2->refresh();
+    expect($slot1->status)->toBe(VisitSlotStatus::Closed)
+        ->and($slot2->status)->toBe(VisitSlotStatus::Closed);
+
+    // 2. Remettre en published rouvre les créneaux futurs
+    $this->patchJson("/api/landlord/properties/{$listing->id}/status", [
+        'status' => 'published',
+    ])->assertStatus(200);
+
+    $slot1->refresh();
+    $slot2->refresh();
+    expect($slot1->status)->toBe(VisitSlotStatus::Open)
+        ->and($slot2->status)->toBe(VisitSlotStatus::Open);
+});
+
+it('PUT /api/landlord/properties/{id}/slots reopens closed future slots and regenerates schedule', function () {
+    $landlord = ($this->createLandlord)();
+    Passport::actingAs($landlord);
+
+    $listing = Listing::factory()->create([
+        'owner_id' => $landlord->id,
+        'created_by_id' => $landlord->id,
+        'status' => ListingStatus::Published,
+        'uses_agenda' => true,
+    ]);
+
+    $slot = VisitSlot::create([
+        'listing_id' => $listing->id,
+        'owner_id' => $landlord->id,
+        'start_at' => now()->addDays(2),
+        'end_at' => now()->addDays(2)->addMinutes(30),
+        'capacity' => 2,
+        'booked_count' => 0,
+        'status' => VisitSlotStatus::Closed,
+    ]);
+
+    // Envoi des horaires par PUT .../slots
+    $res = $this->putJson("/api/landlord/properties/{$listing->id}/slots", [
+        'days' => [
+            [
+                'day' => now()->addDays(2)->dayOfWeek,
+                'from' => '09:00',
+                'to' => '17:00',
+                'closed' => false,
+            ],
+        ],
+        'slot_duration_minutes' => 30,
+        'horizon_days' => 7,
+    ]);
+
+    $res->assertStatus(200);
+
+    $slot->refresh();
+    expect($slot->status)->toBe(VisitSlotStatus::Open);
 });

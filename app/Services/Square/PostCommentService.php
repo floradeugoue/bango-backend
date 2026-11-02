@@ -7,6 +7,7 @@ use App\Models\Square\PostComment;
 use App\Models\User;
 use App\Notifications\Social\SocialNotification;
 use App\Services\Admin\AutomatedTextFilterService;
+use App\Services\Translation\TranslationService;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
@@ -95,12 +96,18 @@ class PostCommentService
             }
         }
 
-        return DB::transaction(function () use ($post, $user, $body, $parentId, $parent) {
+        $activePage = request()?->attributes?->get('active_page');
+
+        return DB::transaction(function () use ($post, $user, $body, $parentId, $parent, $activePage) {
+            $language = app(TranslationService::class)->detectLanguage($body);
+
             $comment = PostComment::create([
                 'post_id' => $post->id,
                 'user_id' => $user->id,
+                'page_id' => $activePage?->id,
                 'parent_id' => $parentId,
                 'body' => $body,
+                'language' => $language,
                 'likes_count' => 0,
                 'dislikes_count' => 0,
                 'replies_count' => 0,
@@ -120,12 +127,14 @@ class PostCommentService
                 ->scanText($body, 'comment', $comment->id, $user);
 
             // Notifications sociales : commentaire, réponse et mentions
+            $targetPageId = $post->page_id ?? null;
             if ($parentId && $parent && $parent->user_id !== $user->id) {
                 $parentAuthor = User::find($parent->user_id);
                 if ($parentAuthor) {
                     $parentAuthor->notify(new SocialNotification('reply', $user, [
                         'post_id' => $post->id,
                         'comment_id' => $comment->id,
+                        'page_id' => $targetPageId,
                         'text' => $body,
                     ]));
                 }
@@ -135,6 +144,7 @@ class PostCommentService
                     $postAuthor->notify(new SocialNotification('comment', $user, [
                         'post_id' => $post->id,
                         'comment_id' => $comment->id,
+                        'page_id' => $targetPageId,
                         'text' => $body,
                     ]));
                 }
@@ -149,6 +159,7 @@ class PostCommentService
                     $mentioned->notify(new SocialNotification('mention', $user, [
                         'post_id' => $post->id,
                         'comment_id' => $comment->id,
+                        'page_id' => $targetPageId,
                         'text' => $body,
                     ]));
                 }

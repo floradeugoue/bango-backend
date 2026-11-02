@@ -197,3 +197,116 @@ test('publishing an unmatching listing does not notify user', function (): void 
 
     Notification::assertNotSentTo($this->user, NewMatchingListingNotification::class);
 });
+
+test('alert can be disabled with enabled=false and disabled_at is populated', function (): void {
+    Passport::actingAs($this->user);
+
+    $createRes = $this->postJson('/api/listings/alerts', [
+        'name' => 'Alerte Bonanjo',
+        'city' => 'Douala',
+    ])->assertCreated();
+
+    expect($createRes->json('enabled'))->toBeTrue()
+        ->and($createRes->json('disabled_at'))->toBeNull();
+
+    $alertId = $createRes->json('id');
+
+    // Désactiver l'alerte
+    $updateRes = $this->patchJson("/api/listings/alerts/{$alertId}", [
+        'enabled' => false,
+    ])->assertOk();
+
+    expect($updateRes->json('enabled'))->toBeFalse()
+        ->and($updateRes->json('disabled_at'))->not->toBeNull();
+
+    // Réactiver l'alerte
+    $reactivateRes = $this->patchJson("/api/listings/alerts/{$alertId}", [
+        'enabled' => true,
+    ])->assertOk();
+
+    expect($reactivateRes->json('enabled'))->toBeTrue()
+        ->and($reactivateRes->json('disabled_at'))->toBeNull();
+});
+
+test('disabled alert does not receive notifications when matching listing is published', function (): void {
+    Notification::fake();
+
+    // Alerte éteinte (enabled = false)
+    ListingAlert::create([
+        'user_id' => $this->user->id,
+        'name' => 'Alerte Éteinte',
+        'city' => 'Douala',
+        'frequency' => 'instant',
+        'enabled' => false,
+        'disabled_at' => now(),
+    ]);
+
+    $matchingListing = Listing::factory()->create([
+        'owner_id' => $this->owner->id,
+        'title' => 'Appartement Douala',
+        'status' => ListingStatus::Published,
+        'city' => 'Douala',
+        'published_at' => now(),
+    ]);
+
+    $listener = new NotifyMatchingHousingSearches;
+    $listener->handle(new ListingPublished($matchingListing));
+
+    // Aucune notification car l'alerte est désactivée
+    Notification::assertNotSentTo($this->user, NewMatchingListingNotification::class);
+});
+
+test('alert can be paused with is_active=false preserving push and email channels and ignoring notifications', function (): void {
+    Notification::fake();
+    Passport::actingAs($this->user);
+
+    // 1. Création d'une alerte avec push et email activés
+    $createRes = $this->postJson('/api/listings/alerts', [
+        'name' => 'Alerte Dakar Plateau',
+        'city' => 'Dakar',
+        'push' => true,
+        'email' => true,
+        'is_active' => true,
+    ])->assertCreated();
+
+    expect($createRes->json('is_active'))->toBeTrue()
+        ->and($createRes->json('enabled'))->toBeTrue()
+        ->and($createRes->json('push'))->toBeTrue()
+        ->and($createRes->json('email'))->toBeTrue();
+
+    $alertId = $createRes->json('id');
+
+    // 2. Mettre en pause l'alerte (interrupteur UI : is_active = false)
+    $pauseRes = $this->patchJson("/api/listings/alerts/{$alertId}", [
+        'is_active' => false,
+    ])->assertOk();
+
+    expect($pauseRes->json('is_active'))->toBeFalse()
+        ->and($pauseRes->json('enabled'))->toBeFalse()
+        ->and($pauseRes->json('push'))->toBeTrue()
+        ->and($pauseRes->json('email'))->toBeTrue();
+
+    // 3. Un bien correspondant est publié, aucune notification ne doit être envoyée
+    $matchingListing = Listing::factory()->create([
+        'owner_id' => $this->owner->id,
+        'title' => 'Studio Dakar Plateau',
+        'status' => ListingStatus::Published,
+        'city' => 'Dakar',
+        'published_at' => now(),
+    ]);
+
+    $listener = new NotifyMatchingHousingSearches;
+    $listener->handle(new ListingPublished($matchingListing));
+
+    Notification::assertNotSentTo($this->user, NewMatchingListingNotification::class);
+
+    // 4. Rallumer l'alerte (is_active = true) : les canaux push et email sont toujours intacts
+    $resumeRes = $this->patchJson("/api/listings/alerts/{$alertId}", [
+        'is_active' => true,
+    ])->assertOk();
+
+    expect($resumeRes->json('is_active'))->toBeTrue()
+        ->and($resumeRes->json('enabled'))->toBeTrue()
+        ->and($resumeRes->json('push'))->toBeTrue()
+        ->and($resumeRes->json('email'))->toBeTrue();
+});

@@ -2,10 +2,12 @@
 
 namespace App\Services\Subscription;
 
+use App\Enums\Page\PageCertificationStatus;
 use App\Models\Subscription\Subscription;
 use App\Models\Subscription\SubscriptionEvent;
 use App\Models\Subscription\SubscriptionPrice;
 use App\Models\User;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -93,19 +95,31 @@ class SubscriptionService
             $product = $price->product;
             $now = now();
             $durationDays = $price->duration_days ?: 30;
-            $periodEnd = $now->copy()->addDays($durationDays);
+            $periodEnd = isset($metadata['custom_period_end'])
+                ? Carbon::parse($metadata['custom_period_end'])
+                : (isset($metadata['period_end'])
+                    ? Carbon::parse($metadata['period_end'])
+                    : $now->copy()->addDays($durationDays));
+
+            $pageId = isset($metadata['page_id']) ? (int) $metadata['page_id'] : null;
 
             // Find existing subscription for this badge type or create new
-            $subscription = Subscription::where('user_id', $user->id)
-                ->where('badge_type', $product->badge_type ?: $product->code)
-                ->lockForUpdate()
-                ->first();
+            $query = Subscription::where('user_id', $user->id)
+                ->where('badge_type', $product->badge_type ?: $product->code);
+
+            if ($pageId) {
+                $query->where('page_id', $pageId);
+            } else {
+                $query->whereNull('page_id');
+            }
+
+            $subscription = $query->lockForUpdate()->first();
 
             $oldState = $subscription?->state;
 
             if ($subscription) {
-                // If currently active, extend from current_period_end instead of now
-                if ($subscription->isActive()) {
+                // If currently active and no explicit period_end was provided in metadata, extend from current_period_end instead of now
+                if ($subscription->isActive() && ! isset($metadata['custom_period_end']) && ! isset($metadata['period_end'])) {
                     $periodEnd = $subscription->current_period_end->copy()->addDays($durationDays);
                 }
 
@@ -131,6 +145,7 @@ class SubscriptionService
             } else {
                 $subscription = Subscription::create([
                     'user_id' => $user->id,
+                    'page_id' => $pageId,
                     'product_id' => $product->id,
                     'price_id' => $price->id,
                     'badge_type' => $product->badge_type ?: $product->code,
@@ -299,6 +314,13 @@ class SubscriptionService
 
             // Re-evaluate badge status
             $this->badgeService->syncUserBadge($subscription->user, 'system', null, $reason);
+
+            // Si c'est un abonnement rattaché à une Page (ex: page_pro / certification)
+            if ($subscription->page_id && $subscription->page) {
+                $subscription->page->update([
+                    'certification_status' => PageCertificationStatus::Lapsed,
+                ]);
+            }
 
             return $subscription;
         });

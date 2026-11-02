@@ -30,6 +30,7 @@ class SupportTicketReplyNotification extends Notification implements ShouldQueue
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
         $senderName = $this->ticketMessage->sender?->name ?? 'Support BANGO';
         $preview = mb_substr($this->ticketMessage->message, 0, 100);
 
@@ -42,7 +43,7 @@ class SupportTicketReplyNotification extends Notification implements ShouldQueue
             'sender_id' => $this->ticketMessage->sender_id,
             'sender_name' => $senderName,
             'preview' => $preview,
-            'title' => "Réponse au ticket {$this->ticket->reference}",
+            'title' => trans('notifications.support_ticket_reply.title', ['reference' => $this->ticket->reference], $locale),
             'created_at' => $this->ticketMessage->created_at?->toIso8601String(),
         ];
     }

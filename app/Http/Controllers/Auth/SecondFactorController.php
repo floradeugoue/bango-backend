@@ -195,7 +195,20 @@ class SecondFactorController extends Controller
         }
 
         $deviceName = $data['device_name'] ?? 'Application mobile';
-        $token = $user->createToken($deviceName)->accessToken;
+        $deviceId = $data['device_id'] ?? null;
+        $tokenName = $deviceId ? "{$deviceName}::{$deviceId}" : $deviceName;
+
+        // Révoquer les anciens jetons du même appareil (par device_id ou device_name)
+        if ($deviceId) {
+            $user->tokens()->where(function ($query) use ($deviceId, $deviceName) {
+                $query->where('name', 'like', "%::{$deviceId}")
+                    ->orWhere('name', $deviceName);
+            })->delete();
+        } else {
+            $user->tokens()->where('name', $deviceName)->delete();
+        }
+
+        $token = $user->createToken($tokenName)->accessToken;
 
         $responsePayload = [
             'token' => $token,

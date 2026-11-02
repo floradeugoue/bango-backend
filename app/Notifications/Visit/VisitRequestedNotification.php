@@ -42,6 +42,9 @@ class VisitRequestedNotification extends Notification implements ShouldQueue
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
+        $title = $this->reservation->listing->title ?? '';
+
         return [
             'type' => 'visit_requested',
             'reservation_id' => $this->reservation->id,
@@ -50,7 +53,8 @@ class VisitRequestedNotification extends Notification implements ShouldQueue
             'prospect_id' => $this->reservation->prospect_id,
             'fee_amount' => $this->reservation->fee_amount,
             'scheduled_at' => $this->reservation->slot->start_at->toIso8601String(),
-            'message' => "Nouvelle demande de visite pour {$this->reservation->listing->title}",
+            'title' => trans('notifications.visit_requested.title', [], $locale),
+            'message' => trans('notifications.visit_requested.body', ['title' => $title], $locale),
         ];
     }
 }

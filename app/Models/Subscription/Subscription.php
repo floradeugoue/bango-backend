@@ -2,6 +2,7 @@
 
 namespace App\Models\Subscription;
 
+use App\Models\Page\Page;
 use App\Models\Payment\PaymentTransaction;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
@@ -16,6 +17,7 @@ class Subscription extends Model
 
     protected $fillable = [
         'user_id',
+        'page_id',
         'product_id',
         'price_id',
         'badge_type',
@@ -54,6 +56,11 @@ class Subscription extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function page(): BelongsTo
+    {
+        return $this->belongsTo(Page::class, 'page_id');
     }
 
     public function product(): BelongsTo

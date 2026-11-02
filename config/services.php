@@ -74,4 +74,10 @@ return [
         'salt' => env('CONTACT_MATCHING_SALT', 'bango_contact_salt_secret_2026'),
     ],
 
+    'translation' => [
+        'driver' => env('TRANSLATION_DRIVER', 'google'),
+        'google_api_key' => env('GOOGLE_TRANSLATE_API_KEY', env('GOOGLE_CLOUD_TRANSLATION_API_KEY')),
+        'deepl_api_key' => env('DEEPL_API_KEY'),
+    ],
+
 ];

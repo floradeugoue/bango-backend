@@ -28,7 +28,7 @@ class MessageController extends Controller
     public function index(string $threadId, Request $request): AnonymousResourceCollection
     {
         /** @var Conversation $thread */
-        $thread = Conversation::query()->findOrFail($threadId);
+        $thread = Conversation::withTrashed()->findOrFail($threadId);
 
         Gate::authorize('view', $thread);
 
@@ -49,7 +49,7 @@ class MessageController extends Controller
     public function store(string $threadId, StoreMessageRequest $request): JsonResponse
     {
         /** @var Conversation $thread */
-        $thread = Conversation::query()->findOrFail($threadId);
+        $thread = Conversation::withTrashed()->findOrFail($threadId);
 
         Gate::authorize('sendMessage', $thread);
 

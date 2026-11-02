@@ -74,6 +74,8 @@ class FollowRequestController extends Controller
 
         $sender->notify(new SocialNotification('follow', $user));
 
+        $user->syncFollowerCertificationThreshold();
+
         $followRequest->delete();
 
         return response()->json(['success' => true]);

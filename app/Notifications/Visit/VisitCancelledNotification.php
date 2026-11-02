@@ -41,12 +41,20 @@ class VisitCancelledNotification extends Notification implements ShouldQueue
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
+        $title = $this->reservation->listing->title ?? '';
+
+        $message = $this->reason
+            ? $this->reason
+            : trans('notifications.visit_cancelled.body', ['title' => $title], $locale);
+
         return [
             'type' => 'visit_cancelled',
             'reservation_id' => $this->reservation->id,
             'listing_id' => $this->reservation->listing_id,
             'reason' => $this->reason,
-            'message' => "La visite pour {$this->reservation->listing->title} a été annulée.",
+            'title' => trans('notifications.visit_cancelled.title', [], $locale),
+            'message' => $message,
         ];
     }
 }

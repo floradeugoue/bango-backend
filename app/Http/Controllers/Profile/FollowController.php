@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Profile;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\FollowUserResource;
+use App\Models\Profile\Follow;
 use App\Models\Profile\FollowRequest;
 use App\Models\User;
 use App\Notifications\Social\SocialNotification;
@@ -23,6 +24,30 @@ class FollowController extends Controller
         $actor = $request->user();
         /** @var User $target */
         $target = User::findOrFail($id);
+
+        $activePage = $request->attributes->get('active_page');
+
+        if ($activePage) {
+            $isFollowing = Follow::where('follower_page_id', $activePage->id)
+                ->where('following_id', $target->id)
+                ->exists();
+
+            if ($isFollowing) {
+                return response()->json([
+                    'status' => 'already_following',
+                ], 200);
+            }
+
+            Follow::firstOrCreate([
+                'follower_id' => $actor->id,
+                'follower_page_id' => $activePage->id,
+                'following_id' => $target->id,
+            ]);
+
+            return response()->json([
+                'status' => 'followed',
+            ], 200);
+        }
 
         if ($actor->id === $target->id) {
             return response()->json([
@@ -65,6 +90,9 @@ class FollowController extends Controller
         // Attribution publicitaire automatique (Boost) si impression < 24h
         app(CampaignAttributionService::class)->attributeFollow($actor, $target);
 
+        // Seuil automatique de certification à 600 000 abonnés
+        $target->syncFollowerCertificationThreshold();
+
         return response()->json([
             'status' => 'followed',
         ], 200);
@@ -80,11 +108,28 @@ class FollowController extends Controller
         /** @var User $target */
         $target = User::findOrFail($id);
 
+        $activePage = $request->attributes->get('active_page');
+
+        if ($activePage) {
+            $deleted = Follow::where('follower_page_id', $activePage->id)
+                ->where('following_id', $target->id)
+                ->delete();
+
+            if ($deleted) {
+                $target->syncFollowerCertificationThreshold();
+            }
+
+            return response()->json([
+                'status' => $deleted ? 'unfollowed' : 'unchanged',
+            ], 200);
+        }
+
         $wasFollowing = $actor->isFollowing($target);
         $wasRequested = $actor->hasRequestedToFollow($target);
 
         if ($wasFollowing) {
             $actor->following()->detach($target->id);
+            $target->syncFollowerCertificationThreshold();
             $status = 'unfollowed';
         } elseif ($wasRequested) {
             $actor->sentFollowRequests()->where('to_id', $target->id)->delete();
@@ -168,7 +213,16 @@ class FollowController extends Controller
             return response()->json(['message' => 'Ce compte est privé ou inaccessible.'], 403);
         }
 
-        $query = $target->following();
+        $activePage = $request->attributes->get('active_page');
+
+        if ($activePage && (! $id || (int) $id === (int) $actor?->id)) {
+            $query = User::query()
+                ->join('follows', 'users.id', '=', 'follows.following_id')
+                ->where('follows.follower_page_id', $activePage->id)
+                ->select('users.*');
+        } else {
+            $query = $target->following();
+        }
 
         if ($request->filled('query')) {
             $needle = '%'.strtolower($request->query('query')).'%';

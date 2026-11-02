@@ -11,7 +11,9 @@ use App\Models\Payment\PaymentTransaction;
 use App\Models\User;
 use App\Models\Visit\VisitReservation;
 use App\Models\Visit\VisitSlot;
+use App\Notifications\Visit\VisitCancelledNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Notification;
 use Laravel\Passport\Passport;
 
 uses(RefreshDatabase::class);
@@ -259,4 +261,91 @@ test('prospect rejecting a proposal cancels visit with full refund', function ()
     $rejectResponse->assertOk();
     expect($rejectResponse->json('data.status'))->toBe(VisitReservationStatus::Refunded->value)
         ->and((float) $rejectResponse->json('data.refund_amount'))->toEqual(5000.0);
+});
+
+test('marking property taken refunds paid visits in requested or proposed status and notifies prospects', function (): void {
+    Notification::fake();
+
+    // 1. Visite 1 : requested avec transaction de paiement payée
+    $transaction1 = PaymentTransaction::create([
+        'user_id' => $this->prospect->id,
+        'service_type' => PaymentServiceType::Visit,
+        'payable_type' => VisitReservation::class,
+        'payable_id' => $this->reservation->id,
+        'provider' => PaymentProvider::Monetbil,
+        'channel' => PaymentChannel::MobileMoney,
+        'currency' => 'XAF',
+        'amount' => 5000,
+        'status' => PaymentStatus::Confirmed,
+        'idempotency_key' => 'TX-TEST-'.Str::random(8),
+        'total_amount' => 5000,
+        'amount_charged' => 5000,
+    ]);
+    $this->reservation->update([
+        'status' => VisitReservationStatus::Requested,
+        'transaction_id' => $transaction1->id,
+        'paid_at' => now(),
+    ]);
+
+    // 2. Visite 2 : proposed avec paiement par crédit BANGO
+    $slot2 = VisitSlot::create([
+        'listing_id' => $this->listing->id,
+        'owner_id' => $this->owner->id,
+        'start_at' => now()->addDays(5)->setTime(10, 0),
+        'end_at' => now()->addDays(5)->setTime(10, 30),
+        'capacity' => 1,
+        'booked_count' => 0,
+        'status' => VisitSlotStatus::Open,
+    ]);
+    $reservation2 = VisitReservation::create([
+        'listing_id' => $this->listing->id,
+        'slot_id' => $slot2->id,
+        'prospect_id' => $this->otherProspect->id,
+        'owner_id' => $this->owner->id,
+        'status' => VisitReservationStatus::Proposed,
+        'fee' => 5000,
+        'currency' => 'XAF',
+        'payment_reference' => 'VISIT-CREDIT-999',
+        'paid_at' => now(),
+    ]);
+
+    // 3. Le bailleur marque le bien comme pris / loué (taken)
+    Passport::actingAs($this->owner);
+    $patchRes = $this->patchJson("/api/listings/{$this->listing->id}/status", [
+        'status' => 'taken',
+    ])->assertOk();
+
+    // Vérifier que les 2 visites ont été remboursées
+    $this->reservation->refresh();
+    $reservation2->refresh();
+
+    expect($this->reservation->status)->toBe(VisitReservationStatus::Refunded)
+        ->and((float) $this->reservation->refund_amount)->toEqual(5000.0)
+        ->and($this->reservation->refund_channel)->toBe('bango_credit');
+
+    expect($reservation2->status)->toBe(VisitReservationStatus::Refunded)
+        ->and((float) $reservation2->refund_amount)->toEqual(5000.0)
+        ->and($reservation2->refund_channel)->toBe('bango_credit');
+
+    // Vérifier que chaque prospect a reçu une notification individuelle
+    Notification::assertSentTo(
+        $this->prospect,
+        VisitCancelledNotification::class
+    );
+    Notification::assertSentTo(
+        $this->otherProspect,
+        VisitCancelledNotification::class
+    );
+
+    // 4. Les créneaux futurs ont été fermés
+    expect($this->slot->fresh()->status)->toBe(VisitSlotStatus::Closed)
+        ->and($slot2->fresh()->status)->toBe(VisitSlotStatus::Closed);
+
+    // 5. Remettre le bien en disponible (published) rouvre les créneaux futurs
+    $this->patchJson("/api/listings/{$this->listing->id}/status", [
+        'status' => 'published',
+    ])->assertOk();
+
+    expect($this->slot->fresh()->status)->toBe(VisitSlotStatus::Open)
+        ->and($slot2->fresh()->status)->toBe(VisitSlotStatus::Open);
 });

@@ -38,12 +38,15 @@ class CampaignSuspendedNotification extends Notification implements ShouldQueue
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
+
         return [
             'type' => 'campaign_suspended',
             'campaign_id' => $this->campaign->id,
             'page_id' => $this->campaign->page_id,
             'reason' => $this->reason,
-            'message' => "Votre campagne de boost a été suspendue : {$this->reason}.",
+            'title' => trans('notifications.campaign_suspended.title', [], $locale),
+            'message' => trans('notifications.campaign_suspended.body', ['reason' => $this->reason], $locale),
         ];
     }
 }

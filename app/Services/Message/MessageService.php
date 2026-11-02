@@ -35,7 +35,8 @@ class MessageService
         $member?->markAsDelivered();
 
         return $conversation->messages()
-            ->with(['sender:id,name,handle,avatar_url', 'replyTo', 'conversation.members'])
+            ->visibleTo($user->id)
+            ->with(['sender:id,name,display_name,handle,avatar_url,is_verified,is_certified', 'replyTo', 'conversation.members'])
             ->orderBy('created_at', 'desc')
             ->paginate($perPage);
     }
@@ -56,8 +57,14 @@ class MessageService
         if ($conversation->status === 'pending' && $conversation->created_by_id !== $sender->id) {
             throw new AccessDeniedHttpException('Vous devez accepter cette demande de message avant de pouvoir y répondre.');
         }
-        if ($conversation->status === 'rejected') {
-            throw new AccessDeniedHttpException('Cette demande de message a été refusée.');
+        // Vérification si le groupe / fil est en lecture seule (groupe supprimé)
+        if ($conversation->is_read_only) {
+            throw new AccessDeniedHttpException('Cette conversation est en lecture seule.');
+        }
+
+        // Vérification de la restriction admins_only pour les groupes
+        if ($conversation->admins_only && ! $conversation->isAdmin($sender->id)) {
+            throw new AccessDeniedHttpException('Seuls les administrateurs peuvent envoyer des messages dans ce groupe.');
         }
 
         // 2. Vérification des permissions immobilières de l'agent (MS-20 / AG)
@@ -115,9 +122,12 @@ class MessageService
                 $metadata['undelivered'] = true;
             }
 
+            $activePage = request()?->attributes?->get('active_page');
+
             $message = Message::create([
                 'conversation_id' => $conversation->id,
                 'sender_id' => $sender->id,
+                'page_id' => $activePage?->id,
                 'type' => $type,
                 'body' => $data['body'] ?? null,
                 'client_message_id' => $data['client_message_id'] ?? null,

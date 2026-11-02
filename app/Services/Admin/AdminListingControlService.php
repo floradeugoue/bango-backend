@@ -3,7 +3,9 @@
 namespace App\Services\Admin;
 
 use App\Enums\Boost\CampaignStatus;
+use App\Enums\Boost\CreditTransactionType;
 use App\Enums\Listing\ListingStatus;
+use App\Enums\Payment\PaymentStatus;
 use App\Enums\Visit\VisitReservationStatus;
 use App\Enums\Visit\VisitSlotStatus;
 use App\Events\Listing\ListingPublished;
@@ -16,6 +18,9 @@ use App\Models\User;
 use App\Models\Visit\VisitReservation;
 use App\Models\Visit\VisitSlot;
 use App\Notifications\Listing\ListingDecisionNotification;
+use App\Notifications\Visit\VisitCancelledNotification;
+use App\Services\Admin\Finance\AdminPayoutService;
+use App\Services\Boost\CreditWalletService;
 use App\Services\Payment\PaymentEngineService;
 use DomainException;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -729,24 +734,70 @@ class AdminListingControlService
             $visit->cancellation_reason = $reason;
             $visit->lock_expires_at = null;
 
-            if ($wasConfirmed && $visit->fee_amount > 0 && $visit->paymentTransaction) {
+            $isCreditPaid = str_starts_with((string) $visit->payment_reference, 'VISIT-CREDIT-');
+            $hasPaidTransaction = $visit->paymentTransaction && $visit->paymentTransaction->status === PaymentStatus::Confirmed;
+            $isPaid = ($hasPaidTransaction || $isCreditPaid || $visit->paid_at !== null) && (float) $visit->fee_amount > 0;
+
+            if ($isPaid) {
                 try {
-                    $this->paymentEngineService->refundTransaction(
-                        transaction: $visit->paymentTransaction,
-                        reason: $reason,
-                        amount: (float) $visit->fee_amount,
-                        externalRefundReference: 'REFUND-AUTO-'.$visit->id
-                    );
+                    if ($isCreditPaid) {
+                        $prospect = $visit->prospect ?? User::find($visit->prospect_id);
+                        if ($prospect) {
+                            app(CreditWalletService::class)->credit(
+                                account: $prospect,
+                                amount: (float) $visit->fee_amount,
+                                type: CreditTransactionType::Deposit,
+                                description: sprintf('Remboursement visite annonce #%s', $visit->listing_id),
+                                idempotencyKey: 'REFUND-AUTO-'.$visit->id,
+                                reference: $visit,
+                                metadata: [
+                                    'reservation_id' => $visit->id,
+                                    'listing_id' => $visit->listing_id,
+                                    'reason' => $reason,
+                                ],
+                                source: 'visit_refund',
+                                refCode: 'REFUND-AUTO-'.$visit->id,
+                            );
+                        }
+                    } elseif ($visit->paymentTransaction) {
+                        $this->paymentEngineService->refundTransaction(
+                            transaction: $visit->paymentTransaction,
+                            reason: $reason,
+                            amount: (float) $visit->fee_amount,
+                            externalRefundReference: 'REFUND-AUTO-'.$visit->id
+                        );
+                    }
+
                     $visit->status = VisitReservationStatus::Refunded;
                     $visit->refund_amount = $visit->fee_amount;
                     $visit->refunded_at = $now;
                     $visit->refund_channel = 'bango_credit';
+
+                    try {
+                        app(AdminPayoutService::class)->cancelScheduledPayoutForVisit($visit);
+                    } catch (\Throwable $e) {
+                        // ignore
+                    }
                 } catch (\Throwable $e) {
                     Log::warning("Échec du remboursement automatique de la visite {$visit->id} : {$e->getMessage()}");
                 }
             }
 
             $visit->save();
+
+            // Notifier individuellement chaque prospect
+            try {
+                $prospect = $visit->prospect ?? User::find($visit->prospect_id);
+                if ($prospect) {
+                    $refundMsg = $isPaid
+                        ? "Visite annulée : le bien {$listing->title} a été loué. Les frais de visite vous ont été remboursés en crédit BANGO."
+                        : "Visite annulée : le bien {$listing->title} a été loué.";
+                    $prospect->notify(new VisitCancelledNotification($visit, $refundMsg));
+                }
+            } catch (\Throwable $e) {
+                Log::warning("Échec de la notification d'annulation au prospect de la visite {$visit->id} : {$e->getMessage()}");
+            }
+
             $count++;
         }
 
@@ -826,13 +877,22 @@ class AdminListingControlService
                 ->where('created_at', '<', $slaLimit);
         }
 
-        // 4. Recherche textuelle
+        // 3b. Filtre visites en litige (attendance contradictoire)
+        if (isset($filters['disputed']) && filter_var($filters['disputed'], FILTER_VALIDATE_BOOLEAN)) {
+            $query->whereNotNull('disputed_at');
+        }
+
+        // 4. Recherche textuelle (supporte également payment_reference, référence courte ou ID)
         if (! empty($filters['q'])) {
             $search = strtolower(trim((string) $filters['q']));
-            $query->where(function (Builder $q) use ($search) {
-                $q->whereHas('prospect', fn ($pq) => $pq->where('name', 'LIKE', "%{$search}%")->orWhere('email', 'LIKE', "%{$search}%"))
-                    ->orWhereHas('owner', fn ($oq) => $oq->where('name', 'LIKE', "%{$search}%")->orWhere('email', 'LIKE', "%{$search}%"))
-                    ->orWhereHas('listing', fn ($lq) => $lq->where('title', 'LIKE', "%{$search}%"));
+            $like = DB::connection()->getDriverName() === 'pgsql' ? 'ILIKE' : 'LIKE';
+
+            $query->where(function (Builder $q) use ($search, $like) {
+                $q->where('payment_reference', $like, "%{$search}%")
+                    ->orWhereRaw("CAST(id AS TEXT) {$like} ?", ["%{$search}%"])
+                    ->orWhereHas('prospect', fn ($pq) => $pq->where('name', $like, "%{$search}%")->orWhere('email', $like, "%{$search}%")->orWhere('phone', $like, "%{$search}%"))
+                    ->orWhereHas('owner', fn ($oq) => $oq->where('name', $like, "%{$search}%")->orWhere('email', $like, "%{$search}%")->orWhere('phone', $like, "%{$search}%"))
+                    ->orWhereHas('listing', fn ($lq) => $lq->where('title', $like, "%{$search}%"));
             });
         }
 

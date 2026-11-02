@@ -26,17 +26,32 @@ class PostLikeService
             throw new AuthorizationException('Vous n\'êtes pas autorisé à interagir avec cette publication.');
         }
 
-        return DB::transaction(function () use ($post, $user) {
-            $like = PostLike::firstOrCreate(
-                ['post_id' => $post->id, 'user_id' => $user->id]
-            );
+        $activePage = request()?->attributes?->get('active_page');
+
+        return DB::transaction(function () use ($post, $user, $activePage) {
+            $attributes = ['post_id' => $post->id];
+            if ($activePage) {
+                $attributes['page_id'] = $activePage->id;
+            } else {
+                $attributes['user_id'] = $user->id;
+            }
+
+            $like = PostLike::firstOrCreate($attributes, [
+                'user_id' => $user->id,
+                'page_id' => $activePage?->id,
+            ]);
 
             if ($like->wasRecentlyCreated) {
                 Post::where('id', $post->id)->increment('likes_count');
                 if ($post->user_id && $post->user_id !== $user->id) {
                     $author = User::find($post->user_id);
                     if ($author) {
-                        $author->notify(new SocialNotification('like', $user, ['post_id' => $post->id]));
+                        $targetPageId = $post->page_id ?? null;
+                        $author->notify(new SocialNotification('like', $user, [
+                            'post_id' => $post->id,
+                            'page_id' => $targetPageId,
+                            'actor_page_id' => $activePage?->id,
+                        ]));
                     }
                 }
             }
@@ -63,10 +78,17 @@ class PostLikeService
             throw new AuthorizationException('Vous n\'êtes pas autorisé à interagir avec cette publication.');
         }
 
-        return DB::transaction(function () use ($post, $user) {
-            $deleted = PostLike::where('post_id', $post->id)
-                ->where('user_id', $user->id)
-                ->delete();
+        $activePage = request()?->attributes?->get('active_page');
+
+        return DB::transaction(function () use ($post, $user, $activePage) {
+            $query = PostLike::where('post_id', $post->id);
+            if ($activePage) {
+                $query->where('page_id', $activePage->id);
+            } else {
+                $query->where('user_id', $user->id)->whereNull('page_id');
+            }
+
+            $deleted = $query->delete();
 
             if ($deleted > 0) {
                 Post::where('id', $post->id)
@@ -125,11 +147,23 @@ class PostLikeService
     }
 
     /**
-     * Récupère la liste paginée des publications aimées par un utilisateur (les plus récentes d'abord).
+     * Récupère la liste paginée des publications aimées par un utilisateur ou sa page active (les plus récentes d'abord).
      */
     public function getLikedPosts(User $user, int $perPage = 15): LengthAwarePaginator
     {
         $perPage = min(max($perPage, 1), 50);
+        $activePage = request()?->attributes?->get('active_page');
+
+        if ($activePage) {
+            return Post::query()
+                ->join('post_likes', 'posts.id', '=', 'post_likes.post_id')
+                ->where('post_likes.page_id', $activePage->id)
+                ->select('posts.*')
+                ->with(['media.tags.user', 'hashtags', 'user', 'page'])
+                ->with(['likes' => fn ($q) => $q->where('page_id', $activePage->id)])
+                ->orderByDesc('post_likes.created_at')
+                ->paginate($perPage);
+        }
 
         return $user->likedPosts()
             ->with(['media.tags.user', 'hashtags', 'user'])

@@ -10,6 +10,7 @@ enum PageCertificationStatus: string
     case Approved = 'approved';
     case Rejected = 'rejected';
     case Suspended = 'suspended';
+    case Lapsed = 'lapsed';
 
     public function label(): string
     {
@@ -20,6 +21,7 @@ enum PageCertificationStatus: string
             self::Approved => 'Certifiée officielle',
             self::Rejected => 'Dossier rejeté',
             self::Suspended => 'Certification suspendue',
+            self::Lapsed => 'Certification expirée',
         };
     }
 

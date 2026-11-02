@@ -70,7 +70,9 @@ class SigninController extends Controller
 
         RateLimiter::clear($key);
 
+        $deviceId = $request->input('device_id') ?: $request->header('X-Device-Id');
         $deviceName = $request->input('device_name') ?: $request->header('X-Device-Name') ?: 'Application mobile';
+        $tokenName = $deviceId ? "{$deviceName}::{$deviceId}" : $deviceName;
 
         // 2FA check
         if (! empty($user->two_factor_method) && $user->two_factor_method !== 'off') {
@@ -106,6 +108,7 @@ class SigninController extends Controller
                 'user_id' => $user->id,
                 'persistent' => $request->boolean('persistent'),
                 'device_name' => $deviceName,
+                'device_id' => $deviceId,
                 'destination' => $destination,
                 'channel' => $channel,
             ], now()->addMinutes(10));
@@ -139,13 +142,23 @@ class SigninController extends Controller
             ], 200);
         }
 
+        // Révoquer les anciens jetons du même appareil (par device_id ou device_name)
+        if ($deviceId) {
+            $user->tokens()->where(function ($query) use ($deviceId, $deviceName) {
+                $query->where('name', 'like', "%::{$deviceId}")
+                    ->orWhere('name', $deviceName);
+            })->delete();
+        } else {
+            $user->tokens()->where('name', $deviceName)->delete();
+        }
+
         if ($request->boolean('persistent')) {
             Passport::personalAccessTokensExpireIn(now()->addYear());
         } else {
             Passport::personalAccessTokensExpireIn(now()->addDays(7));
         }
 
-        $token = $user->createToken($deviceName)->accessToken;
+        $token = $user->createToken($tokenName)->accessToken;
 
         return response()->json([
             'token' => $token,

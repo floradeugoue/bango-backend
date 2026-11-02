@@ -106,11 +106,35 @@ class PaymentController extends Controller
             }
         }
 
+        $alignWith = $request->input('align_with');
+        $proratedBaseAmount = null;
+
+        if ($serviceType === PaymentServiceType::Subscription && $alignWith) {
+            $alignSub = $user?->subscriptions()
+                ->where('badge_type', $alignWith)
+                ->where('state', 'active')
+                ->where('current_period_end', '>', now())
+                ->first();
+
+            if ($alignSub) {
+                $customPeriodEnd = $alignSub->current_period_end;
+                $remainingDays = max(1, now()->diffInDays($customPeriodEnd, false));
+                $priceId = (int) $request->input('price_id');
+                /** @var SubscriptionPrice|null $price */
+                $price = SubscriptionPrice::find($priceId);
+                if ($price) {
+                    $baseDurationDays = $price->duration_days ?: ($price->cadence === 'yearly' ? 365 : 30);
+                    $ratio = min(1.0, max(0.0, $remainingDays / $baseDurationDays));
+                    $proratedBaseAmount = round((float) $price->price_amount * $ratio, 2);
+                }
+            }
+        }
+
         // 2. Calcul du devis via PricingService
         $quote = $this->pricingService->calculateQuote(
             serviceType: $serviceType,
             priceId: $request->input('price_id'),
-            customAmount: $request->getCustomAmount(),
+            customAmount: $proratedBaseAmount ?? $request->getCustomAmount(),
             gateway: $request->getGateway()
         );
 
@@ -138,6 +162,8 @@ class PaymentController extends Controller
             'total_amount' => (float) $quote->totalAmount,
             'gateway' => $quote->gateway,
             'expires_at' => $expiresAt,
+            'period_end' => isset($customPeriodEnd) ? $customPeriodEnd->toISOString() : null,
+            'align_with' => $alignWith,
             'quote_token' => $quoteToken,
             'breakdown' => $quote->breakdown,
             'purchasable' => true,
@@ -196,11 +222,36 @@ class PaymentController extends Controller
             }
         }
 
+        $alignWith = $request->input('align_with');
+        $customPeriodEnd = null;
+        $proratedBaseAmount = null;
+
+        if ($serviceType === PaymentServiceType::Subscription && $alignWith) {
+            $alignSub = $user->subscriptions()
+                ->where('badge_type', $alignWith)
+                ->where('state', 'active')
+                ->where('current_period_end', '>', now())
+                ->first();
+
+            if ($alignSub) {
+                $customPeriodEnd = $alignSub->current_period_end;
+                $remainingDays = max(1, now()->diffInDays($customPeriodEnd, false));
+                $priceId = (int) $request->input('price_id');
+                /** @var SubscriptionPrice|null $price */
+                $price = SubscriptionPrice::find($priceId);
+                if ($price) {
+                    $baseDurationDays = $price->duration_days ?: ($price->cadence === 'yearly' ? 365 : 30);
+                    $ratio = min(1.0, max(0.0, $remainingDays / $baseDurationDays));
+                    $proratedBaseAmount = round((float) $price->price_amount * $ratio, 2);
+                }
+            }
+        }
+
         // 2. Calcul du devis certifié côté serveur (source de vérité immuable)
         $quote = $this->pricingService->calculateQuote(
             serviceType: $serviceType,
             priceId: $request->input('price_id'),
-            customAmount: $request->getCustomAmount()
+            customAmount: $proratedBaseAmount ?? $request->getCustomAmount()
         );
 
         // 3. Vérification de cohérence avec un devis préalable (si transmis par le frontend)
@@ -232,18 +283,26 @@ class PaymentController extends Controller
         }
 
         // 4. Création ou restitution de transaction par idempotence stricte
+        $transactionContext = [
+            'phone' => $request->getPhone(),
+            'operator' => $request->input('operator'),
+            'channel' => $request->getChannel()->value,
+            'client_ip' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+        ];
+        if ($alignWith) {
+            $transactionContext['align_with'] = $alignWith;
+        }
+        if ($customPeriodEnd) {
+            $transactionContext['custom_period_end'] = $customPeriodEnd->toISOString();
+        }
+
         try {
             $transaction = $this->paymentEngineService->createOrRetrieveTransaction(
                 user: $user,
                 quote: $quote,
                 idempotencyKey: $request->getIdempotencyKey(),
-                context: [
-                    'phone' => $request->getPhone(),
-                    'operator' => $request->input('operator'),
-                    'channel' => $request->getChannel()->value,
-                    'client_ip' => $request->ip(),
-                    'user_agent' => $request->userAgent(),
-                ]
+                context: $transactionContext
             );
         } catch (IdempotencyConflictException $e) {
             return $this->paymentError(
@@ -358,6 +417,7 @@ class PaymentController extends Controller
             metadata: [
                 'phone' => $request->getPhone(),
                 'operator' => $request->input('operator'),
+                'country' => $request->input('country') ?? $request->input('country_code'),
             ]
         );
 
@@ -366,6 +426,7 @@ class PaymentController extends Controller
         $initiateResult = $gateway->initiatePayment($transaction, [
             'phone' => $request->getPhone(),
             'operator' => $request->input('operator'),
+            'country' => $request->input('country') ?? $request->input('country_code'),
         ]);
 
         if ($initiateResult->isSuccessful) {
@@ -404,6 +465,16 @@ class PaymentController extends Controller
             errorCode: $initiateResult->errorCode ?? 'GATEWAY_ERROR',
             errorMessage: $initiateResult->errorMessage ?? 'Erreur lors de l\'appel à la passerelle'
         );
+
+        if ($initiateResult->errorCode === 'COUNTRY_NOT_SUPPORTED') {
+            return $this->paymentError(
+                code: 'COUNTRY_NOT_SUPPORTED',
+                message: $initiateResult->errorMessage ?? 'Ce pays n\'est pas pris en charge pour le paiement mobile.',
+                status: 422,
+                details: $initiateResult->raw ?? [],
+                retryable: false
+            );
+        }
 
         if ($initiateResult->errorCode === 'GATEWAY_TIMEOUT') {
             return $this->paymentError(
@@ -694,5 +765,35 @@ class PaymentController extends Controller
             message: 'Achat intégré vérifié et abonnement activé avec succès.',
             status: 200
         );
+    }
+
+    /**
+     * POST /api/payments/fees
+     * Calcule le montant des frais d'opérateur et le total selon le montant et l'opérateur/passerelle.
+     */
+    public function calculateFees(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'amount' => ['required', 'numeric', 'min:1'],
+            'operator' => ['nullable', 'string'],
+        ]);
+
+        $baseAmount = (float) $validated['amount'];
+        $gatewayName = config('payment.default_gateway', 'monetbil');
+
+        $feeAmount = (float) $this->pricingService->calculateGatewayFee(
+            number_format($baseAmount, 2, '.', ''),
+            $gatewayName
+        );
+
+        $totalAmount = $baseAmount + $feeAmount;
+
+        return response()->json([
+            'fee' => $feeAmount,
+            'total' => $totalAmount,
+            'amount' => $baseAmount,
+            'gateway' => $gatewayName,
+            'operator' => $validated['operator'] ?? null,
+        ]);
     }
 }

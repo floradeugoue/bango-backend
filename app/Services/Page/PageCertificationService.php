@@ -5,6 +5,7 @@ namespace App\Services\Page;
 use App\Enums\Page\PageCertificationStatus;
 use App\Enums\Payment\PaymentChannel;
 use App\Enums\Payment\PaymentServiceType;
+use App\Models\Admin\AdminAuditLog;
 use App\Models\Page\Page;
 use App\Models\Page\PageCertification;
 use App\Models\Payment\PaymentTransaction;
@@ -15,8 +16,11 @@ use App\Notifications\Page\PageCertificationSubmittedNotification;
 use App\Notifications\Page\PageCertificationSupplementRequestedNotification;
 use App\Services\Payment\PaymentEngineService;
 use App\Services\Payment\PricingService;
+use App\Services\Subscription\SubscriptionService;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -71,7 +75,15 @@ class PageCertificationService
             foreach ($files as $key => $file) {
                 if ($file instanceof UploadedFile) {
                     $this->validateFile($file);
-                    $path = $file->store("page_certifications/{$lockedPage->id}", 'local');
+                    $extension = $file->getClientOriginalExtension() ?: 'bin';
+                    $fileName = (string) Str::uuid().'.'.$extension;
+                    $path = "page_certifications/{$lockedPage->id}/{$fileName}";
+
+                    // Chiffrement au repos de la pièce justificative
+                    $fileContent = file_get_contents($file->getRealPath());
+                    $encryptedContent = Crypt::encrypt($fileContent);
+                    Storage::disk('local')->put($path, $encryptedContent);
+
                     $storedDocuments[$key] = [
                         'file_path' => $path,
                         'original_name' => $file->getClientOriginalName(),
@@ -153,6 +165,8 @@ class PageCertificationService
         $transaction->update([
             'payable_type' => PageCertification::class,
             'payable_id' => $certification->id,
+            'price_id' => $quote->price?->id,
+            'product_id' => $quote->product?->id,
         ]);
 
         return $transaction;
@@ -160,7 +174,7 @@ class PageCertificationService
 
     /**
      * Fulfiller appelé par le module PAY lors de la confirmation d'un paiement.
-     * Idempotent : ne certifie JAMAIS automatiquement la page !
+     * Idempotent : crée/active l'abonnement pour la page et rattache la transaction sans certifier automatiquement la page (validation admin requise) !
      */
     public function confirmPaymentFromTransaction(PaymentTransaction $transaction): void
     {
@@ -185,6 +199,27 @@ class PageCertificationService
                 "Frais de certification réglés avec succès (Réf: {$transaction->reference})"
             );
             $certification->save();
+
+            // Raccordement à l'abonnement de la Page
+            if ($transaction->price) {
+                $subscriptionService = app(SubscriptionService::class);
+                $subscription = $subscriptionService->activateSubscription(
+                    user: $transaction->user,
+                    price: $transaction->price,
+                    paymentReference: $transaction->reference,
+                    metadata: [
+                        'page_id' => $certification->page_id,
+                        'certification_id' => $certification->id,
+                        'payment_transaction_id' => $transaction->id,
+                        'provider' => $transaction->provider->value,
+                        'amount_paid' => (float) $transaction->total_amount,
+                        'currency' => $transaction->currency,
+                    ]
+                );
+
+                $transaction->subscription_id = $subscription->id;
+                $transaction->save();
+            }
         });
     }
 
@@ -212,7 +247,15 @@ class PageCertificationService
             foreach ($files as $key => $file) {
                 if ($file instanceof UploadedFile) {
                     $this->validateFile($file);
-                    $path = $file->store("page_certifications/{$lockedCert->page_id}", 'local');
+                    $extension = $file->getClientOriginalExtension() ?: 'bin';
+                    $fileName = (string) Str::uuid().'.'.$extension;
+                    $path = "page_certifications/{$lockedCert->page_id}/{$fileName}";
+
+                    // Chiffrement au repos de la pièce justificative
+                    $fileContent = file_get_contents($file->getRealPath());
+                    $encryptedContent = Crypt::encrypt($fileContent);
+                    Storage::disk('local')->put($path, $encryptedContent);
+
                     $existingDocs[$key] = [
                         'file_path' => $path,
                         'original_name' => $file->getClientOriginalName(),
@@ -353,6 +396,7 @@ class PageCertificationService
 
     /**
      * Téléchargement sécurisé d'un document justificatif privé.
+     * Chaque consultation est déchiffrée et journalisée dans AdminAuditLog si consultée par un opérateur.
      */
     public function downloadDocument(PageCertification $certification, string $docKey, User $viewer): StreamedResponse
     {
@@ -363,12 +407,50 @@ class PageCertificationService
 
         $filePath = $docs[$docKey]['file_path'] ?? null;
         $originalName = $docs[$docKey]['original_name'] ?? 'document.pdf';
+        $mimeType = $docs[$docKey]['mime_type'] ?? 'application/octet-stream';
 
         if (! $filePath || ! Storage::disk('local')->exists($filePath)) {
             abort(404, 'Fichier introuvable sur le stockage sécurisé.');
         }
 
-        return Storage::disk('local')->download($filePath, $originalName);
+        $isOwner = $certification->page?->isOwner($viewer);
+        if (! $isOwner) {
+            AdminAuditLog::logChainedEvent(
+                event: 'page_certification.document_opened',
+                operator: $viewer,
+                targetType: 'PageCertification',
+                targetId: (string) $certification->id,
+                targetLabel: "Consultation pièce certification {$docKey} ({$originalName}) pour la page #{$certification->page_id}",
+                context: [
+                    'certification_id' => $certification->id,
+                    'page_id' => $certification->page_id,
+                    'doc_key' => $docKey,
+                    'original_name' => $originalName,
+                    'mime_type' => $mimeType,
+                ],
+                ip: request()?->ip(),
+                userAgent: request()?->userAgent()
+            );
+        }
+
+        $rawContent = Storage::disk('local')->get($filePath);
+        try {
+            $decryptedContent = Crypt::decrypt($rawContent);
+        } catch (DecryptException) {
+            $decryptedContent = $rawContent;
+        }
+
+        return response()->streamDownload(
+            function () use ($decryptedContent) {
+                echo $decryptedContent;
+            },
+            $originalName,
+            [
+                'Content-Type' => $mimeType,
+                'Cache-Control' => 'no-store, no-cache, must-revalidate, private',
+                'X-Content-Type-Options' => 'nosniff',
+            ]
+        );
     }
 
     /**

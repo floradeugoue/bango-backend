@@ -26,6 +26,7 @@ class UpdateListingDetailsRequest extends FormRequest
             'title' => ['sometimes', 'string', 'max:70'],
             'description' => ['sometimes', 'nullable', 'string', 'max:4000'],
             'landmark' => ['sometimes', 'nullable', 'string', 'max:80'],
+            'address' => ['sometimes', 'nullable', 'string', 'max:160'],
             'price' => ['sometimes', 'numeric', 'min:0'],
             'deposit_months' => ['sometimes', 'integer', 'min:0', 'max:36'],
             'advance_months' => ['sometimes', 'integer', 'min:0', 'max:36'],
@@ -33,6 +34,7 @@ class UpdateListingDetailsRequest extends FormRequest
             'charges' => ['sometimes', 'numeric', 'min:0'],
             'negotiable' => ['sometimes', 'boolean'],
             'utilities_included' => ['sometimes', 'boolean'],
+            'uses_agenda' => ['sometimes', 'nullable', 'boolean'],
             'amenities' => ['sometimes', 'nullable', 'array'],
             'amenities.*' => ['string', 'max:50'],
         ];

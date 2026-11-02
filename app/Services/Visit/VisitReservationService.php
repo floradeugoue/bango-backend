@@ -3,6 +3,7 @@
 namespace App\Services\Visit;
 
 use App\Enums\Boost\CreditTransactionType;
+use App\Enums\Delegation\DelegationStatus;
 use App\Enums\Payment\PaymentChannel;
 use App\Enums\Payment\PaymentEventSource;
 use App\Enums\Payment\PaymentProvider;
@@ -12,6 +13,7 @@ use App\Enums\Visit\VisitDeclineReason;
 use App\Enums\Visit\VisitReservationStatus;
 use App\Enums\Visit\VisitSlotStatus;
 use App\Exceptions\Payment\PaymentNotFoundException;
+use App\Models\Delegation\Delegation;
 use App\Models\Listing\Listing;
 use App\Models\Payment\PaymentTransaction;
 use App\Models\User;
@@ -22,6 +24,7 @@ use App\Notifications\Visit\VisitConfirmedNotification;
 use App\Notifications\Visit\VisitDeclinedNotification;
 use App\Notifications\Visit\VisitProposedNotification;
 use App\Notifications\Visit\VisitRequestedNotification;
+use App\Services\Admin\Finance\AdminPayoutService;
 use App\Services\Boost\CreditWalletService;
 use App\Services\Listing\ListingService;
 use App\Services\Payment\Gateways\MonetbilGateway;
@@ -192,7 +195,14 @@ class VisitReservationService
             ]);
 
             if ($isPaid) {
-                $this->notifyVisitRequested($reservation);
+                if ($listing->autoConfirm()) {
+                    $reservation->status = VisitReservationStatus::Confirmed;
+                    $lockedSlot->increment('booked_count');
+                    $reservation->save();
+                    $this->notifyVisitConfirmed($reservation);
+                } else {
+                    $this->notifyVisitRequested($reservation);
+                }
 
                 return [
                     'reservation' => $reservation,
@@ -220,13 +230,20 @@ class VisitReservationService
                     ]
                 );
 
-                $reservation->status = VisitReservationStatus::Requested;
+                $reservation->status = $listing->autoConfirm() ? VisitReservationStatus::Confirmed : VisitReservationStatus::Requested;
                 $reservation->paid_at = now();
                 $reservation->payment_reference = 'VISIT-CREDIT-'.$reservation->id;
                 $reservation->lock_expires_at = null;
+                if ($listing->autoConfirm()) {
+                    $lockedSlot->increment('booked_count');
+                }
                 $reservation->save();
 
-                $this->notifyVisitRequested($reservation);
+                if ($listing->autoConfirm()) {
+                    $this->notifyVisitConfirmed($reservation);
+                } else {
+                    $this->notifyVisitRequested($reservation);
+                }
 
                 return [
                     'reservation' => $reservation,
@@ -311,10 +328,22 @@ class VisitReservationService
                 );
             }
 
+            $prompt = null;
+            if (isset($initiateResult) && $initiateResult->isSuccessful && $initiateResult->ussdPrompt) {
+                $timeoutSeconds = (int) config('payment.timeout_seconds', 120);
+                $prompt = [
+                    'ussd' => $initiateResult->ussdPrompt,
+                    'message' => $initiateResult->ussdPrompt,
+                    'timeout_seconds' => $timeoutSeconds,
+                    'expires_at' => $transaction->created_at ? $transaction->created_at->addSeconds($timeoutSeconds)->toIso8601String() : now()->addSeconds($timeoutSeconds)->toIso8601String(),
+                ];
+            }
+
             return [
                 'reservation' => $reservation,
                 'transaction' => $transaction->fresh(),
                 'quote' => $quote,
+                'prompt' => $prompt,
             ];
         });
     }
@@ -366,15 +395,178 @@ class VisitReservationService
                 ]
             );
 
-            $lockedReservation->status = VisitReservationStatus::Requested;
+            $autoConfirm = $lockedReservation->listing?->autoConfirm() ?? false;
+            $lockedReservation->status = $autoConfirm ? VisitReservationStatus::Confirmed : VisitReservationStatus::Requested;
             $lockedReservation->paid_at = now();
             $lockedReservation->payment_reference = 'VISIT-CREDIT-'.$lockedReservation->id;
             $lockedReservation->lock_expires_at = null;
+            if ($autoConfirm) {
+                $lockedSlot->increment('booked_count');
+            }
             $lockedReservation->save();
 
-            $this->notifyVisitRequested($lockedReservation);
+            if ($autoConfirm) {
+                $this->notifyVisitConfirmed($lockedReservation);
+            } else {
+                $this->notifyVisitRequested($lockedReservation);
+            }
 
             return $lockedReservation;
+        });
+    }
+
+    /**
+     * Règle une réservation de visite existante (Crédit BANGO ou Mobile Money Monetbil).
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array{reservation: VisitReservation, transaction: PaymentTransaction|null, quote: array<string, mixed>}
+     */
+    public function payReservation(VisitReservation $reservation, User $user, array $payload = []): array
+    {
+        if ((int) $reservation->prospect_id !== (int) $user->id) {
+            throw new AuthorizationException('Vous ne pouvez pas régler la réservation d\'un tiers.');
+        }
+
+        if ($reservation->status !== VisitReservationStatus::PendingPayment) {
+            throw ValidationException::withMessages([
+                'reservation' => ['Cette réservation n\'est pas en attente de paiement (statut actuel : '.$reservation->status->value.').'],
+            ]);
+        }
+
+        $feeAmount = (float) $reservation->fee_amount;
+        $quote = [
+            'amount' => $feeAmount,
+            'fee_amount' => $feeAmount,
+            'currency' => $reservation->currency ?: 'XAF',
+            'deposit' => 0,
+            'total' => $feeAmount,
+        ];
+
+        // 1. Visite gratuite
+        if ($feeAmount <= 0) {
+            $reservation->status = VisitReservationStatus::Confirmed;
+            $reservation->paid_at = now();
+            $reservation->save();
+
+            $this->notifyVisitConfirmed($reservation);
+
+            return [
+                'reservation' => $reservation,
+                'transaction' => null,
+                'quote' => $quote,
+            ];
+        }
+
+        // 2. Paiement par Crédit BANGO
+        $isCreditPayment = ($payload['channel'] ?? null) === 'credit_wallet' || ($payload['payment_method'] ?? null) === 'credit';
+        if ($isCreditPayment) {
+            $paidReservation = $this->payReservationWithCredits($reservation, $user);
+
+            return [
+                'reservation' => $paidReservation,
+                'transaction' => null,
+                'quote' => $quote,
+            ];
+        }
+
+        // 3. Paiement Mobile Money Monetbil
+        return DB::transaction(function () use ($reservation, $user, $feeAmount, $payload, $quote) {
+            /** @var VisitReservation $lockedReservation */
+            $lockedReservation = VisitReservation::where('id', $reservation->id)->lockForUpdate()->firstOrFail();
+            /** @var VisitSlot $lockedSlot */
+            $lockedSlot = VisitSlot::where('id', $lockedReservation->slot_id)->lockForUpdate()->firstOrFail();
+
+            $idempotencyKey = $payload['idempotency_key'] ?? ('VISIT-'.$lockedReservation->id.'-'.Str::random(6));
+
+            $transaction = PaymentTransaction::create([
+                'user_id' => $user->id,
+                'service_type' => PaymentServiceType::Visit,
+                'payable_type' => VisitReservation::class,
+                'payable_id' => $lockedReservation->id,
+                'provider' => PaymentProvider::Monetbil,
+                'channel' => isset($payload['channel']) ? (PaymentChannel::tryFrom($payload['channel']) ?? PaymentChannel::MobileMoney) : PaymentChannel::MobileMoney,
+                'currency' => $quote['currency'],
+                'amount' => $feeAmount,
+                'fee_amount' => '0.00',
+                'tax_amount' => '0.00',
+                'total_amount' => $feeAmount,
+                'credit_used' => '0.00',
+                'amount_charged' => $feeAmount,
+                'status' => PaymentStatus::Pending,
+                'idempotency_key' => $idempotencyKey,
+                'metadata' => [
+                    'reservation_id' => $lockedReservation->id,
+                    'listing_id' => $lockedReservation->listing_id,
+                    'slot_id' => $lockedSlot->id,
+                    'operator' => $payload['operator'] ?? null,
+                    'phone_number' => $payload['phone_number'] ?? $user->phone,
+                    'scheduled_at' => $lockedSlot->start_at->toIso8601String(),
+                ],
+            ]);
+
+            $lockedReservation->payment_transaction_id = $transaction->id;
+            $lockedReservation->payment_reference = $transaction->reference;
+            $lockedReservation->save();
+
+            $phone = $payload['phone_number'] ?? $payload['phone'] ?? $user->phone;
+            $operator = $payload['operator'] ?? null;
+
+            $attempt = $transaction->createAttempt(
+                provider: PaymentProvider::Monetbil,
+                channel: $transaction->channel,
+                externalReference: null,
+                metadata: [
+                    'phone' => $phone,
+                    'operator' => $operator,
+                ]
+            );
+
+            try {
+                $initiateResult = $this->monetbilGateway->initiatePayment($transaction, [
+                    'phone' => $phone,
+                    'operator' => $operator,
+                ]);
+
+                if ($initiateResult->isSuccessful) {
+                    $attempt->markSuccessful(
+                        externalReference: $initiateResult->gatewayReference,
+                        metadata: ['ussd_prompt' => $initiateResult->ussdPrompt]
+                    );
+
+                    if ($initiateResult->gatewayReference) {
+                        $transaction->external_reference = $initiateResult->gatewayReference;
+                        $transaction->save();
+                    }
+                } else {
+                    $attempt->markFailed(
+                        errorCode: $initiateResult->errorCode ?? 'GATEWAY_ERROR',
+                        errorMessage: $initiateResult->errorMessage ?? 'Échec d\'initialisation du paiement.'
+                    );
+                }
+            } catch (\Throwable $e) {
+                $attempt->markFailed(
+                    errorCode: 'GATEWAY_ERROR',
+                    errorMessage: $e->getMessage()
+                );
+            }
+
+            $prompt = null;
+            if (isset($initiateResult) && $initiateResult->isSuccessful && $initiateResult->ussdPrompt) {
+                $timeoutSeconds = (int) config('payment.timeout_seconds', 120);
+                $prompt = [
+                    'ussd' => $initiateResult->ussdPrompt,
+                    'message' => $initiateResult->ussdPrompt,
+                    'timeout_seconds' => $timeoutSeconds,
+                    'expires_at' => $transaction->created_at ? $transaction->created_at->addSeconds($timeoutSeconds)->toIso8601String() : now()->addSeconds($timeoutSeconds)->toIso8601String(),
+                ];
+            }
+
+            return [
+                'reservation' => $lockedReservation->fresh(),
+                'transaction' => $transaction->fresh(),
+                'quote' => $quote,
+                'prompt' => $prompt,
+            ];
         });
     }
 
@@ -439,12 +631,20 @@ class VisitReservationService
             }
 
             // Validation normale du paiement
-            $reservation->status = VisitReservationStatus::Requested;
+            $autoConfirm = $reservation->listing?->autoConfirm() ?? false;
+            $reservation->status = $autoConfirm ? VisitReservationStatus::Confirmed : VisitReservationStatus::Requested;
             $reservation->paid_at = $now;
             $reservation->lock_expires_at = null;
+            if ($autoConfirm && $reservation->slot) {
+                $reservation->slot->increment('booked_count');
+            }
             $reservation->save();
 
-            $this->notifyVisitRequested($reservation);
+            if ($autoConfirm) {
+                $this->notifyVisitConfirmed($reservation);
+            } else {
+                $this->notifyVisitRequested($reservation);
+            }
 
             return $reservation;
         });
@@ -706,6 +906,12 @@ class VisitReservationService
             $isCredit = str_starts_with((string) $locked->payment_reference, 'VISIT-CREDIT-');
             if ($isEligibleForRefund && ($locked->paymentTransaction || $isCredit)) {
                 $this->processRefund($locked, $locked->cancellation_reason);
+            } else {
+                try {
+                    app(AdminPayoutService::class)->cancelScheduledPayoutForVisit($locked);
+                } catch (\Throwable $e) {
+                    // Ignore
+                }
             }
 
             $this->notifyVisitCancelled($locked, $reason);
@@ -763,6 +969,12 @@ class VisitReservationService
         $reservation->refunded_at = now();
         $reservation->refund_channel = 'bango_credit';
         $reservation->save();
+
+        try {
+            app(AdminPayoutService::class)->cancelScheduledPayoutForVisit($reservation);
+        } catch (\Throwable $e) {
+            // Log or ignore
+        }
     }
 
     /**
@@ -825,6 +1037,44 @@ class VisitReservationService
         return $count;
     }
 
+    /**
+     * Traite les visites où le bailleur a émargé 'came' sans contestation du prospect sous 24h.
+     * Passe automatiquement la visite en 'visited' et planifie le reversement.
+     */
+    public function settleUncontestedVisits(): int
+    {
+        $cutoff = now()->subHours(24);
+
+        $reservations = VisitReservation::where('status', VisitReservationStatus::Confirmed->value)
+            ->where('landlord_attendance', 'came')
+            ->whereNull('disputed_at')
+            ->whereNotNull('landlord_attendance_at')
+            ->where('landlord_attendance_at', '<=', $cutoff)
+            ->get();
+
+        $count = 0;
+        foreach ($reservations as $reservation) {
+            DB::transaction(function () use ($reservation, &$count) {
+                /** @var VisitReservation $locked */
+                $locked = VisitReservation::where('id', $reservation->id)->lockForUpdate()->first();
+                if ($locked && $locked->status === VisitReservationStatus::Confirmed && ! $locked->disputed_at) {
+                    $locked->status = VisitReservationStatus::Visited;
+                    $locked->save();
+
+                    try {
+                        app(AdminPayoutService::class)->schedulePayoutForVisit($locked);
+                    } catch (\Throwable $e) {
+                        // Ignore
+                    }
+
+                    $count++;
+                }
+            });
+        }
+
+        return $count;
+    }
+
     protected function notifyVisitRequested(VisitReservation $reservation): void
     {
         $reservation->owner->notify(new VisitRequestedNotification($reservation));
@@ -849,5 +1099,113 @@ class VisitReservationService
         if ($reservation->agent) {
             $reservation->agent->notify(new VisitCancelledNotification($reservation, $reason));
         }
+    }
+
+    /**
+     * Enregistrer l'émargement / présence d'une visite par le bailleur (ou son agent mandaté) ou par le prospect.
+     * Accessible uniquement après la fin du créneau horaire de la visite.
+     * En cas de déclarations contradictoires, place la visite en litige pour le back-office.
+     */
+    public function recordAttendance(VisitReservation $reservation, User $actor, string $attendance): VisitReservation
+    {
+        if (! in_array($attendance, ['came', 'no_show'], true)) {
+            throw ValidationException::withMessages([
+                'attendance' => 'La présence doit être "came" ou "no_show".',
+            ]);
+        }
+
+        // Vérifier que la visite est confirmée ou déjà visée
+        if (! in_array($reservation->status, [VisitReservationStatus::Confirmed, VisitReservationStatus::Visited], true)) {
+            throw ValidationException::withMessages([
+                'attendance' => 'L\'émargement ne peut être saisi que pour une visite confirmée.',
+            ]);
+        }
+
+        // Vérifier que le créneau est terminé (seuls les créneaux passés peuvent être émargés)
+        $slot = $reservation->slot;
+        if (! $slot || ! $slot->end_at) {
+            throw ValidationException::withMessages([
+                'attendance' => 'Aucun créneau horaire valide associé à cette visite.',
+            ]);
+        }
+
+        if (now()->lt($slot->end_at)) {
+            throw ValidationException::withMessages([
+                'attendance' => 'L\'émargement n\'est autorisé qu\'après la fin du créneau horaire prévu.',
+            ]);
+        }
+
+        // Déterminer le rôle de l'acteur
+        $isProspect = ($actor->id === $reservation->prospect_id);
+
+        $hasVisitsDelegation = false;
+        if ($reservation->listing_id) {
+            $hasVisitsDelegation = Delegation::where('listing_id', $reservation->listing_id)
+                ->where('agent_id', $actor->id)
+                ->where('status', DelegationStatus::Active->value)
+                ->get()
+                ->contains(fn (Delegation $d) => $d->isOperational() && $d->hasCapability('visits'));
+        }
+
+        $isLandlordOrAgent = ($actor->id === $reservation->owner_id)
+            || ($reservation->agent_id && $actor->id === $reservation->agent_id)
+            || $hasVisitsDelegation
+            || ($reservation->listing && $this->listingService->canManageVisits($actor, $reservation->listing));
+
+        if (! $isProspect && ! $isLandlordOrAgent && ! $actor->isAdmin()) {
+            throw new AuthorizationException('Vous n\'êtes pas autorisé à émarger cette visite.');
+        }
+
+        return DB::transaction(function () use ($reservation, $attendance, $isProspect, $isLandlordOrAgent) {
+            /** @var VisitReservation $locked */
+            $locked = VisitReservation::where('id', $reservation->id)->lockForUpdate()->firstOrFail();
+
+            $now = now();
+
+            if ($isProspect && ! ($isLandlordOrAgent && ! $isProspect)) {
+                $locked->prospect_attendance = $attendance;
+                $locked->prospect_attendance_at = $now;
+            } else {
+                // Bailleur, agent avec capacité 'visits' ou admin
+                $locked->landlord_attendance = $attendance;
+                $locked->landlord_attendance_at = $now;
+            }
+
+            // Détecter contradiction :
+            // Ex: l'un dit "came" et l'autre "no_show"
+            if (! empty($locked->prospect_attendance) && ! empty($locked->landlord_attendance)) {
+                if ($locked->prospect_attendance !== $locked->landlord_attendance) {
+                    $locked->disputed_at = $now;
+                    $locked->dispute_reason = sprintf(
+                        'Contradiction de présence : le prospect déclare "%s" et le bailleur déclare "%s".',
+                        $locked->prospect_attendance,
+                        $locked->landlord_attendance
+                    );
+                    // En cas de litige, annuler tout reversement programmé préventivement et remettre en Confirmed
+                    $locked->status = VisitReservationStatus::Confirmed;
+                    try {
+                        app(AdminPayoutService::class)->cancelScheduledPayoutForVisit($locked);
+                    } catch (\Throwable $e) {
+                        // Ignore
+                    }
+                }
+            }
+
+            // Statut 'visited' :
+            // Si le prospect confirme être venu ('came'), la visite est actée.
+            // Si aucune contestation n'est relevée et que le prospect a confirmé 'came'
+            if ($locked->prospect_attendance === 'came' && ! $locked->disputed_at) {
+                $locked->status = VisitReservationStatus::Visited;
+                try {
+                    app(AdminPayoutService::class)->schedulePayoutForVisit($locked);
+                } catch (\Throwable $e) {
+                    // Ignore already scheduled or error
+                }
+            }
+
+            $locked->save();
+
+            return $locked->fresh(['listing', 'slot', 'proposalSlot', 'prospect', 'owner', 'agent', 'paymentTransaction']);
+        });
     }
 }

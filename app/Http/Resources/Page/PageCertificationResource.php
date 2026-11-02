@@ -52,6 +52,7 @@ class PageCertificationResource extends JsonResource
             'supplement_request_reason' => $this->supplement_request_reason,
             'payment_transaction_id' => $isOwnerOrAdmin ? $this->payment_transaction_id : null,
             'is_paid' => $this->payment_transaction_id !== null,
+            'renews_at' => $this->page->activeSubscription?->current_period_end?->toIso8601String(),
             'submitted_at' => $this->submitted_at?->toIso8601String(),
             'decided_at' => $this->decided_at?->toIso8601String(),
             'history' => $isOwnerOrAdmin ? ($this->history ?? []) : [],

@@ -219,7 +219,7 @@ class CampaignController extends Controller
             date: now()->toDateString(),
             impressions: 1,
             clicks: 0,
-            reach: 1,
+            reach: 0,
             spent: 0.00,
             user: $user
         );

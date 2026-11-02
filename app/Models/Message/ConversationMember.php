@@ -35,6 +35,7 @@ class ConversationMember extends Model
         'user_id',
         'role',
         'is_muted',
+        'pinned_at',
         'last_read_message_id',
         'last_read_at',
         'last_delivered_at',
@@ -47,6 +48,7 @@ class ConversationMember extends Model
         return [
             'role' => ConversationMemberRole::class,
             'is_muted' => 'boolean',
+            'pinned_at' => 'datetime',
             'last_read_at' => 'datetime',
             'last_delivered_at' => 'datetime',
             'joined_at' => 'datetime',

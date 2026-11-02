@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources\Support;
 
+use App\Models\Page\Page;
 use App\Models\Support\SupportTicket;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -32,14 +33,38 @@ class SupportTicketResource extends JsonResource
                 'value' => $this->priority->value,
                 'label' => $this->priority->label(),
             ],
+            'page_id' => $this->page_id ? (int) $this->page_id : null,
+            'page' => ($page = $this->page_id ? ($this->relationLoaded('page') ? $this->page : Page::find($this->page_id)) : null) ? [
+                'id' => (int) $page->id,
+                'name' => $page->name,
+                'handle' => $page->handle,
+                'logo_url' => $page->logo_url,
+                'is_certified' => $page->isCertified(),
+            ] : null,
             'user' => [
                 'id' => (int) $this->user_id,
-                'name' => $this->user?->name,
+                'name' => $this->user?->display_name ?: $this->user?->name,
+                'handle' => $this->user?->handle,
+                'email' => $this->user?->email,
+            ],
+            'author' => $page ? [
+                'id' => (string) $page->id,
+                'name' => $page->name,
+                'handle' => $page->handle,
+                'logo_url' => $page->logo_url,
+                'avatar_url' => $page->logo_url,
+                'is_certified' => $page->isCertified(),
+            ] : [
+                'id' => (string) $this->user_id,
+                'name' => $this->user?->display_name ?: $this->user?->name,
+                'handle' => $this->user?->handle,
+                'avatar_url' => $this->user?->avatar_url,
                 'email' => $this->user?->email,
             ],
             'assigned_agent' => $this->assigned_to ? [
                 'id' => (int) $this->assigned_to,
-                'name' => $this->assignedAgent?->name,
+                'name' => $this->assignedAgent?->display_name ?: $this->assignedAgent?->name,
+                'handle' => $this->assignedAgent?->handle,
             ] : null,
             'messages_count' => $this->whenCounted('messages'),
             'messages' => SupportTicketMessageResource::collection($this->whenLoaded('messages')),

@@ -4,6 +4,7 @@ namespace App\Models\Story;
 
 use App\Enums\Story\StoryAudience;
 use App\Enums\Story\StoryStatus;
+use App\Models\Page\Page;
 use App\Models\User;
 use Database\Factories\Story\StoryFactory;
 use Illuminate\Database\Eloquent\Builder;
@@ -27,6 +28,7 @@ class Story extends Model
         'allow_archive',
         'status',
         'published_at',
+        'page_id',
         'expires_at',
         'views_count',
         'poll_votes_count',
@@ -58,6 +60,11 @@ class Story extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function page(): BelongsTo
+    {
+        return $this->belongsTo(Page::class, 'page_id');
     }
 
     public function likes(): HasMany
@@ -173,6 +180,17 @@ class Story extends Model
                     });
                 });
         });
+    }
+
+    /**
+     * Vérifie si la Story est actuellement active (en ligne et non expirée).
+     */
+    public function isActive(): bool
+    {
+        return $this->status === StoryStatus::Active
+            && $this->published_at !== null
+            && $this->published_at->isPast()
+            && ! $this->isExpired();
     }
 
     /**

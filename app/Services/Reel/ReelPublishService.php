@@ -7,6 +7,7 @@ use App\Jobs\Reel\ProcessReelVideoJob;
 use App\Models\Reel\Reel;
 use App\Models\User;
 use App\Services\Admin\AutomatedTextFilterService;
+use App\Services\Translation\TranslationService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -54,6 +55,11 @@ class ReelPublishService
                 $reel->user_id = $user->id;
             }
 
+            $activePage = request()?->attributes?->get('active_page');
+            if ($activePage) {
+                $reel->page_id = $activePage->id;
+            }
+
             // Vérification de l'éligibilité du son (verrouillage / disponibilité)
             $soundId = $data['sound_id'] ?? $reel->sound_id;
             if ($soundId) {
@@ -91,13 +97,19 @@ class ReelPublishService
             $reel->duration = $duration;
 
             $reel->caption = $data['caption'] ?? $reel->caption;
-            $reel->topic = $data['topic'] ?? ($reel->topic ?: 'neighbourhood');
+            $reel->language = app(TranslationService::class)->detectLanguage($reel->caption);
+            $reel->listing_id = $data['listing_id'] ?? $reel->listing_id;
+            $reel->topic = app(ReelTopicResolver::class)->resolve(
+                topic: $data['topic'] ?? null,
+                caption: $reel->caption,
+                listingId: $reel->listing_id,
+                user: $user
+            );
             $reel->sound_id = $soundId;
             $reel->allow_download = isset($data['allow_download']) ? (bool) $data['allow_download'] : ($reel->allow_download ?? true);
             $reel->comments_closed = isset($data['comments_closed']) ? (bool) $data['comments_closed'] : ($reel->comments_closed ?? false);
             $reel->subtitles = $data['subtitles'] ?? $reel->subtitles;
             $reel->subtitles_locale = $data['subtitles_locale'] ?? ($reel->subtitles_locale ?: 'fr');
-            $reel->listing_id = $data['listing_id'] ?? $reel->listing_id;
 
             $reel->status = ReelStatus::Processing;
             $reel->error_message = null;

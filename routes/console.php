@@ -176,11 +176,35 @@ Schedule::command('visits:settle-overdue')
     ->withoutOverlapping()
     ->onOneServer();
 
+// 7b. Clôture des visites émargées sans contestation sous 24h
+Schedule::command('visits:settle-uncontested')
+    ->hourly()
+    ->withoutOverlapping()
+    ->onOneServer();
+
 // --------------------------------------------------------------------------
 // PLANIFICATEUR DES REVERSEMENTS BAILLEURS (Étape 4 — Règle J+1 à 08:00)
 // --------------------------------------------------------------------------
 // 8. Reversements des frais de visite aux bailleurs à J+1 à 08:00
 Schedule::command('payouts:process-scheduled')
     ->dailyAt('08:00')
+    ->withoutOverlapping()
+    ->onOneServer();
+
+// --------------------------------------------------------------------------
+// PLANIFICATEUR DE PURGE DES JETONS PASSPORT
+// --------------------------------------------------------------------------
+// 9. Purge quotidienne des jetons d'accès et de rafraîchissement révoqués ou expirés
+Schedule::command('passport:purge')
+    ->daily()
+    ->withoutOverlapping()
+    ->onOneServer();
+
+// --------------------------------------------------------------------------
+// PLANIFICATEUR DE PURGE DE CONFORMITÉ DES PIÈCES SENSIBLES (KYC & CERTIFICATIONS)
+// --------------------------------------------------------------------------
+// 10. Destruction chaque nuit des pièces refusées > 30j et comptes sans abonnement > 90j
+Schedule::command('kyc:purge-documents')
+    ->dailyAt('02:00')
     ->withoutOverlapping()
     ->onOneServer();

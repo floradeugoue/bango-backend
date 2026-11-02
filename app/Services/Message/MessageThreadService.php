@@ -4,16 +4,19 @@ namespace App\Services\Message;
 
 use App\Enums\Message\ConversationMemberRole;
 use App\Enums\Message\ConversationType;
+use App\Enums\Message\MessageType;
 use App\Events\Message\ConversationCreated;
 use App\Models\Listing\Listing;
 use App\Models\Message\Conversation;
 use App\Models\Message\ConversationMember;
+use App\Models\Message\Message;
 use App\Models\User;
 use App\Notifications\Message\AddedToGroupNotification;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
@@ -26,19 +29,27 @@ class MessageThreadService
      */
     public function listUserThreads(User $user, array $filters = [], int $perPage = 20): LengthAwarePaginator
     {
-        $query = Conversation::query()
-            ->forUser($user->id)
-            ->with([
-                'members.user' => function ($q): void {
-                    $q->select(['id', 'name', 'handle', 'avatar_url', 'is_verified', 'account_type']);
-                },
-                'latestMessage.sender' => function ($q): void {
-                    $q->select(['id', 'name', 'handle']);
-                },
-                'listing' => function ($q): void {
-                    $q->select(['id', 'title', 'price', 'currency', 'status', 'mode', 'kind', 'owner_id', 'agent_id']);
-                },
-            ]);
+        $activePage = request()?->attributes?->get('active_page');
+
+        $query = Conversation::query();
+
+        if ($activePage) {
+            $query->where('page_id', $activePage->id);
+        } else {
+            $query->forUser($user->id);
+        }
+
+        $query->with([
+            'members.user' => function ($q): void {
+                $q->select(['id', 'name', 'handle', 'avatar_url', 'is_verified', 'account_type']);
+            },
+            'latestMessage.sender' => function ($q): void {
+                $q->select(['id', 'name', 'handle']);
+            },
+            'listing' => function ($q): void {
+                $q->select(['id', 'title', 'price', 'currency', 'status', 'mode', 'kind', 'owner_id', 'agent_id']);
+            },
+        ]);
 
         // Filtrage par catégorie
         if (! empty($filters['type'])) {
@@ -52,17 +63,19 @@ class MessageThreadService
             }
         }
 
-        // Dans la boîte principale : exclure les demandes d'inconnus reçues en attente et les conversations rejetées
-        $query->where(function (Builder $q) use ($user): void {
-            $q->where(function (Builder $sub) {
-                $sub->where('status', 'active')->orWhereNull('status');
-            })->orWhere(function (Builder $sub) use ($user) {
-                $sub->where('status', 'pending')
-                    ->where('created_by_id', $user->id);
+        // Dans la boîte principale : si pas de page active, exclure les demandes en attente
+        if (! $activePage) {
+            $query->where(function (Builder $q) use ($user): void {
+                $q->where(function (Builder $sub) {
+                    $sub->where('status', 'active')->orWhereNull('status');
+                })->orWhere(function (Builder $sub) use ($user) {
+                    $sub->where('status', 'pending')
+                        ->where('created_by_id', $user->id);
+                });
+            })->where(function (Builder $q) {
+                $q->where('status', '!=', 'rejected')->orWhereNull('status');
             });
-        })->where(function (Builder $q) {
-            $q->where('status', '!=', 'rejected')->orWhereNull('status');
-        });
+        }
 
         // Recherche par titre ou nom d'interlocuteur
 
@@ -77,8 +90,20 @@ class MessageThreadService
             });
         }
 
-        // Tri par date du dernier message ou création
-        return $query->orderByRaw('COALESCE(last_message_at, created_at) DESC')
+        // Jointure ou sous-requête pour récupérer pinned_at du membre courant afin de trier les épinglées d'abord
+        $query->addSelect([
+            'conversations.*',
+            'current_user_pinned_at' => ConversationMember::query()
+                ->select('pinned_at')
+                ->whereColumn('conversation_members.conversation_id', 'conversations.id')
+                ->where('conversation_members.user_id', $user->id)
+                ->limit(1),
+        ]);
+
+        // Tri par conversations épinglées d'abord (pinned_at DESC NULLS LAST), puis date du dernier message ou création
+        return $query->orderByRaw('CASE WHEN current_user_pinned_at IS NOT NULL THEN 0 ELSE 1 END ASC')
+            ->orderByDesc('current_user_pinned_at')
+            ->orderByRaw('COALESCE(last_message_at, created_at) DESC')
             ->paginate($perPage);
     }
 
@@ -437,5 +462,188 @@ class MessageThreadService
         });
 
         return $conversation;
+    }
+
+    /**
+     * Poste un message système dans une conversation.
+     */
+    public function postSystemMessage(Conversation $conversation, string $text): Message
+    {
+        return DB::transaction(function () use ($conversation, $text): Message {
+            $message = Message::create([
+                'conversation_id' => $conversation->id,
+                'sender_id' => null,
+                'type' => MessageType::System,
+                'body' => $text,
+            ]);
+
+            $conversation->update([
+                'last_message_at' => now(),
+            ]);
+
+            return $message;
+        });
+    }
+
+    /**
+     * Supprime un groupe de discussion (créateur ou admin).
+     */
+    public function deleteGroup(Conversation $conversation, User $actor): void
+    {
+        if ($conversation->type !== ConversationType::Group) {
+            throw new AccessDeniedHttpException('Cette conversation n\'est pas un groupe.');
+        }
+
+        Gate::authorize('delete', $conversation);
+
+        DB::transaction(function () use ($conversation): void {
+            // Créer le message système pour informer les membres
+            $this->postSystemMessage($conversation, 'Le groupe a été supprimé');
+
+            // Passer en lecture seule et supprimer logiquement
+            $conversation->update([
+                'is_read_only' => true,
+            ]);
+
+            $conversation->delete();
+        });
+    }
+
+    /**
+     * Nomme ou retire un administrateur du groupe.
+     */
+    public function setAdminRole(Conversation $conversation, User $actor, int $targetUserId, bool $isAdmin): void
+    {
+        if ($conversation->type !== ConversationType::Group) {
+            throw new AccessDeniedHttpException('Cette conversation n\'est pas un groupe.');
+        }
+
+        if (! $conversation->isAdmin($actor->id) && (int) $conversation->created_by_id !== (int) $actor->id) {
+            throw new AccessDeniedHttpException('Seul un administrateur peut modifier les rôles.');
+        }
+
+        $member = $conversation->members()->where('user_id', $targetUserId)->whereNull('left_at')->first();
+        if (! $member) {
+            throw ValidationException::withMessages([
+                'user_id' => ['L\'utilisateur n\'est pas membre de ce groupe.'],
+            ]);
+        }
+
+        $targetUser = $member->user;
+        $targetName = $targetUser?->display_name ?: ($targetUser?->name ?: 'Un membre');
+
+        DB::transaction(function () use ($member, $conversation, $targetName, $isAdmin): void {
+            $member->update([
+                'role' => $isAdmin ? ConversationMemberRole::Admin : ConversationMemberRole::Member,
+            ]);
+
+            $systemText = $isAdmin
+                ? "{$targetName} a été nommé(e) administrateur du groupe"
+                : "{$targetName} n'est plus administrateur du groupe";
+
+            $this->postSystemMessage($conversation, $systemText);
+        });
+    }
+
+    /**
+     * Génère un lien d'invitation pour le groupe.
+     *
+     * @return array{url: string, token: string}
+     */
+    public function createInviteLink(Conversation $conversation, User $actor): array
+    {
+        if ($conversation->type !== ConversationType::Group) {
+            throw new AccessDeniedHttpException('Cette conversation n\'est pas un groupe.');
+        }
+
+        if (! $conversation->isAdmin($actor->id) && (int) $conversation->created_by_id !== (int) $actor->id) {
+            throw new AccessDeniedHttpException('Seul un administrateur peut générer un lien d\'invitation.');
+        }
+
+        if (! $conversation->invite_token) {
+            $conversation->update([
+                'invite_token' => Str::random(32),
+            ]);
+        }
+
+        $token = $conversation->invite_token;
+        $url = url("/api/messages/groups/join/{$token}");
+
+        return [
+            'url' => $url,
+            'token' => $token,
+        ];
+    }
+
+    /**
+     * Révoque le lien d'invitation du groupe.
+     */
+    public function revokeInviteLink(Conversation $conversation, User $actor): void
+    {
+        if ($conversation->type !== ConversationType::Group) {
+            throw new AccessDeniedHttpException('Cette conversation n\'est pas un groupe.');
+        }
+
+        if (! $conversation->isAdmin($actor->id) && (int) $conversation->created_by_id !== (int) $actor->id) {
+            throw new AccessDeniedHttpException('Seul un administrateur peut révoquer le lien d\'invitation.');
+        }
+
+        DB::transaction(function () use ($conversation): void {
+            $conversation->update([
+                'invite_token' => null,
+            ]);
+
+            $this->postSystemMessage($conversation, 'Le lien d\'invitation a été révoqué');
+        });
+    }
+
+    /**
+     * Rejoindre un groupe via un token d'invitation.
+     */
+    public function joinGroupByInviteToken(string $token, User $user): Conversation
+    {
+        /** @var Conversation|null $conversation */
+        $conversation = Conversation::query()
+            ->where('invite_token', $token)
+            ->where('type', ConversationType::Group)
+            ->first();
+
+        if (! $conversation) {
+            throw ValidationException::withMessages([
+                'token' => ['Ce lien d\'invitation est invalide ou a été révoqué.'],
+            ]);
+        }
+
+        if ($conversation->is_read_only) {
+            throw ValidationException::withMessages([
+                'token' => ['Ce groupe n\'accepte plus de nouveaux membres.'],
+            ]);
+        }
+
+        // Vérifier si l'utilisateur est déjà membre
+        $existing = $conversation->members()->where('user_id', $user->id)->first();
+        if ($existing) {
+            if ($existing->left_at !== null) {
+                $existing->update(['left_at' => null, 'joined_at' => now()]);
+                $userName = $user->display_name ?: ($user->name ?: 'Un membre');
+                $this->postSystemMessage($conversation, "{$userName} a rejoint le groupe via le lien d'invitation");
+            }
+
+            return $conversation->fresh(['members.user']);
+        }
+
+        DB::transaction(function () use ($conversation, $user): void {
+            ConversationMember::create([
+                'conversation_id' => $conversation->id,
+                'user_id' => $user->id,
+                'role' => ConversationMemberRole::Member,
+                'joined_at' => now(),
+            ]);
+
+            $userName = $user->display_name ?: ($user->name ?: 'Un membre');
+            $this->postSystemMessage($conversation, "{$userName} a rejoint le groupe via le lien d'invitation");
+        });
+
+        return $conversation->fresh(['members.user']);
     }
 }

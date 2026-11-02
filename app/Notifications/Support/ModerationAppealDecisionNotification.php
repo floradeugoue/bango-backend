@@ -53,10 +53,11 @@ class ModerationAppealDecisionNotification extends Notification implements Shoul
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
         $isRevoked = $this->resolution === 'revoked';
         $message = $isRevoked
-            ? "Votre recours {$this->appeal->reference} a été accepté et la sanction a été levée."
-            : "Votre recours {$this->appeal->reference} a été rejeté. Motif : {$this->decisionNotes}";
+            ? trans('notifications.moderation_appeal.revoked', ['reference' => $this->appeal->reference], $locale)
+            : trans('notifications.moderation_appeal.rejected', ['reference' => $this->appeal->reference, 'notes' => $this->decisionNotes], $locale);
 
         return [
             'type' => 'appeal_decision',

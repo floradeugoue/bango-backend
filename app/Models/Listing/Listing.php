@@ -9,6 +9,7 @@ use App\Enums\Listing\ListingStatus;
 use App\Enums\Visit\VisitReservationStatus;
 use App\Models\Boost\Campaign;
 use App\Models\Delegation\Delegation;
+use App\Models\Landlord\LandlordSlotRule;
 use App\Models\Message\Conversation;
 use App\Models\Page\Page;
 use App\Models\Reel\Reel;
@@ -49,6 +50,7 @@ class Listing extends Model
         'kind',
         'status',
         'uses_agenda',
+        'auto_confirm',
         'price',
         'currency',
         'period',
@@ -77,6 +79,7 @@ class Listing extends Model
         'lng',
         'views_count',
         'saves_count',
+        'shares_count',
         'likes_count',
         'pending_visits_count',
         'submitted_at',
@@ -108,6 +111,7 @@ class Listing extends Model
             'kind' => ListingKind::class,
             'status' => ListingStatus::class,
             'uses_agenda' => 'boolean',
+            'auto_confirm' => 'boolean',
             'withdrawn_by_bango' => 'boolean',
             'withdrawn_by_bango_at' => 'datetime',
             'price' => 'decimal:2',
@@ -129,6 +133,7 @@ class Listing extends Model
             'sponsored' => 'boolean',
             'views_count' => 'integer',
             'saves_count' => 'integer',
+            'shares_count' => 'integer',
             'likes_count' => 'integer',
             'pending_visits_count' => 'integer',
             'amenities' => 'array',
@@ -157,6 +162,24 @@ class Listing extends Model
         }
 
         return (bool) ($this->owner?->uses_agenda ?? true);
+    }
+
+    /**
+     * Indique si la confirmation automatique est active pour ce bien ou selon la règle bailleur.
+     */
+    public function autoConfirm(): bool
+    {
+        if ($this->auto_confirm !== null) {
+            return (bool) $this->auto_confirm;
+        }
+
+        if ($attrsAutoConfirm = ($this->attributes['auto_confirm'] ?? null)) {
+            return (bool) $attrsAutoConfirm;
+        }
+
+        $ownerRule = LandlordSlotRule::where('user_id', $this->owner_id)->first();
+
+        return (bool) ($ownerRule?->auto_confirm ?? false);
     }
 
     /**

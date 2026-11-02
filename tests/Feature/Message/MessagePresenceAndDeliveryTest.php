@@ -161,3 +161,43 @@ test('endpoint explicite markAsDelivered met a jour last_delivered_at', function
 
     expect($bobMember->fresh()->last_delivered_at->toDateTimeString())->toBe('2026-10-26 14:10:00');
 });
+
+test('ConversationMemberResource et MessageResource affichent le display_name et la certification des membres', function (): void {
+    $arnaud = User::factory()->create([
+        'name' => 'arnaud',
+        'display_name' => 'Arnaud Fotso',
+        'is_certified' => true,
+    ]);
+
+    $thread = Conversation::factory()->create(['created_by_id' => $this->alice->id]);
+    ConversationMember::create(['conversation_id' => $thread->id, 'user_id' => $this->alice->id]);
+    ConversationMember::create(['conversation_id' => $thread->id, 'user_id' => $arnaud->id]);
+
+    $message = Message::create([
+        'conversation_id' => $thread->id,
+        'sender_id' => $arnaud->id,
+        'type' => MessageType::Text,
+        'body' => 'Bonjour à tous',
+        'client_message_id' => 'client-arn-1',
+    ]);
+
+    Passport::actingAs($this->alice);
+
+    // 1. Vérifier ConversationMemberResource via GET /threads/{id}
+    $resThread = $this->getJson("/api/messages/threads/{$thread->id}");
+    $resThread->assertOk();
+    $memberArnaud = collect($resThread->json('data.members'))->firstWhere('user_id', $arnaud->id);
+
+    expect($memberArnaud['user']['name'])->toBe('Arnaud Fotso');
+    expect($memberArnaud['user']['certified'])->toBeTrue();
+    expect($memberArnaud['user']['is_certified'])->toBeTrue();
+
+    // 2. Vérifier MessageResource via GET /threads/{id}/messages
+    $resMessages = $this->getJson("/api/messages/threads/{$thread->id}/messages");
+    $resMessages->assertOk();
+    $msg = $resMessages->json('data.0');
+
+    expect($msg['sender']['name'])->toBe('Arnaud Fotso');
+    expect($msg['sender']['certified'])->toBeTrue();
+    expect($msg['sender']['is_certified'])->toBeTrue();
+});

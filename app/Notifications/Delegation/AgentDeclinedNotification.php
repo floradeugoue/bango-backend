@@ -41,14 +41,17 @@ class AgentDeclinedNotification extends Notification implements ShouldQueue
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
+
         return [
             'type' => 'agent_declined',
             'delegation_id' => $this->delegation->id,
             'listing_id' => $this->delegation->listing_id,
             'agent_id' => $this->delegation->agent_id,
-            'agent_name' => $this->delegation->agent->name ?? 'Agent',
+            'agent_name' => $this->delegation->agent->display_name ?: ($this->delegation->agent->name ?? 'Agent'),
             'listing_title' => $this->delegation->listing->title ?? 'Bien',
-            'message' => 'L\'agent a décliné votre invitation de mandat',
+            'title' => trans('notifications.agent_declined.title', [], $locale),
+            'message' => trans('notifications.agent_declined.body', [], $locale),
         ];
     }
 }

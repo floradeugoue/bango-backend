@@ -7,6 +7,7 @@ use App\Http\Resources\Listing\ListingResource;
 use App\Models\Listing\Listing;
 use App\Models\Listing\ListingLike;
 use App\Models\User;
+use App\Notifications\Social\SocialNotification;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -70,23 +71,44 @@ class ListingLikeController extends Controller
     }
 
     /**
-     * Aimer une annonce (idempotent : un seul « j'aime » par compte).
+     * Aimer une annonce (idempotent : un seul « j'aime » par compte ou par page).
      */
     public function store(Request $request, string $id): JsonResponse
     {
         $listing = Listing::publiclyVisible()->findOrFail($id);
+        $activePage = $request->attributes->get('acting_page') ?? $request->attributes->get('active_page');
 
-        DB::transaction(function () use ($listing, $request) {
+        DB::transaction(function () use ($listing, $request, $activePage) {
             /** @var User $user */
             $user = $request->user();
 
-            $like = ListingLike::firstOrCreate([
+            $attributes = ['listing_id' => $listing->id];
+            if ($activePage) {
+                $attributes['page_id'] = $activePage->id;
+            } else {
+                $attributes['user_id'] = $user->id;
+            }
+
+            $like = ListingLike::firstOrCreate($attributes, [
                 'user_id' => $user->id,
-                'listing_id' => $listing->id,
+                'page_id' => $activePage?->id,
             ]);
 
             if ($like->wasRecentlyCreated) {
                 $listing->increment('likes_count');
+
+                // Notification au propriétaire si distinct
+                if ($listing->owner_id && (int) $listing->owner_id !== (int) $user->id) {
+                    try {
+                        $listing->owner->notify(new SocialNotification('like', $user, [
+                            'listing_id' => $listing->id,
+                            'page_id' => $listing->page_id,
+                            'liker_page_id' => $activePage?->id,
+                        ]));
+                    } catch (\Throwable $e) {
+                        // ignore
+                    }
+                }
             }
         });
 
@@ -103,11 +125,17 @@ class ListingLikeController extends Controller
     public function destroy(Request $request, string $id): JsonResponse
     {
         $listing = Listing::findOrFail($id);
+        $activePage = $request->attributes->get('acting_page') ?? $request->attributes->get('active_page');
 
-        DB::transaction(function () use ($listing, $request) {
-            $deleted = ListingLike::where('user_id', $request->user()->id)
-                ->where('listing_id', $listing->id)
-                ->delete();
+        DB::transaction(function () use ($listing, $request, $activePage) {
+            $query = ListingLike::where('listing_id', $listing->id);
+            if ($activePage) {
+                $query->where('page_id', $activePage->id);
+            } else {
+                $query->where('user_id', $request->user()->id)->whereNull('page_id');
+            }
+
+            $deleted = $query->delete();
 
             if ($deleted > 0) {
                 $listing->decrement('likes_count');

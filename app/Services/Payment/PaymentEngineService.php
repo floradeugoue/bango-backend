@@ -167,16 +167,22 @@ class PaymentEngineService
                     ->exists();
 
                 if (! $alreadyFulfilled) {
+                    $txMetadata = $lockedTx->metadata ?? [];
+                    $subMetadata = array_merge([
+                        'payment_transaction_id' => $lockedTx->id,
+                        'provider' => $lockedTx->provider->value,
+                        'amount_paid' => (float) $lockedTx->total_amount,
+                        'currency' => $lockedTx->currency,
+                    ], array_filter([
+                        'align_with' => $txMetadata['align_with'] ?? null,
+                        'custom_period_end' => $txMetadata['custom_period_end'] ?? null,
+                    ]));
+
                     $subscription = $this->subscriptionService->activateSubscription(
                         user: $lockedTx->user,
                         price: $lockedTx->price,
                         paymentReference: $lockedTx->reference,
-                        metadata: [
-                            'payment_transaction_id' => $lockedTx->id,
-                            'provider' => $lockedTx->provider->value,
-                            'amount_paid' => (float) $lockedTx->total_amount,
-                            'currency' => $lockedTx->currency,
-                        ]
+                        metadata: $subMetadata
                     );
 
                     // Association atomique de la subscription à la transaction

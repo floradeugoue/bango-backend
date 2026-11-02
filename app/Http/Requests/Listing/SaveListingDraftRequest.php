@@ -39,6 +39,7 @@ class SaveListingDraftRequest extends FormRequest
             'charges' => ['nullable', 'numeric', 'min:0'],
             'negotiable' => ['nullable', 'boolean'],
             'utilities_included' => ['nullable', 'boolean'],
+            'uses_agenda' => ['nullable', 'boolean'],
             'bedrooms' => ['nullable', 'integer', 'min:0', 'max:100'],
             'showers' => ['nullable', 'integer', 'min:0', 'max:100'],
             'area' => ['nullable', 'numeric', 'min:0'],

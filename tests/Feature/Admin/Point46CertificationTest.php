@@ -1,10 +1,13 @@
 <?php
 
+use App\Enums\Listing\ListingStatus;
+use App\Http\Resources\Listing\ListingResource;
 use App\Http\Resources\PublicProfileResource;
 use App\Http\Resources\Search\PeopleSearchResultResource;
 use App\Http\Resources\UserResource;
 use App\Models\Admin\AdminSession;
 use App\Models\Auth\Role;
+use App\Models\Listing\Listing;
 use App\Models\User;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -82,4 +85,52 @@ test('point 46: /admin/users/{id}/certification route grants and removes certifi
 
     $user->refresh();
     expect($user->is_certified)->toBeFalse();
+});
+
+test('ListingResource.owner exposes certified boolean based on is_certified', function () {
+    $certifiedUser = User::factory()->create([
+        'is_certified' => true,
+        'badge' => 'landlord',
+    ]);
+
+    $listing = Listing::factory()->create([
+        'owner_id' => $certifiedUser->id,
+        'status' => ListingStatus::Published,
+    ]);
+
+    $resource = (new ListingResource($listing))->toArray(Request::create('/api/listings/'.$listing->id));
+
+    expect($resource['owner'])->toHaveKey('certified');
+    expect($resource['owner']['certified'])->toBeTrue();
+    expect($resource['owner']['is_certified'])->toBeTrue();
+
+    // Propriétaire non certifié
+    $certifiedUser->is_certified = false;
+    $certifiedUser->save();
+
+    $resourceAfter = (new ListingResource($listing->fresh()))->toArray(Request::create('/api/listings/'.$listing->id));
+    expect($resourceAfter['owner']['certified'])->toBeFalse();
+    expect($resourceAfter['owner']['is_certified'])->toBeFalse();
+});
+
+test('600 000 abonnés déclenche automatiquement la certification et la retire en cas de perte du seuil', function () {
+    $creator = User::factory()->create([
+        'is_certified' => false,
+        'is_private' => false,
+    ]);
+
+    // Test avec syncFollowerCertificationThreshold paramétrable
+    expect($creator->followers()->count())->toBe(0);
+    $creator->syncFollowerCertificationThreshold();
+    expect($creator->is_certified)->toBeFalse();
+
+    // Atteint le seuil >= 600 000
+    $creator->syncFollowerCertificationThreshold(600000);
+    expect($creator->is_certified)->toBeTrue();
+    expect($creator->certified_at)->not->toBeNull();
+
+    // Redescente sous 600 000
+    $creator->syncFollowerCertificationThreshold(599999);
+    expect($creator->is_certified)->toBeFalse();
+    expect($creator->certified_at)->toBeNull();
 });

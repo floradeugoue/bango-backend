@@ -44,13 +44,17 @@ class VisitConfirmedNotification extends Notification implements ShouldQueue
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
+        $title = $this->reservation->listing->title ?? '';
+
         return [
             'type' => 'visit_confirmed',
             'reservation_id' => $this->reservation->id,
             'listing_id' => $this->reservation->listing_id,
             'slot_id' => $this->reservation->slot_id,
             'scheduled_at' => $this->reservation->slot->start_at->toIso8601String(),
-            'message' => "Visite confirmée pour {$this->reservation->listing->title}",
+            'title' => trans('notifications.visit_confirmed.title', [], $locale),
+            'message' => trans('notifications.visit_confirmed.body', ['title' => $title], $locale),
         ];
     }
 }

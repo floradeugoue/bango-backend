@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Landlord;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Landlord\SubmitKycRequest;
+use App\Http\Resources\Kyc\KycDocumentResource;
 use App\Http\Resources\Kyc\KycSubmissionResource;
 use App\Models\Kyc\KycDocument;
 use App\Services\Kyc\KycService;
@@ -63,5 +64,56 @@ class LandlordKycController extends Controller
         $document = KycDocument::findOrFail($id);
 
         return $this->kycService->downloadDocument($document, $request->user());
+    }
+
+    /**
+     * Ajouter un justificatif de propriété supplémentaire pour un bien.
+     * POST /api/landlord/kyc/property-deeds
+     */
+    public function storePropertyDeed(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'property_deed' => ['nullable', 'file', 'max:10240', 'mimes:jpeg,jpg,png,webp,pdf'],
+            'deed' => ['nullable', 'file', 'max:10240', 'mimes:jpeg,jpg,png,webp,pdf'],
+            'file' => ['nullable', 'file', 'max:10240', 'mimes:jpeg,jpg,png,webp,pdf'],
+            'deed_type' => ['nullable', 'string', 'max:64'],
+            'listing_id' => ['nullable', 'uuid'],
+        ]);
+
+        $file = $request->file('property_deed') ?? $request->file('deed') ?? $request->file('file');
+
+        if (! $file) {
+            return response()->json([
+                'message' => 'Un fichier de justificatif de propriété est requis.',
+                'errors' => [
+                    'property_deed' => ['Le fichier de titre de propriété est manquant.'],
+                ],
+            ], 422);
+        }
+
+        $document = $this->kycService->addPropertyDeed(
+            user: $request->user(),
+            file: $file,
+            deedType: $validated['deed_type'] ?? null,
+            listingId: $validated['listing_id'] ?? null
+        );
+
+        return response()->json([
+            'message' => 'Justificatif de propriété ajouté avec succès. Il sera examiné par la conformité.',
+            'data' => new KycDocumentResource($document),
+        ], 201);
+    }
+
+    /**
+     * Lister les justificatifs de propriété du bailleur avec leur état.
+     * GET /api/landlord/kyc/property-deeds
+     */
+    public function listPropertyDeeds(Request $request): JsonResponse
+    {
+        $deeds = $this->kycService->listPropertyDeeds($request->user());
+
+        return response()->json([
+            'data' => KycDocumentResource::collection($deeds),
+        ]);
     }
 }

@@ -30,8 +30,15 @@ class EnsureAdminSession
         }
 
         // Support testing with Passport::actingAs for admin users
-        if (empty($rawCookie) && app()->environment('testing') && $request->user()?->isAdmin()) {
-            return $next($request);
+        if (empty($rawCookie) && app()->environment('testing') && $request->user()) {
+            if ($request->user()->isAdmin()) {
+                return $next($request);
+            }
+
+            return response()->json([
+                'code' => 'forbidden',
+                'message' => 'Accès refusé. Privilèges administratifs insuffisants.',
+            ], 403);
         }
 
         if (empty($rawCookie) || ! is_string($rawCookie)) {

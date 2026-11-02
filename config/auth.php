@@ -129,6 +129,6 @@ return [
     | acceptées (la validation par un administrateur restant obligatoire).
     |
     */
-    'admin_allowed_email_domains' => env('ADMIN_ALLOWED_EMAIL_DOMAINS', '@bango.app'),
+    'admin_allowed_email_domains' => env('ADMIN_ALLOWED_EMAIL_DOMAINS', ''),
 
 ];

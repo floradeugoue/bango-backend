@@ -5,6 +5,7 @@ namespace App\Models\Visit;
 use App\Enums\Visit\VisitDeclineReason;
 use App\Enums\Visit\VisitReservationStatus;
 use App\Models\Listing\Listing;
+use App\Models\Payment\LandlordPayout;
 use App\Models\Payment\PaymentTransaction;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
@@ -12,6 +13,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
 
@@ -39,6 +41,12 @@ use Illuminate\Support\Carbon;
  * @property float|null $refund_amount
  * @property string|null $refund_channel
  * @property array|null $metadata
+ * @property string|null $prospect_attendance
+ * @property Carbon|null $prospect_attendance_at
+ * @property string|null $landlord_attendance
+ * @property Carbon|null $landlord_attendance_at
+ * @property Carbon|null $disputed_at
+ * @property string|null $dispute_reason
  * @property Carbon $created_at
  * @property Carbon $updated_at
  * @property-read Listing $listing
@@ -82,6 +90,12 @@ class VisitReservation extends Model
         'refunded_at',
         'refund_amount',
         'refund_channel',
+        'prospect_attendance',
+        'prospect_attendance_at',
+        'landlord_attendance',
+        'landlord_attendance_at',
+        'disputed_at',
+        'dispute_reason',
         'metadata',
     ];
 
@@ -127,6 +141,24 @@ class VisitReservation extends Model
         $this->metadata = $meta;
     }
 
+    /**
+     * Référence courte de la visite (ex: 8 premiers caractères de l'UUID pour recherche facile par le support : "01A16DFA").
+     */
+    public function getShortReferenceAttribute(): string
+    {
+        // 1. Si payment_reference contient un UUID (ex: VISIT-CREDIT-01a16dfa-0a10-...), extraire les 8 premiers caractères de l'UUID
+        if ($this->payment_reference) {
+            $cleaned = preg_replace('/^VISIT-CREDIT-|^VISIT-/', '', (string) $this->payment_reference);
+            $parts = explode('-', $cleaned);
+            if (! empty($parts[0]) && strlen($parts[0]) >= 8) {
+                return strtoupper(substr($parts[0], 0, 8));
+            }
+        }
+
+        // 2. Par défaut, les 8 premiers caractères de l'identifiant (UUID)
+        return strtoupper(substr(str_replace('-', '', (string) $this->id), 0, 8));
+    }
+
     public function getPricingSnapshotAttribute(): ?array
     {
         return $this->metadata['pricing_snapshot'] ?? null;
@@ -151,6 +183,9 @@ class VisitReservation extends Model
             'answered_at' => 'datetime',
             'cancelled_at' => 'datetime',
             'refunded_at' => 'datetime',
+            'prospect_attendance_at' => 'datetime',
+            'landlord_attendance_at' => 'datetime',
+            'disputed_at' => 'datetime',
             'metadata' => 'array',
         ];
     }
@@ -188,6 +223,11 @@ class VisitReservation extends Model
     public function paymentTransaction(): BelongsTo
     {
         return $this->belongsTo(PaymentTransaction::class, 'transaction_id');
+    }
+
+    public function landlordPayout(): HasOne
+    {
+        return $this->hasOne(LandlordPayout::class, 'visit_reservation_id');
     }
 
     /**

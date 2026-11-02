@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\DB;
 
 class Post extends Model
 {
@@ -27,6 +28,7 @@ class Post extends Model
         'user_id',
         'page_id',
         'body',
+        'language',
         'audience',
         'comments_by',
         'comments_closed',
@@ -42,6 +44,7 @@ class Post extends Model
         'likes_count',
         'comments_count',
         'shares_count',
+        'saves_count',
         'views_count',
         'pinned_comment_id',
     ];
@@ -62,6 +65,7 @@ class Post extends Model
             'likes_count' => 'integer',
             'comments_count' => 'integer',
             'shares_count' => 'integer',
+            'saves_count' => 'integer',
             'views_count' => 'integer',
         ];
     }
@@ -134,6 +138,16 @@ class Post extends Model
      */
     public function isLikedBy(?User $user): bool
     {
+        $activePage = request()?->attributes?->get('active_page');
+
+        if ($activePage) {
+            if ($this->relationLoaded('likes')) {
+                return $this->likes->contains('page_id', $activePage->id);
+            }
+
+            return $this->likes()->where('page_id', $activePage->id)->exists();
+        }
+
         if (! $user) {
             return false;
         }
@@ -143,6 +157,41 @@ class Post extends Model
         }
 
         return $this->likes()->where('user_id', $user->id)->exists();
+    }
+
+    /**
+     * Utilisateurs ayant enregistré cette publication.
+     */
+    public function savedByUsers(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'user_saved_posts')
+            ->withPivot('page_id')
+            ->withTimestamps();
+    }
+
+    /**
+     * Vérifie si un utilisateur ou une page active a enregistré cette publication.
+     */
+    public function isSavedBy(?User $user): bool
+    {
+        $activePage = request()?->attributes?->get('active_page');
+
+        if ($activePage) {
+            return DB::table('user_saved_posts')
+                ->where('post_id', $this->id)
+                ->where('page_id', $activePage->id)
+                ->exists();
+        }
+
+        if (! $user) {
+            return false;
+        }
+
+        return DB::table('user_saved_posts')
+            ->where('post_id', $this->id)
+            ->where('user_id', $user->id)
+            ->whereNull('page_id')
+            ->exists();
     }
 
     /**

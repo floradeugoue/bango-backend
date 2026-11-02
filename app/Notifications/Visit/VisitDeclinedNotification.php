@@ -42,12 +42,16 @@ class VisitDeclinedNotification extends Notification implements ShouldQueue
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
+        $title = $this->reservation->listing->title ?? '';
+
         return [
             'type' => 'visit_declined',
             'reservation_id' => $this->reservation->id,
             'listing_id' => $this->reservation->listing_id,
             'reason' => $this->reason,
-            'message' => "Votre demande de visite pour {$this->reservation->listing->title} a été déclinée. Les frais ont été remboursés.",
+            'title' => trans('notifications.visit_declined.title', [], $locale),
+            'message' => trans('notifications.visit_declined.body', ['title' => $title], $locale),
         ];
     }
 }

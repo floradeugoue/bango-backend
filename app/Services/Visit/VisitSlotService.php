@@ -5,6 +5,8 @@ namespace App\Services\Visit;
 use App\Enums\Visit\VisitReservationStatus;
 use App\Enums\Visit\VisitSlotStatus;
 use App\Models\Geo\City;
+use App\Models\Landlord\LandlordSlotRule;
+use App\Models\Landlord\LandlordUnavailability;
 use App\Models\Listing\Listing;
 use App\Models\User;
 use App\Models\Visit\VisitReservation;
@@ -96,7 +98,12 @@ class VisitSlotService
                 ->all();
         }
 
-        // 4. Structurer les créneaux par jour
+        // Vérifier les congés / indisponibilités du bailleur
+        $unavailabilities = LandlordUnavailability::where('user_id', $listing->owner_id)
+            ->where('to', '>=', $at)
+            ->where('from', '<=', $endDate)
+            ->get();
+
         $days = [];
         for ($i = 0; $i < self::DAYS_SHOWN; $i++) {
             $currentDate = $at->copy()->addDays($i);
@@ -110,8 +117,15 @@ class VisitSlotService
             foreach ($daySlots as $slot) {
                 $holdsCount = $slot->activeReservations->count();
                 $isMine = in_array($slot->id, $myReservedSlotIds, true);
+
+                // Vérifier si le créneau tombe pendant une indisponibilité (congés) du bailleur
+                $isUnavailable = $unavailabilities->contains(function ($u) use ($slot) {
+                    return $slot->start_at->lt($u->to) && $slot->end_at->gt($u->from);
+                });
+
                 $isFree = $slot->start_at->isAfter($earliestTime)
                     && ! $isMine
+                    && ! $isUnavailable
                     && $holdsCount < $slot->capacity;
 
                 $formattedSlots[] = [
@@ -203,38 +217,97 @@ class VisitSlotService
      */
     public function ensureDefaultSlotsExist(Listing $listing, Carbon $startDate, int $daysCount = 5): void
     {
-        // Créneaux horaires par défaut : 09:30, 11:00, 14:00, 15:30, 17:00
-        $defaultTimes = ['09:30', '11:00', '14:00', '15:30', '17:00'];
         $timezone = $this->resolveListingTimezone($listing);
+        $ownerRule = LandlordSlotRule::where('user_id', $listing->owner_id)->first();
+
+        $scheduleByDay = null;
+        if ($ownerRule && ! empty($ownerRule->days) && is_array($ownerRule->days)) {
+            $scheduleByDay = collect($ownerRule->days)->keyBy('day');
+        }
+
+        $defaultCapacity = $ownerRule && $ownerRule->grouped ? max(1, (int) $ownerRule->group_size) : 1;
+        $defaultTimes = ['09:30', '11:00', '14:00', '15:30', '17:00'];
 
         for ($i = 0; $i < $daysCount; $i++) {
             $day = $startDate->copy()->setTimezone($timezone)->addDays($i);
+            $dayOfWeek = $day->dayOfWeek;
 
-            // Pas de visites le dimanche (jour 0)
-            if ($day->dayOfWeek === Carbon::SUNDAY) {
-                continue;
-            }
+            if ($scheduleByDay) {
+                if (! $scheduleByDay->has($dayOfWeek)) {
+                    continue;
+                }
+                $rule = $scheduleByDay->get($dayOfWeek);
+                if (! empty($rule['closed'])) {
+                    continue;
+                }
+                $from = $rule['from'] ?? '09:00';
+                $to = $rule['to'] ?? '18:00';
+                [$fromH, $fromM] = explode(':', $from);
+                [$toH, $toM] = explode(':', $to);
 
-            foreach ($defaultTimes as $time) {
-                [$hour, $minute] = explode(':', $time);
-                // Créer le créneau dans le fuseau du pays de l'annonce, puis stocker en UTC
-                $startAt = $day->copy()->setTime((int) $hour, (int) $minute, 0)->utc();
-                $endAt = $startAt->copy()->addMinutes(self::VISIT_DURATION_MINUTES);
+                $cursor = $day->copy()->setTime((int) $fromH, (int) $fromM, 0);
+                $limit = $day->copy()->setTime((int) $toH, (int) $toM, 0);
 
-                VisitSlot::firstOrCreate(
-                    [
-                        'listing_id' => $listing->id,
-                        'start_at' => $startAt,
-                        'end_at' => $endAt,
-                    ],
-                    [
-                        'owner_id' => $listing->owner_id,
-                        'agent_id' => $listing->agent_id,
-                        'capacity' => 1,
-                        'booked_count' => 0,
-                        'status' => VisitSlotStatus::Open,
-                    ]
-                );
+                while ($cursor->copy()->addMinutes(self::VISIT_DURATION_MINUTES)->lte($limit)) {
+                    $startAt = $cursor->copy()->utc();
+                    $endAt = $startAt->copy()->addMinutes(self::VISIT_DURATION_MINUTES);
+
+                    if ($startAt->isFuture()) {
+                        $slot = VisitSlot::firstOrCreate(
+                            [
+                                'listing_id' => $listing->id,
+                                'start_at' => $startAt,
+                                'end_at' => $endAt,
+                            ],
+                            [
+                                'owner_id' => $listing->owner_id,
+                                'agent_id' => $listing->agent_id,
+                                'capacity' => $defaultCapacity,
+                                'booked_count' => 0,
+                                'status' => VisitSlotStatus::Open,
+                            ]
+                        );
+
+                        if ($slot->status !== VisitSlotStatus::Open && ! $slot->activeReservations()->exists()) {
+                            $slot->status = VisitSlotStatus::Open;
+                            $slot->save();
+                        }
+                    }
+                    $cursor->addMinutes(self::SLOT_STEP_MINUTES);
+                }
+            } else {
+                // Pas de visites le dimanche (jour 0)
+                if ($dayOfWeek === Carbon::SUNDAY) {
+                    continue;
+                }
+
+                foreach ($defaultTimes as $time) {
+                    [$hour, $minute] = explode(':', $time);
+                    $startAt = $day->copy()->setTime((int) $hour, (int) $minute, 0)->utc();
+                    $endAt = $startAt->copy()->addMinutes(self::VISIT_DURATION_MINUTES);
+
+                    if ($startAt->isFuture()) {
+                        $slot = VisitSlot::firstOrCreate(
+                            [
+                                'listing_id' => $listing->id,
+                                'start_at' => $startAt,
+                                'end_at' => $endAt,
+                            ],
+                            [
+                                'owner_id' => $listing->owner_id,
+                                'agent_id' => $listing->agent_id,
+                                'capacity' => $defaultCapacity,
+                                'booked_count' => 0,
+                                'status' => VisitSlotStatus::Open,
+                            ]
+                        );
+
+                        if ($slot->status !== VisitSlotStatus::Open && ! $slot->activeReservations()->exists()) {
+                            $slot->status = VisitSlotStatus::Open;
+                            $slot->save();
+                        }
+                    }
+                }
             }
         }
     }
@@ -343,10 +416,24 @@ class VisitSlotService
             if (isset($payload['group_size'])) {
                 $attrs['group_size'] = (int) $payload['group_size'];
             }
+            if (isset($payload['auto_confirm'])) {
+                $attrs['auto_confirm'] = (bool) $payload['auto_confirm'];
+                $listing->auto_confirm = (bool) $payload['auto_confirm'];
+            }
+            if (array_key_exists('uses_agenda', $payload)) {
+                $listing->uses_agenda = $payload['uses_agenda'] !== null ? (bool) $payload['uses_agenda'] : null;
+            }
             $listing->attributes = $attrs;
             $listing->save();
 
             $defaultCapacity = ! empty($payload['grouped']) ? max(1, (int) ($payload['group_size'] ?? 5)) : 1;
+
+            // Rouvrir les créneaux futurs fermés sans réservations actives (pour régénération)
+            VisitSlot::where('listing_id', $listing->id)
+                ->where('start_at', '>', now())
+                ->where('status', VisitSlotStatus::Closed->value)
+                ->whereDoesntHave('activeReservations')
+                ->update(['status' => VisitSlotStatus::Open->value]);
 
             // 1. Mise à jour explicite par liste de créneaux
             if (! empty($payload['slots']) && is_array($payload['slots'])) {
@@ -453,11 +540,41 @@ class VisitSlotService
                                 ]
                             );
 
+                            if ($slot->status !== VisitSlotStatus::Open) {
+                                $slot->status = VisitSlotStatus::Open;
+                                $slot->capacity = $defaultCapacity;
+                                $slot->save();
+                            }
+
                             $createdSlots[] = $slot;
                         }
 
                         $cursor->addMinutes($slotDuration + 15);
                     }
+                }
+            }
+
+            // 3. Si aucun créneau explicite ou grille 'days' n'a été spécifié (ex: simple renvoi d'horaires ou mise à jour de paramètres),
+            // ou pour garantir que tous les créneaux futurs fermés sans réservations soient régénérés/rouverts :
+            if (empty($payload['slots']) && empty($payload['days'])) {
+                // Rouvrir tous les créneaux futurs fermés sans réservations actives
+                VisitSlot::where('listing_id', $listing->id)
+                    ->where('start_at', '>', now())
+                    ->where('status', VisitSlotStatus::Closed->value)
+                    ->whereDoesntHave('activeReservations')
+                    ->update(['status' => VisitSlotStatus::Open->value]);
+
+                // Régénérer les créneaux par défaut pour les 7 prochains jours
+                $this->ensureDefaultSlotsExist($listing, now(), 7);
+
+                $freshFutureSlots = VisitSlot::where('listing_id', $listing->id)
+                    ->where('start_at', '>', now())
+                    ->where('status', VisitSlotStatus::Open->value)
+                    ->orderBy('start_at')
+                    ->get();
+
+                foreach ($freshFutureSlots as $slot) {
+                    $createdSlots[] = $slot;
                 }
             }
 
