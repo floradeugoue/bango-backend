@@ -6,6 +6,7 @@ use App\Models\Listing\Listing;
 use App\Models\Listing\ListingMedia;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\Auth;
 
 /**
  * @mixin Listing
@@ -19,7 +20,7 @@ class ListingResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
-        $viewer = $request->user();
+        $viewer = $request->user() ?: Auth::guard('api')->user();
 
         // Photos sous forme d'URLs simples et qualifications de pièces
         $photosList = $this->photos->map(fn (ListingMedia $m) => $m->url)->values()->all();
@@ -41,11 +42,14 @@ class ListingResource extends JsonResource
             $ownerRole = ($owner->badge === 'agent') ? 'agent' : 'landlord';
             $ownerData = [
                 'id' => $owner->id,
-                'name' => $owner->name,
-                'display_name' => $owner->display_name ?? $owner->name,
+                'name' => $owner->display_name ?: $owner->name,
+                'display_name' => $owner->display_name ?: $owner->name,
+                'handle' => $owner->handle,
                 'avatar_url' => $owner->avatar_url,
                 'phone' => $owner->phone,
                 'is_verified' => (bool) $owner->is_verified,
+                'certified' => (bool) ($owner->is_certified ?? false),
+                'is_certified' => (bool) ($owner->is_certified ?? false),
                 'badge' => $owner->badge ?? 'none',
                 'role' => $ownerRole,
                 'meta' => $owner->is_verified ? 'Bailleur vérifié' : 'Bailleur non vérifié',
@@ -87,11 +91,15 @@ class ListingResource extends JsonResource
             'owner_phone' => $owner?->phone,
             'comments_count' => (int) ($this->comments_count ?? 0),
             'saves' => (int) $this->saves_count,
+            'saves_count' => (int) ($this->saves_count ?? 0),
             'is_saved' => $viewer ? $this->isSavedBy($viewer) : false,
+            'shares' => (int) ($this->shares_count ?? 0),
+            'shares_count' => (int) ($this->shares_count ?? 0),
             'likes_count' => (int) ($this->likes_count ?? 0),
             'is_liked' => $viewer ? $this->isLikedBy($viewer) : false,
             'visit_fee' => (float) $this->visit_fee,
             'uses_agenda' => $this->usesAgenda(),
+            'auto_confirm' => (bool) ($this->auto_confirm ?? false),
             'sponsored' => (bool) $this->sponsored,
             'is_sponsored' => $this->isSponsored(),
             'campaign_id' => $this->campaignId(),

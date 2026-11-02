@@ -37,13 +37,16 @@ class CampaignActivatedNotification extends Notification implements ShouldQueue
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
+
         return [
             'type' => 'campaign_activated',
             'campaign_id' => $this->campaign->id,
             'page_id' => $this->campaign->page_id,
             'budget' => (float) $this->campaign->budget_amount,
             'objective' => $this->campaign->objective->value,
-            'message' => 'Votre campagne de boost est désormais active et en cours de diffusion.',
+            'title' => trans('notifications.campaign_activated.title', [], $locale),
+            'message' => trans('notifications.campaign_activated.body', [], $locale),
         ];
     }
 }

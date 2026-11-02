@@ -32,6 +32,7 @@ class InitiatePaymentRequest extends FormRequest
             'idempotency_key' => ['sometimes', 'string', 'max:128'],
             'key' => ['sometimes', 'string', 'max:128'],
             'channel' => ['nullable', 'string', 'in:mobile_money,credit_wallet,card'],
+            'align_with' => ['nullable', 'string', 'in:landlord,agent'],
         ];
     }
 

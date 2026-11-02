@@ -23,6 +23,7 @@ class LandlordPropertyResource extends JsonResource
             'mode' => $this->mode?->value ?? (string) $this->mode,
             'kind' => $this->kind?->value ?? (string) $this->kind,
             'status' => $this->status?->value ?? (string) $this->status,
+            'uses_agenda' => $this->usesAgenda(),
             'price' => (float) $this->price,
             'currency' => $this->currency ?? 'XOF',
             'period' => $this->period,
@@ -55,7 +56,7 @@ class LandlordPropertyResource extends JsonResource
             ]),
             'active_agent' => $this->activeDelegation ? [
                 'id' => $this->activeDelegation->agent_id,
-                'name' => $this->activeDelegation->agent->name ?? $this->activeDelegation->agent->display_name ?? null,
+                'name' => $this->activeDelegation->agent?->display_name ?: $this->activeDelegation->agent?->name,
                 'handle' => $this->activeDelegation->agent->handle ?? null,
                 'capabilities' => $this->activeDelegation->capabilities ?? [],
             ] : null,

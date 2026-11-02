@@ -41,14 +41,17 @@ class AgentAcceptedNotification extends Notification implements ShouldQueue
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
+
         return [
             'type' => 'agent_accepted',
             'delegation_id' => $this->delegation->id,
             'listing_id' => $this->delegation->listing_id,
             'agent_id' => $this->delegation->agent_id,
-            'agent_name' => $this->delegation->agent->name ?? 'Agent',
+            'agent_name' => $this->delegation->agent->display_name ?: ($this->delegation->agent->name ?? 'Agent'),
             'listing_title' => $this->delegation->listing->title ?? 'Bien',
-            'message' => 'L\'agent a accepté votre invitation de mandat',
+            'title' => trans('notifications.agent_accepted.title', [], $locale),
+            'message' => trans('notifications.agent_accepted.body', [], $locale),
         ];
     }
 }

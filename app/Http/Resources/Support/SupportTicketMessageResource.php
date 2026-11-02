@@ -24,7 +24,8 @@ class SupportTicketMessageResource extends JsonResource
             'support_ticket_id' => (int) $this->support_ticket_id,
             'sender' => [
                 'id' => $this->sender_id,
-                'name' => $this->sender?->name ?? 'Support BANGO',
+                'name' => $this->sender ? ($this->sender->display_name ?: $this->sender->name) : 'Support BANGO',
+                'handle' => $this->sender?->handle,
             ],
             'sender_type' => $this->sender_type->value,
             'message' => $this->message,

@@ -2,7 +2,6 @@
 
 namespace App\Notifications\Social;
 
-use App\Jobs\Notification\SendPushNotificationJob;
 use App\Models\User;
 use Illuminate\Bus\Queueable;
 use Illuminate\Notifications\Notification;
@@ -44,17 +43,11 @@ class SocialNotification extends Notification
             'snippet' => $snippet,
         ], $locale);
 
-        // Déclenchement automatique de la notification push
-        if ($notifiable instanceof User) {
-            SendPushNotificationJob::dispatch($notifiable, $title, $body, [
-                'type' => $this->type,
-                'actor_id' => $this->actor->id,
-                'metadata' => $this->metadata,
-            ]);
-        }
+        $pageId = $this->metadata['page_id'] ?? null;
 
         return [
             'type' => $this->type,
+            'page_id' => $pageId,
             'actor_id' => $this->actor->id,
             'actor_name' => $actorName,
             'title' => $title,

@@ -40,9 +40,9 @@ class StoryViewerResource extends JsonResource
 
         return [
             'id' => $viewer->id,
-            'name' => $viewer->name,
+            'name' => $viewer->display_name ?: $viewer->name,
             'handle' => $viewer->handle,
-            'display_name' => $viewer->display_name ?? $viewer->name,
+            'display_name' => $viewer->display_name ?: $viewer->name,
             'avatar_url' => $viewer->avatar_url,
             'is_verified' => (bool) $viewer->is_verified,
             'viewed_at' => $this->viewed_at?->toIso8601String() ?? $this->created_at?->toIso8601String(),

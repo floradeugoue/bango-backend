@@ -14,7 +14,7 @@ class UserResource extends JsonResource
             'email' => $this->email,
             'phone' => $this->phone,
             'handle' => $this->handle,
-            'displayName' => $this->display_name ?? $this->name,
+            'displayName' => $this->display_name ?: $this->name,
             'avatarUrl' => $this->avatar_url,
             'bio' => $this->bio,
             'website' => $this->website,
@@ -37,6 +37,8 @@ class UserResource extends JsonResource
             'privacySettings' => $this->privacy_settings,
             'badge' => $this->badge ?? 'none',
             'verificationLapsed' => (bool) ($this->verification_lapsed ?? false),
+            'uses_agenda' => (bool) ($this->uses_agenda ?? true),
+            'usesAgenda' => (bool) ($this->uses_agenda ?? true),
             'restrictedUntil' => $this->restricted_until?->toIso8601String(),
             'counts' => [
                 'followers' => $this->followers()->count(),

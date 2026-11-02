@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources\Story;
 
+use App\Models\Page\Page;
 use App\Models\Story\Story;
 use App\Models\Story\StoryLike;
 use App\Models\User;
@@ -32,15 +33,33 @@ class StoryResource extends JsonResource
                 : StoryLike::where('story_id', $this->id)->where('user_id', $user->id)->exists();
         }
 
+        $page = $this->page_id ? ($this->relationLoaded('page') ? $this->page : Page::find($this->page_id)) : null;
+
+        $authorId = $page ? (string) $page->id : (string) $this->user->id;
+        $authorName = $page ? $page->name : ($this->user->display_name ?: $this->user->name);
+        $authorHandle = $page ? $page->handle : $this->user->handle;
+        $authorAvatar = $page ? $page->logo_url : $this->user->avatar_url;
+        $authorVerified = $page ? $page->isCertified() : (bool) $this->user->is_verified;
+
         return [
             'id' => (string) $this->id,
+            'page_id' => $this->page_id ? (int) $this->page_id : null,
+            'page' => $page ? [
+                'id' => (int) $page->id,
+                'name' => $page->name,
+                'handle' => $page->handle,
+                'logo_url' => $page->logo_url,
+                'is_certified' => $page->isCertified(),
+            ] : null,
             'author' => [
-                'id' => $this->user->id,
-                'name' => $this->user->name,
-                'handle' => $this->user->handle,
-                'display_name' => $this->user->display_name ?? $this->user->name,
-                'avatar_url' => $this->user->avatar_url,
-                'is_verified' => (bool) $this->user->is_verified,
+                'id' => $authorId,
+                'name' => $authorName,
+                'handle' => $authorHandle,
+                'display_name' => $authorName,
+                'avatar_url' => $authorAvatar,
+                'is_verified' => $authorVerified,
+                'certified' => $authorVerified,
+                'is_certified' => $authorVerified,
             ],
             'audience' => $this->audience->value,
             'allow_replies' => (bool) $this->allow_replies,
@@ -51,6 +70,7 @@ class StoryResource extends JsonResource
             'is_liked' => $isLiked,
             'likes_count' => (int) $this->likes_count,
             'is_expired' => $this->isExpired(),
+            'is_active' => $this->isActive(),
             'published_at' => $this->published_at?->toIso8601String(),
             'expires_at' => $this->expires_at?->toIso8601String(),
             'stats' => $isMine ? [

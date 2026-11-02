@@ -35,6 +35,7 @@ class StoreListingRequest extends FormRequest
             'charges' => ['nullable', 'numeric', 'min:0'],
             'negotiable' => ['nullable', 'boolean'],
             'utilities_included' => ['nullable', 'boolean'],
+            'uses_agenda' => ['nullable', 'boolean'],
             'bedrooms' => ['required', 'integer', 'min:0', 'max:100'],
             'showers' => ['required', 'integer', 'min:0', 'max:100'],
             'area' => ['required', 'numeric', 'min:1'],

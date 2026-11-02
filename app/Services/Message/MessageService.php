@@ -35,7 +35,8 @@ class MessageService
         $member?->markAsDelivered();
 
         return $conversation->messages()
-            ->with(['sender:id,name,handle,avatar_url', 'replyTo', 'conversation.members'])
+            ->visibleTo($user->id)
+            ->with(['sender:id,name,display_name,handle,avatar_url,is_verified,is_certified', 'replyTo', 'conversation.members'])
             ->orderBy('created_at', 'desc')
             ->paginate($perPage);
     }
@@ -115,9 +116,12 @@ class MessageService
                 $metadata['undelivered'] = true;
             }
 
+            $activePage = request()?->attributes?->get('active_page');
+
             $message = Message::create([
                 'conversation_id' => $conversation->id,
                 'sender_id' => $sender->id,
+                'page_id' => $activePage?->id,
                 'type' => $type,
                 'body' => $data['body'] ?? null,
                 'client_message_id' => $data['client_message_id'] ?? null,

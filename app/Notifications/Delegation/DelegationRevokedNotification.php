@@ -53,6 +53,8 @@ class DelegationRevokedNotification extends Notification implements ShouldQueue
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
+
         return [
             'type' => 'delegation_revoked',
             'delegation_id' => $this->delegation->id,
@@ -61,7 +63,8 @@ class DelegationRevokedNotification extends Notification implements ShouldQueue
             'bailleur_name' => $this->delegation->bailleur?->display_name ?: ($this->delegation->bailleur?->name ?? 'Bailleur'),
             'listing_title' => $this->listingTitle() ?? 'Bien',
             'reason' => $this->reason,
-            'message' => 'Le mandat a été révoqué',
+            'title' => trans('notifications.delegation_revoked.title', [], $locale),
+            'message' => trans('notifications.delegation_revoked.body', [], $locale),
         ];
     }
 }

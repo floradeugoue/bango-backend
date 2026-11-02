@@ -40,6 +40,8 @@ class PageCertificationRejectedNotification extends Notification implements Shou
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
+
         return [
             'type' => 'page_certification_rejected',
             'certification_id' => $this->certification->id,
@@ -48,7 +50,8 @@ class PageCertificationRejectedNotification extends Notification implements Shou
             'rejection_reason' => $this->certification->rejection_reason,
             'corrections_count' => $this->certification->corrections_count,
             'can_correct' => $this->certification->canSubmitCorrection(),
-            'message' => 'Le dossier de certification de votre Page a été rejeté.',
+            'title' => trans('notifications.page_certification_rejected.title', [], $locale),
+            'message' => trans('notifications.page_certification_rejected.body', [], $locale),
         ];
     }
 }

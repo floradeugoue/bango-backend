@@ -77,6 +77,21 @@ it('GET /api/profile/public/{identifier} returns public profile by ID and by @ha
     $res404->assertStatus(404)->assertJsonPath('kind', 'not-found');
 });
 
+it('GET /api/profile/public/{identifier} returns absolute URL for avatarUrl even if stored as relative path', function () {
+    $user = User::factory()->create([
+        'handle' => 'nonomarie515',
+        'avatar_url' => '/storage/avatars/test-avatar.jpg',
+    ]);
+    Passport::actingAs($user);
+
+    $res = getJson('/api/profile/public/@nonomarie515');
+    $res->assertStatus(200);
+
+    $avatarUrl = $res->json('data.avatarUrl');
+    expect($avatarUrl)->toStartWith('http')
+        ->and($avatarUrl)->toContain('/storage/avatars/test-avatar.jpg');
+});
+
 it('PUT /api/profile/identity updates handle, displayName and bio', function () {
     $user = User::factory()->create(['handle' => 'ancien.pseudo']);
     Passport::actingAs($user);

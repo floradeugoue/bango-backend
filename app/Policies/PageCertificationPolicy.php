@@ -51,13 +51,21 @@ class PageCertificationPolicy
 
     /**
      * Détermine si l'utilisateur peut télécharger les pièces justificatives privées.
+     * Accessible uniquement par le propriétaire de la page ou l'équipe conformité BANGO.
      */
     public function downloadDocument(User $user, PageCertification $certification): bool
     {
-        if ($user->isAdmin()) {
-            return true;
+        $isCompliance = $user->hasRole('verification')
+            || $user->hasRole('direction')
+            || $user->hasRole('compliance')
+            || $user->hasPermission('verification:view')
+            || $user->hasPermission('kyc:view')
+            || $user->hasPermission('kyc:documents');
+
+        if ($user->isAdmin() || $user->isInternalOperator()) {
+            return $isCompliance;
         }
 
-        return $certification->page->memberRole($user) === PageRole::Owner;
+        return $certification->page->isOwner($user);
     }
 }

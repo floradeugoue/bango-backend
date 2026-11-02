@@ -39,12 +39,15 @@ class PageSuspendedNotification extends Notification implements ShouldQueue
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
+
         return [
             'type' => 'page_suspended',
             'page_id' => $this->page->id,
             'page_name' => $this->page->name,
             'reason' => $this->reason,
-            'message' => "La Page Professionnelle « {$this->page->name} » a été suspendue.",
+            'title' => trans('notifications.page_suspended.title', [], $locale),
+            'message' => trans('notifications.page_suspended.body', ['page' => $this->page->name], $locale),
         ];
     }
 }

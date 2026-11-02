@@ -159,6 +159,60 @@ test('POST /api/boost/estimate compte les comptes réels passant le filtre plut�
         ->and($poolTargeted)->toBeGreaterThanOrEqual(1);
 });
 
+test('BO-02 : POST /api/boost/estimate fonctionne sans erreur 500 sur le ciblage avec profilage et respecte ads_personalization', function () {
+    Passport::actingAs($this->user);
+
+    // Utilisateur 1 : Douala, 28 ans, ads_personalization = true
+    User::factory()->create([
+        'city' => 'Douala',
+        'neighbourhood' => 'Bonanjo',
+        'birth_date' => now()->subYears(28)->format('Y-m-d'),
+        'privacy_settings' => ['ads_personalization' => true],
+    ]);
+
+    // Utilisateur 2 : Douala, 30 ans, privacy_settings non défini (consentement implicite par défaut)
+    User::factory()->create([
+        'city' => 'Douala',
+        'neighbourhood' => 'Bonanjo',
+        'birth_date' => now()->subYears(30)->format('Y-m-d'),
+        'privacy_settings' => null,
+    ]);
+
+    // Utilisateur 3 : Douala, 32 ans, ads_personalization = false (refus du profilage publicitaire)
+    User::factory()->create([
+        'city' => 'Douala',
+        'neighbourhood' => 'Bonanjo',
+        'birth_date' => now()->subYears(32)->format('Y-m-d'),
+        'privacy_settings' => ['ads_personalization' => false],
+    ]);
+
+    // Requête avec profilage d'âge : Douala, 25-35 ans
+    $response = $this->postJson('/api/boost/estimate', [
+        'budget' => 5000,
+        'currency' => 'XAF',
+        'duration_days' => 5,
+        'targeting' => [
+            'city' => 'Douala',
+            'neighbourhoods' => ['Bonanjo'],
+            'age_min' => 25,
+            'age_max' => 35,
+        ],
+    ]);
+
+    $response->assertOk()
+        ->assertJsonStructure([
+            'data' => [
+                'budget',
+                'reach' => ['low', 'high'],
+                'estimated_audience_pool',
+            ],
+        ]);
+
+    // L'utilisateur ayant ads_personalization = false doit être exclu du comptage
+    $pool = $response->json('data.estimated_audience_pool');
+    expect($pool)->toBe(2);
+});
+
 test('POST /api/boost/estimate valide le contenu spécifié et autorise le propriétaire', function () {
     Passport::actingAs($this->user);
 

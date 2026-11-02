@@ -13,6 +13,7 @@ class Follow extends Model
 
     protected $fillable = [
         'follower_id',
+        'follower_page_id',
         'following_id',
     ];
 

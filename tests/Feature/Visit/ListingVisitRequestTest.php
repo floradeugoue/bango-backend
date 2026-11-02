@@ -5,7 +5,11 @@ use App\Models\User;
 use App\Models\Visit\ListingVisitRequest;
 use App\Models\Visit\VisitReservation;
 use App\Models\Visit\VisitSlot;
+use App\Notifications\Visit\ListingVisitRequestedNotification;
+use App\Notifications\Visit\ListingVisitSlotChosenNotification;
+use App\Services\Boost\CreditWalletService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Notification;
 use Laravel\Passport\Passport;
 
 uses(RefreshDatabase::class);
@@ -68,9 +72,37 @@ test('uses_agenda is rendered in ListingResource and determines default slots ge
     ]);
     expect($listingWithNullAgenda->usesAgenda())->toBeFalse();
 
-    $resNull = $this->getJson("/api/listings/{$listingWithNullAgenda->id}");
-    $resNull->assertOk();
-    expect($resNull->json('data.uses_agenda'))->toBeFalse();
+    // 4. Test updating uses_agenda via PATCH /listings/{id}
+    Passport::actingAs($this->owner);
+    $patchRes = $this->patchJson("/api/listings/{$this->listing->id}", [
+        'uses_agenda' => false,
+    ]);
+    $patchRes->assertOk();
+    expect($patchRes->json('data.uses_agenda'))->toBeFalse();
+    expect($this->listing->fresh()->uses_agenda)->toBeFalse();
+
+    // Re-enabling uses_agenda via PATCH /listings/{id}
+    $patchRes2 = $this->patchJson("/api/listings/{$this->listing->id}", [
+        'uses_agenda' => true,
+    ]);
+    $patchRes2->assertOk();
+    expect($patchRes2->json('data.uses_agenda'))->toBeTrue();
+    expect($this->listing->fresh()->uses_agenda)->toBeTrue();
+
+    // 5. Test updating uses_agenda via landlord settings (PUT /api/profile)
+    $profileRes = $this->putJson('/api/profile', [
+        'uses_agenda' => false,
+    ]);
+    $profileRes->assertOk();
+    expect($profileRes->json('user.uses_agenda'))->toBeFalse();
+    expect($this->owner->fresh()->uses_agenda)->toBeFalse();
+
+    // 6. Test updating uses_agenda via PUT /api/landlord/properties/{id}/slots
+    $slotsUpdateRes = $this->putJson("/api/landlord/properties/{$this->listing->id}/slots", [
+        'uses_agenda' => false,
+    ]);
+    $slotsUpdateRes->assertOk();
+    expect($this->listing->fresh()->uses_agenda)->toBeFalse();
 });
 
 test('prospect can submit visit request with 1 to 3 proposals without payment (IM-22)', function (): void {
@@ -86,21 +118,27 @@ test('prospect can submit visit request with 1 to 3 proposals without payment (I
 
     $response->assertCreated();
     $response->assertJsonStructure([
-        'id',
-        'listing_id',
-        'prospect_id',
-        'status',
-        'proposals',
-        'expires_at',
+        'data' => [
+            'id',
+            'listing_id',
+            'prospect_id',
+            'status',
+            'proposals',
+            'expires_at',
+        ],
     ]);
 
-    expect($response->json('status'))->toBe('pending')
-        ->and(count($response->json('proposals')))->toBe(2)
-        ->and($response->json('message'))->toBe('Bonjour, je suis très intéressé par le studio.')
-        ->and($response->json('visit_reservation_id'))->toBeNull();
+    expect($response->json('data.status'))->toBe('pending')
+        ->and(count($response->json('data.proposals')))->toBe(2)
+        ->and($response->json('data.message'))->toBe('Bonjour, je suis très intéressé par le studio.')
+        ->and($response->json('data.visit_reservation_id'))->toBeNull();
+
+    // Vérifier que expires_at est fixé à 24h
+    $expiresAt = Carbon\Carbon::parse($response->json('data.expires_at'));
+    expect(round(abs(now()->diffInRealHours($expiresAt))))->toBe(24.0);
 
     $this->assertDatabaseHas('listing_visit_requests', [
-        'id' => $response->json('id'),
+        'id' => $response->json('data.id'),
         'listing_id' => $this->listing->id,
         'prospect_id' => $this->prospect->id,
         'status' => 'pending',
@@ -167,7 +205,7 @@ test('prospect and landlord can view visit request and landlord viewing sets vie
     Passport::actingAs($this->owner);
     $landlordRes = $this->getJson("/api/visits/requests/{$request->id}");
     $landlordRes->assertOk();
-    expect($landlordRes->json('viewed_by_landlord_at'))->not->toBeNull();
+    expect($landlordRes->json('data.viewed_by_landlord_at'))->not->toBeNull();
 
     $request->refresh();
     expect($request->viewed_by_landlord_at)->not->toBeNull();
@@ -247,4 +285,113 @@ test('landlord chooses proposal index creating a reservation pending payment wit
     expect($slot)->not->toBeNull()
         ->and($slot->listing_id)->toBe($this->listing->id)
         ->and($slot->start_at->toIso8601String())->toBe(Carbon\Carbon::parse($d2)->toIso8601String());
+});
+
+test('IM-22 : GET /landlord/listing-visit-requests liste les demandes pour le bailleur et agent avec prospect, bien et proposals', function (): void {
+    Notification::fake();
+
+    $d1 = now()->addDays(2)->setTime(10, 0)->toIso8601String();
+    $d2 = now()->addDays(3)->setTime(15, 30)->toIso8601String();
+
+    // 1. Soumission d'une demande par le prospect avec notification au bailleur
+    Passport::actingAs($this->prospect);
+    $postRes = $this->postJson("/api/listings/{$this->listing->id}/visit-requests", [
+        'proposals' => [$d1, $d2],
+        'message' => 'Propositions créneaux week-end',
+    ]);
+    $postRes->assertStatus(201);
+    $requestId = $postRes->json('data.id');
+
+    Notification::assertSentTo(
+        $this->owner,
+        ListingVisitRequestedNotification::class
+    );
+
+    // 2. Le bailleur consulte la liste via GET /api/landlord/listing-visit-requests?status=pending
+    Passport::actingAs($this->owner);
+    $listRes = $this->getJson('/api/landlord/listing-visit-requests?status=pending');
+    $listRes->assertOk();
+
+    $items = $listRes->json('data');
+    expect($items)->toHaveCount(1);
+    $item = $items[0];
+
+    expect($item['id'])->toBe($requestId)
+        ->and($item['status'])->toBe('pending')
+        ->and($item['prospect'])->not->toBeNull()
+        ->and($item['prospect']['name'])->toBe($this->prospect->name)
+        ->and($item['listing'])->not->toBeNull()
+        ->and($item['listing']['title'])->toBe($this->listing->title)
+        ->and($item['proposals'])->toHaveCount(2);
+
+    // 3. Le bailleur choisit le créneau -> notification envoyée au prospect
+    $chooseRes = $this->postJson("/api/landlord/visit-requests/{$requestId}/choose", [
+        'proposal_index' => 0,
+    ]);
+    $chooseRes->assertOk();
+
+    Notification::assertSentTo(
+        $this->prospect,
+        ListingVisitSlotChosenNotification::class
+    );
+
+    // 4. La demande n'est plus pending
+    $listPendingAfter = $this->getJson('/api/landlord/listing-visit-requests?status=pending');
+    $listPendingAfter->assertOk();
+    expect($listPendingAfter->json('data'))->toHaveCount(0);
+});
+
+test('IM-23 : GET /visits/requests liste les demandes du prospect et POST /visits/{id}/pay règle la réservation au crédit BANGO ou mobile money', function (): void {
+    Notification::fake();
+
+    $d1 = now()->addDays(2)->setTime(10, 0)->toIso8601String();
+
+    // 1. Soumission d'une demande par le prospect
+    Passport::actingAs($this->prospect);
+    $postRes = $this->postJson("/api/listings/{$this->listing->id}/visit-requests", [
+        'proposals' => [$d1],
+        'message' => 'Demande pour visiter',
+    ])->assertStatus(201);
+    $requestId = $postRes->json('data.id');
+
+    // 2. Le prospect consulte ses demandes via GET /api/visits/requests
+    $mineRes = $this->getJson('/api/visits/requests')->assertOk();
+    expect($mineRes->json('data'))->toHaveCount(1)
+        ->and($mineRes->json('data.0.id'))->toBe($requestId);
+
+    // 3. Le bailleur choisit le créneau
+    Passport::actingAs($this->owner);
+    $chooseRes = $this->postJson("/api/landlord/visit-requests/{$requestId}/choose", [
+        'proposal_index' => 0,
+    ])->assertOk();
+
+    $reservationId = $chooseRes->json('data.reservation_id') ?? $chooseRes->json('reservation.id');
+    expect($reservationId)->not->toBeNull();
+
+    // 4. Le prospect consulte ses demandes et voit la réservation rattachée
+    Passport::actingAs($this->prospect);
+    $mineAfterChoose = $this->getJson('/api/visits/requests')->assertOk();
+    expect($mineAfterChoose->json('data.0.reservation_id'))->toBe($reservationId)
+        ->and($mineAfterChoose->json('data.0.status'))->toBe('chosen');
+
+    // 5. Créditer le compte du prospect pour payer par crédit BANGO
+    app(CreditWalletService::class)->credit(
+        account: $this->prospect,
+        amount: 3000,
+        source: 'deposit',
+        description: 'Recharge test'
+    );
+
+    // 6. Le prospect règle la réservation via POST /api/visits/{id}/pay
+    $payRes = $this->postJson("/api/visits/{$reservationId}/pay", [
+        'payment_method' => 'credit',
+    ])->assertOk();
+
+    expect($payRes->json('data.id'))->toBe($reservationId)
+        ->and($payRes->json('data.status'))->toBe('requested')
+        ->and($payRes->json('quote.amount'))->toEqual(3000.0);
+
+    // La réservation en base est désormais payée
+    $reservation = VisitReservation::find($reservationId);
+    expect($reservation->paid_at)->not->toBeNull();
 });

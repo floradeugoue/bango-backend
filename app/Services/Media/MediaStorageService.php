@@ -547,11 +547,11 @@ class MediaStorageService
         }
 
         if (str_starts_with($path, '/storage/')) {
-            return $path;
+            return url($path);
         }
 
         if (str_starts_with($path, 'storage/')) {
-            return '/'.$path;
+            return url('/'.$path);
         }
 
         if (str_starts_with($path, '/sounds/')) {
@@ -560,7 +560,13 @@ class MediaStorageService
 
         $disk = $disk ?? $this->getDisk();
 
-        return Storage::disk($disk)->url($path);
+        $storageUrl = Storage::disk($disk)->url($path);
+
+        if (str_starts_with($storageUrl, 'http://') || str_starts_with($storageUrl, 'https://')) {
+            return $storageUrl;
+        }
+
+        return url($storageUrl);
     }
 
     /**

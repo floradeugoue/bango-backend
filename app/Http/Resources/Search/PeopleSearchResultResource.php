@@ -14,7 +14,7 @@ class PeopleSearchResultResource extends JsonResource
     {
         return [
             'id' => (string) $this->id,
-            'name' => $this->display_name ?? $this->name,
+            'name' => $this->display_name ?: $this->name,
             'handle' => $this->handle ?? '',
             'avatar' => $this->avatar_url,
             'avatar_url' => $this->avatar_url,

@@ -63,20 +63,28 @@ class ListingDecisionNotification extends Notification implements ShouldQueue
      */
     public function toArray(object $notifiable): array
     {
-        $message = match ($this->decision) {
-            'reject' => 'Votre annonce "'.$this->listing->title.'" a été refusée. Motif : '.($this->reason ?? 'Non conforme.'),
-            'request_changes' => 'Des modifications sont demandées sur votre annonce "'.$this->listing->title.'". Motif : '.($this->reason ?? 'Précisions nécessaires.'),
-            'unpublish' => 'Votre annonce "'.$this->listing->title.'" a été dépubliée. Motif : '.($this->reason ?? 'Suspendue.'),
-            'merge' => 'Votre annonce "'.$this->listing->title.'" a été fusionnée avec une annonce similaire. Motif : '.($this->reason ?? 'Doublon.'),
-            default => 'Mise à jour sur votre annonce "'.$this->listing->title.'".',
+        $locale = $notifiable->locale ?? 'fr';
+        $title = $this->listing->title ?? '';
+        $reason = $this->reason ?? ($locale === 'en' ? 'Non-compliant.' : 'Non conforme.');
+
+        $key = match ($this->decision) {
+            'reject' => 'reject',
+            'request_changes' => 'request_changes',
+            'unpublish' => 'unpublish',
+            'merge' => 'merge',
+            default => 'default',
         };
+
+        $message = trans("notifications.listing_decision.{$key}", ['title' => $title, 'reason' => $reason], $locale);
 
         return [
             'type' => 'listing_decision',
             'listing_id' => $this->listing->id,
+            'page_id' => $this->listing->page_id,
             'decision' => $this->decision,
             'status' => $this->listing->status?->value ?? (string) $this->listing->status,
             'reason' => $this->reason,
+            'title' => trans('notifications.listing_decision.title', [], $locale),
             'message' => $message,
         ];
     }

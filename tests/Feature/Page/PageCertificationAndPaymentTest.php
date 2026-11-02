@@ -9,8 +9,12 @@ use App\Models\Page\Page;
 use App\Models\Page\PageCertification;
 use App\Models\Page\PageMember;
 use App\Models\Payment\PaymentTransaction;
+use App\Models\Subscription\Subscription;
+use App\Models\Subscription\SubscriptionProduct;
 use App\Models\User;
 use App\Services\Page\PageCertificationService;
+use App\Services\Payment\PaymentEngineService;
+use App\Services\Subscription\SubscriptionService;
 use Database\Seeders\SubscriptionCatalogSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -225,4 +229,85 @@ test('DELETE /pages/{page}/certification permet d\'annuler une demande en attent
     $res2 = $this->deleteJson("/api/pages/{$this->page->id}/certification");
     $res2->assertStatus(422)
         ->assertJsonValidationErrors(['certification']);
+});
+
+test('la certification fonctionne comme un abonnement avec cadence mensuelle ou annuelle, renews_at et retrait de la coche en cas de péremption', function () {
+    Passport::actingAs($this->owner);
+
+    // 1. Soumission préalable du dossier
+    $cert = PageCertification::factory()->create([
+        'page_id' => $this->page->id,
+        'submitted_by_id' => $this->owner->id,
+        'status' => PageCertificationStatus::Pending,
+    ]);
+
+    // Récupérer le prix annuel de page_pro
+    $product = SubscriptionProduct::where('code', 'page_pro')->first();
+    $yearlyPrice = $product->prices()->where('cadence', 'yearly')->first();
+    expect($yearlyPrice)->not->toBeNull()
+        ->and((int) $yearlyPrice->price_amount)->toBe(150000);
+
+    // 2. Paiement avec choix du price_id (cadence annuelle)
+    $response = $this->postJson("/api/pages/{$this->page->id}/certification/payment", [
+        'provider' => 'mtn',
+        'phone_number' => '+237677112233',
+        'price_id' => $yearlyPrice->id,
+    ]);
+
+    $response->assertCreated();
+    $txId = $response->json('data.id');
+
+    $tx = PaymentTransaction::find($txId);
+    expect($tx->price_id)->toBe($yearlyPrice->id);
+
+    // Confirmer le paiement via le moteur de paiement
+    app(PaymentEngineService::class)->confirmAndFulfill(
+        $tx,
+        'EXT-REF-12345'
+    );
+
+    // Vérifier que la souscription a été activée pour la page
+    $this->assertDatabaseHas('subscriptions', [
+        'user_id' => $this->owner->id,
+        'page_id' => $this->page->id,
+        'product_id' => $product->id,
+        'price_id' => $yearlyPrice->id,
+        'cadence' => 'yearly',
+        'state' => 'active',
+    ]);
+
+    // GET /pages/{page}/certification renvoie renews_at
+    $certRes = $this->getJson("/api/pages/{$this->page->id}/certification");
+    $certRes->assertOk()
+        ->assertJsonPath('data.is_paid', true)
+        ->assertJsonStructure(['data' => ['renews_at']]);
+    expect($certRes->json('data.renews_at'))->not->toBeNull();
+
+    // GET /subscriptions contient la ligne de l'abonnement rattaché à la page
+    $subRes = $this->getJson('/api/subscriptions');
+    $subRes->assertOk();
+    $pageSubItem = collect($subRes->json('data'))->firstWhere('pageId', $this->page->id);
+    expect($pageSubItem)->not->toBeNull()
+        ->and($pageSubItem['cadence'])->toBe('yearly')
+        ->and($pageSubItem['page']['id'])->toBe($this->page->id);
+
+    // 3. Valider la certification par l'admin
+    Passport::actingAs($this->admin);
+    $this->postJson("/api/admin/pages/certifications/{$cert->id}/decide", [
+        'decision' => 'approve',
+    ])->assertOk();
+
+    expect($this->page->fresh()->isCertified())->toBeTrue()
+        ->and($this->page->fresh()->certification_status)->toBe(PageCertificationStatus::Approved);
+
+    // 4. Test du cycle de vie : expiration de l'abonnement
+    $sub = Subscription::where('page_id', $this->page->id)->first();
+    app(SubscriptionService::class)->expireSubscription(
+        $sub,
+        'Période de grâce échue sans régularisation'
+    );
+
+    $freshPage = $this->page->fresh();
+    expect($freshPage->certification_status)->toBe(PageCertificationStatus::Lapsed)
+        ->and($freshPage->isCertified())->toBeFalse();
 });

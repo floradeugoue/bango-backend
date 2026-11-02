@@ -10,9 +10,11 @@ use App\Enums\Listing\ListingStatus;
 use App\Enums\Visit\VisitReservationStatus;
 use App\Events\Listing\ListingPublished;
 use App\Models\Delegation\Delegation;
+use App\Models\Landlord\LandlordSlotRule;
 use App\Models\Listing\Listing;
 use App\Models\Listing\ListingMedia;
 use App\Models\Listing\ListingSave;
+use App\Models\Listing\ListingShare;
 use App\Models\User;
 use App\Services\Admin\AdminListingControlService;
 use App\Services\Media\MediaStorageService;
@@ -262,6 +264,9 @@ class ListingService
             if (isset($data['utilities_included'])) {
                 $listing->utilities_included = (bool) $data['utilities_included'];
             }
+            if (array_key_exists('uses_agenda', $data)) {
+                $listing->uses_agenda = $data['uses_agenda'] !== null ? (bool) $data['uses_agenda'] : null;
+            }
             if (isset($data['bedrooms'])) {
                 $listing->bedrooms = (int) $data['bedrooms'];
             }
@@ -383,6 +388,9 @@ class ListingService
             $listing->charges = (float) ($data['charges'] ?? 0);
             $listing->negotiable = (bool) ($data['negotiable'] ?? false);
             $listing->utilities_included = (bool) ($data['utilities_included'] ?? false);
+            if (array_key_exists('uses_agenda', $data)) {
+                $listing->uses_agenda = $data['uses_agenda'] !== null ? (bool) $data['uses_agenda'] : null;
+            }
 
             $listing->bedrooms = (int) ($data['bedrooms'] ?? 0);
             $listing->showers = (int) ($data['showers'] ?? 0);
@@ -406,6 +414,18 @@ class ListingService
 
             // Génération des attributs de synthèse pour affichage carte/feed
             $listing->attributes = $this->composeAttributes($listing);
+
+            // Application des règles de créneaux par défaut du bailleur (BL-08 compte)
+            $ownerSlotRule = LandlordSlotRule::where('user_id', $user->id)->first();
+            if ($ownerSlotRule) {
+                $attrs = $listing->attributes ?? [];
+                $attrs['minimum_hours'] = $ownerSlotRule->minimum_hours;
+                $attrs['grouped'] = $ownerSlotRule->grouped;
+                $attrs['group_size'] = $ownerSlotRule->group_size;
+                $attrs['auto_confirm'] = $ownerSlotRule->auto_confirm;
+                $listing->attributes = $attrs;
+                $listing->auto_confirm = (bool) $ownerSlotRule->auto_confirm;
+            }
 
             // Cycle de modération vs publication
             if ($submitToReview) {
@@ -488,6 +508,9 @@ class ListingService
             }
             if (array_key_exists('amenities', $patch)) {
                 $listing->amenities = is_array($patch['amenities']) ? array_values($patch['amenities']) : [];
+            }
+            if (array_key_exists('uses_agenda', $patch)) {
+                $listing->uses_agenda = $patch['uses_agenda'] !== null ? (bool) $patch['uses_agenda'] : null;
             }
 
             $listing->attributes = $this->composeAttributes($listing);
@@ -617,10 +640,16 @@ class ListingService
      */
     public function saveListing(Listing $listing, User $user, ?string $action = 'save'): bool
     {
-        return DB::transaction(function () use ($listing, $user, $action) {
-            $existing = ListingSave::where('user_id', $user->id)
-                ->where('listing_id', $listing->id)
-                ->first();
+        $activePage = request()?->attributes?->get('acting_page') ?? request()?->attributes?->get('active_page');
+
+        return DB::transaction(function () use ($listing, $user, $action, $activePage) {
+            $query = ListingSave::where('listing_id', $listing->id);
+            if ($activePage) {
+                $query->where('page_id', $activePage->id);
+            } else {
+                $query->where('user_id', $user->id)->whereNull('page_id');
+            }
+            $existing = $query->first();
 
             if ($action === 'unsave') {
                 if ($existing) {
@@ -639,9 +668,16 @@ class ListingService
                     return false;
                 }
 
-                ListingSave::firstOrCreate([
+                $attributes = ['listing_id' => $listing->id];
+                if ($activePage) {
+                    $attributes['page_id'] = $activePage->id;
+                } else {
+                    $attributes['user_id'] = $user->id;
+                }
+
+                ListingSave::firstOrCreate($attributes, [
                     'user_id' => $user->id,
-                    'listing_id' => $listing->id,
+                    'page_id' => $activePage?->id,
                 ]);
                 $listing->increment('saves_count');
 
@@ -653,9 +689,16 @@ class ListingService
                 return true;
             }
 
-            ListingSave::firstOrCreate([
+            $attributes = ['listing_id' => $listing->id];
+            if ($activePage) {
+                $attributes['page_id'] = $activePage->id;
+            } else {
+                $attributes['user_id'] = $user->id;
+            }
+
+            ListingSave::firstOrCreate($attributes, [
                 'user_id' => $user->id,
-                'listing_id' => $listing->id,
+                'page_id' => $activePage?->id,
             ]);
             $listing->increment('saves_count');
 
@@ -786,5 +829,50 @@ class ListingService
         }
 
         return $attributes;
+    }
+
+    /**
+     * Enregistre un partage d'annonce (Listing) de manière atomique et idempotente.
+     *
+     * @return array{shares_count: int}
+     */
+    public function recordShare(
+        Listing $listing,
+        ?User $user = null,
+        ?string $platform = null,
+        ?string $clientMutationId = null
+    ): array {
+        return DB::transaction(function () use ($listing, $user, $platform, $clientMutationId) {
+            $lockedListing = Listing::where('id', $listing->id)->lockForUpdate()->first();
+            if (! $lockedListing) {
+                return ['shares_count' => (int) $listing->shares_count];
+            }
+
+            // Protection anti-doublon si client_mutation_id est fourni
+            if ($clientMutationId) {
+                $alreadySharedQuery = ListingShare::where('listing_id', $lockedListing->id)
+                    ->where('client_mutation_id', $clientMutationId);
+
+                if ($user) {
+                    $alreadySharedQuery->where('user_id', $user->id);
+                }
+
+                if ($alreadySharedQuery->exists()) {
+                    return ['shares_count' => (int) $lockedListing->shares_count];
+                }
+            }
+
+            ListingShare::create([
+                'listing_id' => $lockedListing->id,
+                'user_id' => $user?->id,
+                'platform' => $platform,
+                'client_mutation_id' => $clientMutationId,
+            ]);
+
+            $lockedListing->increment('shares_count');
+            $lockedListing->refresh();
+
+            return ['shares_count' => (int) $lockedListing->shares_count];
+        });
     }
 }

@@ -39,13 +39,16 @@ class PageMemberDeclinedNotification extends Notification implements ShouldQueue
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
+
         return [
             'type' => 'page_member_declined',
             'page_id' => $this->member->page_id,
             'page_name' => $this->member->page->name ?? 'Page',
             'user_id' => $this->member->user_id,
-            'user_name' => $this->member->user->name ?? 'Utilisateur',
-            'message' => "L'invitation pour rejoindre la Page a été refusée.",
+            'user_name' => $this->member->user->display_name ?: ($this->member->user->name ?? 'Utilisateur'),
+            'title' => trans('notifications.page_member_declined.title', [], $locale),
+            'message' => trans('notifications.page_member_declined.body', [], $locale),
         ];
     }
 }

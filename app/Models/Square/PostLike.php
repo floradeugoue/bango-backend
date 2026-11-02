@@ -2,6 +2,7 @@
 
 namespace App\Models\Square;
 
+use App\Models\Page\Page;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -16,7 +17,13 @@ class PostLike extends Model
     protected $fillable = [
         'post_id',
         'user_id',
+        'page_id',
     ];
+
+    public function page(): BelongsTo
+    {
+        return $this->belongsTo(Page::class);
+    }
 
     /**
      * Publication aimée.

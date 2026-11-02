@@ -5,6 +5,7 @@ namespace App\Models\Support;
 use App\Enums\Support\TicketCategory;
 use App\Enums\Support\TicketPriority;
 use App\Enums\Support\TicketStatus;
+use App\Models\Page\Page;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -20,6 +21,7 @@ class SupportTicket extends Model
     protected $fillable = [
         'reference',
         'user_id',
+        'page_id',
         'assigned_to',
         'resolved_by_id',
         'subject',
@@ -59,6 +61,11 @@ class SupportTicket extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function page(): BelongsTo
+    {
+        return $this->belongsTo(Page::class);
     }
 
     public function assignedAgent(): BelongsTo

@@ -13,6 +13,15 @@ class Currency extends Model
 
     protected $guarded = [];
 
+    protected function casts(): array
+    {
+        return [
+            'rate_from_xaf' => 'float',
+            'round_to' => 'integer',
+            'is_active' => 'boolean',
+        ];
+    }
+
     public function countries()
     {
         return $this->hasMany(Country::class);

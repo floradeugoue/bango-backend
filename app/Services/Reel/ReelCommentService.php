@@ -7,7 +7,9 @@ use App\Models\Reel\Reel;
 use App\Models\Reel\ReelComment;
 use App\Models\Reel\ReelCommentReaction;
 use App\Models\User;
+use App\Notifications\Social\SocialNotification;
 use App\Services\Admin\AutomatedTextFilterService;
+use App\Services\Translation\TranslationService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -69,12 +71,19 @@ class ReelCommentService
             }
         }
 
-        return DB::transaction(function () use ($reel, $user, $body, $parentId) {
+        $activePage = request()?->attributes?->get('active_page');
+
+        return DB::transaction(function () use ($reel, $user, $body, $parentId, $activePage) {
+            $trimmedBody = trim($body);
+            $language = app(TranslationService::class)->detectLanguage($trimmedBody);
+
             $comment = ReelComment::create([
                 'reel_id' => $reel->id,
                 'user_id' => $user->id,
+                'page_id' => $activePage?->id,
                 'parent_id' => $parentId,
-                'body' => trim($body),
+                'body' => $trimmedBody,
+                'language' => $language,
             ]);
 
             $reel->increment('comments_count');
@@ -86,6 +95,30 @@ class ReelCommentService
             // Point 19 : Déclenchement du filtre textuel automatique sur le commentaire du Reel
             app(AutomatedTextFilterService::class)
                 ->scanText($comment->body, 'reel_comment', $comment->id, $user);
+
+            // Notifications sociales : commentaire ou réponse
+            $targetPageId = $reel->page_id ?? null;
+            if ($parentId && isset($parent) && $parent->user_id !== $user->id) {
+                $parentAuthor = User::find($parent->user_id);
+                if ($parentAuthor) {
+                    $parentAuthor->notify(new SocialNotification('reply', $user, [
+                        'reel_id' => (string) $reel->id,
+                        'comment_id' => (string) $comment->id,
+                        'page_id' => $targetPageId,
+                        'text' => $body,
+                    ]));
+                }
+            } elseif (! $parentId && $reel->user_id && $reel->user_id !== $user->id) {
+                $reelAuthor = User::find($reel->user_id);
+                if ($reelAuthor) {
+                    $reelAuthor->notify(new SocialNotification('comment', $user, [
+                        'reel_id' => (string) $reel->id,
+                        'comment_id' => (string) $comment->id,
+                        'page_id' => $targetPageId,
+                        'text' => $body,
+                    ]));
+                }
+            }
 
             return $comment->load('user');
         });

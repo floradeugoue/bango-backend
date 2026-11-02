@@ -39,13 +39,16 @@ class PageCertificationSubmittedNotification extends Notification implements Sho
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
+
         return [
             'type' => 'page_certification_submitted',
             'certification_id' => $this->certification->id,
             'page_id' => $this->certification->page_id,
             'page_name' => $this->certification->page->name ?? 'Page',
             'submitted_at' => $this->certification->submitted_at?->toIso8601String(),
-            'message' => 'Le dossier de certification de votre Page a été transmis aux équipes d\'examen.',
+            'title' => trans('notifications.page_certification_submitted.title', [], $locale),
+            'message' => trans('notifications.page_certification_submitted.body', [], $locale),
         ];
     }
 }

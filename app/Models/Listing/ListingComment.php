@@ -2,6 +2,7 @@
 
 namespace App\Models\Listing;
 
+use App\Models\Page\Page;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -16,6 +17,7 @@ class ListingComment extends Model
     protected $fillable = [
         'listing_id',
         'user_id',
+        'page_id',
         'parent_id',
         'content',
     ];
@@ -23,6 +25,11 @@ class ListingComment extends Model
     public function listing(): BelongsTo
     {
         return $this->belongsTo(Listing::class);
+    }
+
+    public function page(): BelongsTo
+    {
+        return $this->belongsTo(Page::class);
     }
 
     public function user(): BelongsTo

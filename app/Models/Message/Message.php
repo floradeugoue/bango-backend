@@ -3,7 +3,9 @@
 namespace App\Models\Message;
 
 use App\Enums\Message\MessageType;
+use App\Models\Page\Page;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -45,6 +47,7 @@ class Message extends Model
         'id',
         'conversation_id',
         'sender_id',
+        'page_id',
         'type',
         'body',
         'client_message_id',
@@ -84,6 +87,11 @@ class Message extends Model
     public function sender(): BelongsTo
     {
         return $this->belongsTo(User::class, 'sender_id');
+    }
+
+    public function page(): BelongsTo
+    {
+        return $this->belongsTo(Page::class, 'page_id');
     }
 
     /**
@@ -137,5 +145,22 @@ class Message extends Model
             'body' => null,
             'attachment_path' => null,
         ]);
+    }
+
+    /**
+     * Filtre les messages visibles pour un utilisateur donné :
+     * Exclut les messages marqués 'undelivered' sauf si l'utilisateur en est l'expéditeur.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
+     */
+    public function scopeVisibleTo(Builder $query, int $userId): Builder
+    {
+        return $query->where(function (Builder $q) use ($userId): void {
+            $q->where(function (Builder $sub): void {
+                $sub->whereNull('metadata->undelivered')
+                    ->orWhere('metadata->undelivered', false);
+            })->orWhere('sender_id', $userId);
+        });
     }
 }

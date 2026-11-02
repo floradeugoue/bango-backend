@@ -323,13 +323,14 @@ class CampaignService
 
             $debitKey = $idempotencyKey ?? Str::uuid()->toString();
             $campaignShortId = substr((string) $lockedCampaign->id, 0, 8);
+            $topUpReference = "campaign:{$lockedCampaign->id}:topup:{$debitKey}";
 
             // Débite le crédit BANGO du portefeuille de l'utilisateur (lève InsufficientCreditException si solde insuffisant)
             $this->creditWalletService->debit(
                 account: $user,
                 amount: $floatAmount,
                 source: 'boost',
-                reference: $lockedCampaign,
+                reference: $topUpReference,
                 description: sprintf('Recharge budget campagne boost #%s (+%s FCFA)', $campaignShortId, number_format($floatAmount, 0, ',', ' ')),
                 idempotencyKey: $debitKey,
                 referenceModel: $lockedCampaign,
@@ -450,13 +451,15 @@ class CampaignService
             if ($unspent > 0) {
                 $targetUser = $lockedCampaign->user ?? User::findOrFail($lockedCampaign->user_id);
                 $campaignShortId = substr((string) $lockedCampaign->id, 0, 8);
+                $refundIdempotencyKey = "campaign_cancel_refund_{$lockedCampaign->id}";
+                $refundReference = "campaign:{$lockedCampaign->id}:refund:cancel";
 
                 $this->creditWalletService->credit(
                     account: $targetUser,
                     amount: $unspent,
                     type: CreditTransactionType::CampaignRefund,
                     description: "Remboursement campagne boost #{$campaignShortId}",
-                    idempotencyKey: "campaign_cancel_refund_{$lockedCampaign->id}",
+                    idempotencyKey: $refundIdempotencyKey,
                     reference: $lockedCampaign,
                     metadata: [
                         'campaign_id' => (string) $lockedCampaign->id,
@@ -465,7 +468,8 @@ class CampaignService
                         'spent_amount' => (float) $lockedCampaign->spent_amount,
                         'refunded_amount' => $unspent,
                     ],
-                    source: 'boost'
+                    source: 'boost',
+                    refCode: $refundReference
                 );
             }
 
@@ -497,13 +501,15 @@ class CampaignService
             if ($unspent > 0) {
                 $targetUser = $lockedCampaign->user ?? User::findOrFail($lockedCampaign->user_id);
                 $campaignShortId = substr((string) $lockedCampaign->id, 0, 8);
+                $refundIdempotencyKey = "campaign_suspend_refund_{$lockedCampaign->id}";
+                $refundReference = "campaign:{$lockedCampaign->id}:refund:suspend";
 
                 $this->creditWalletService->credit(
                     account: $targetUser,
                     amount: $unspent,
                     type: CreditTransactionType::CampaignRefund,
                     description: "Remboursement campagne boost #{$campaignShortId}",
-                    idempotencyKey: "campaign_suspend_refund_{$lockedCampaign->id}",
+                    idempotencyKey: $refundIdempotencyKey,
                     reference: $lockedCampaign,
                     metadata: [
                         'campaign_id' => (string) $lockedCampaign->id,
@@ -512,7 +518,8 @@ class CampaignService
                         'spent_amount' => (float) $lockedCampaign->spent_amount,
                         'refunded_amount' => $unspent,
                     ],
-                    source: 'boost'
+                    source: 'boost',
+                    refCode: $refundReference
                 );
             }
 
@@ -539,7 +546,9 @@ class CampaignService
 
             // 1. Détermination si cette impression concerne une NOUVELLE personne distincte
             $isNewPerson = false;
-            if ($impressions > 0) {
+            $isUnitTrack = ($user !== null || $impressions === 1);
+
+            if ($impressions > 0 && $isUnitTrack) {
                 if ($user) {
                     $hasSeenBefore = CampaignImpression::where('campaign_id', $campaign->id)
                         ->where('user_id', $user->id)
@@ -557,7 +566,7 @@ class CampaignService
             }
 
             // 2. Enregistrement unitaire de clic
-            if ($clicks > 0) {
+            if ($clicks > 0 && $isUnitTrack) {
                 CampaignClick::create([
                     'campaign_id' => $campaign->id,
                     'user_id' => $user?->id,
@@ -589,26 +598,29 @@ class CampaignService
                 ]);
             }
 
-            // Calcul du reach quotidien distinct
-            $distinctUsersToday = CampaignImpression::query()
-                ->where('campaign_id', $campaign->id)
-                ->whereDate('shown_at', $dateString)
-                ->whereNotNull('user_id')
-                ->distinct('user_id')
-                ->count('user_id');
-
-            // Nombre d'impressions anonymes du jour (sans user_id)
-            $anonymousImpressionsToday = CampaignImpression::query()
-                ->where('campaign_id', $campaign->id)
-                ->whereDate('shown_at', $dateString)
-                ->whereNull('user_id')
-                ->count();
-
-            $totalReachToday = $distinctUsersToday + $anonymousImpressionsToday;
-
             $metric->impressions += $impressions;
             $metric->clicks += $clicks;
-            $metric->reach = max($metric->reach + $reach, $totalReachToday);
+
+            if ($isUnitTrack) {
+                // Calcul strict du reach quotidien : personnes distinctes de campaign_impressions ce jour-là
+                $distinctUsersToday = CampaignImpression::query()
+                    ->where('campaign_id', $campaign->id)
+                    ->whereDate('shown_at', $dateString)
+                    ->whereNotNull('user_id')
+                    ->distinct('user_id')
+                    ->count('user_id');
+
+                $anonymousToday = CampaignImpression::query()
+                    ->where('campaign_id', $campaign->id)
+                    ->whereDate('shown_at', $dateString)
+                    ->whereNull('user_id')
+                    ->count();
+
+                $metric->reach = $distinctUsersToday + $anonymousToday;
+            } else {
+                $metric->reach += $reach;
+            }
+
             $metric->spent = number_format((float) $metric->spent + $calculatedSpent, 2, '.', '');
             $metric->save();
 

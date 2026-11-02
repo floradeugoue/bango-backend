@@ -39,11 +39,14 @@ class UnknownDeviceReportedNotification extends Notification
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
+
         return [
             'type' => 'unknown_device_reported',
             'reason' => $this->reason,
             'device_hash' => substr($this->deviceHash, 0, 16),
-            'message' => 'Votre compte a été sécurisé et verrouillé suite au signalement d\'un appareil inconnu.',
+            'title' => trans('notifications.unknown_device_reported.title', [], $locale),
+            'message' => trans('notifications.unknown_device_reported.body', [], $locale),
             'reported_at' => now()->toIso8601String(),
         ];
     }

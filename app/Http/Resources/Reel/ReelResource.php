@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Services\Media\MediaStorageService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\Auth;
 
 /**
  * @mixin Reel
@@ -23,7 +24,7 @@ class ReelResource extends JsonResource
     public function toArray(Request $request): array
     {
         /** @var User|null $user */
-        $user = $request->user();
+        $user = $request->user() ?: Auth::guard('api')->user();
         $author = $this->user;
 
         $isMine = $user ? $this->user_id === $user->id : false;
@@ -61,7 +62,7 @@ class ReelResource extends JsonResource
 
         // Construction du libellé du son
         $page = $this->page_id ? ($this->relationLoaded('page') ? $this->page : Page::find($this->page_id)) : null;
-        $authorDisplayName = $page ? $page->name : ($author?->display_name ?? $author?->name ?? 'Utilisateur');
+        $authorDisplayName = $page ? $page->name : ($author?->display_name ?: ($author?->name ?? 'Utilisateur'));
 
         $soundLabel = 'Son original';
         $soundRemoved = false;
@@ -107,7 +108,7 @@ class ReelResource extends JsonResource
             }
         }
 
-        $reelAuthorName = $page ? $page->name : ($author?->display_name ?? $author?->name ?? 'Anonyme');
+        $reelAuthorName = $page ? $page->name : ($author?->display_name ?: ($author?->name ?? 'Anonyme'));
         $reelAuthorVerified = $page ? $page->isCertified() : (bool) ($author?->is_verified ?? false);
         $reelAuthorCertified = $page ? $page->isCertified() : (bool) ($author?->is_certified ?? false);
         $reelAuthorBadge = $page ? ($page->isCertified() ? 'page_certified' : 'none') : $author?->badge;
@@ -148,6 +149,7 @@ class ReelResource extends JsonResource
             'sponsored_by' => $this->sponsored_by ?? null,
             'sponsor_branding' => $this->sponsor_branding ?? null,
             'caption' => $this->caption ?? '',
+            'language' => (string) ($this->language ?? 'fr'),
             'handle' => $reelHandle,
             'sound' => $soundLabel,
             'soundId' => $this->sound_id ?? "orig:{$this->id}",
@@ -169,6 +171,8 @@ class ReelResource extends JsonResource
             'comments_count' => (int) $this->comments_count,
             'shares' => (int) $this->shares_count,
             'shares_count' => (int) $this->shares_count,
+            'saves' => (int) ($this->saves_count ?? 0),
+            'saves_count' => (int) ($this->saves_count ?? 0),
             'views' => (int) $this->views_count,
             'views_count' => (int) $this->views_count,
             'tone' => 'deep',

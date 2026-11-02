@@ -51,7 +51,7 @@ class PostLikerResource extends JsonResource
 
         return [
             'id' => (int) $this->id,
-            'name' => (string) ($this->display_name ?? $this->name ?? ''),
+            'name' => (string) ($this->display_name ?: ($this->name ?? '')),
             'handle' => (string) ($this->handle ?? ''),
             'avatar_url' => $this->avatar_url,
             'avatarUrl' => $this->avatar_url,

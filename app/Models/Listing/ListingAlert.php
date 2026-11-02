@@ -35,6 +35,8 @@ class ListingAlert extends Model
         'frequency',
         'push',
         'email',
+        'enabled',
+        'disabled_at',
         'last_triggered_at',
     ];
 
@@ -55,6 +57,8 @@ class ListingAlert extends Model
             'utilities_included_only' => 'boolean',
             'push' => 'boolean',
             'email' => 'boolean',
+            'enabled' => 'boolean',
+            'disabled_at' => 'datetime',
             'last_triggered_at' => 'datetime',
         ];
     }

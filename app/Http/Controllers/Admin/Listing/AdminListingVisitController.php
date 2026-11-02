@@ -19,7 +19,7 @@ class AdminListingVisitController extends Controller
      */
     public function visits(Request $request): JsonResponse
     {
-        $filters = $request->only(['status', 'listing_id', 'overdue_sla', 'q']);
+        $filters = $request->only(['status', 'listing_id', 'overdue_sla', 'disputed', 'q']);
         $perPage = $request->integer('per_page', 20);
 
         $reservations = $this->listingService->getVisits($filters, $perPage);
@@ -63,11 +63,24 @@ class AdminListingVisitController extends Controller
                 'status' => $vr->status->value,
                 'fee' => (float) $vr->fee,
                 'currency' => $vr->currency,
+                'payment_reference' => $vr->payment_reference,
+                'short_reference' => $vr->short_reference,
                 'hours_waiting' => $hoursWaiting,
                 'is_overdue_sla_18h' => $isOverdue,
                 'answered_at' => $vr->answered_at?->toISOString(),
                 'decline_reason' => $vr->decline_reason,
                 'paid_at' => $vr->paid_at?->toISOString(),
+                'prospect_attendance' => $vr->prospect_attendance ? [
+                    'attendance' => $vr->prospect_attendance,
+                    'marked_at' => $vr->prospect_attendance_at?->toISOString(),
+                ] : null,
+                'landlord_attendance' => $vr->landlord_attendance ? [
+                    'attendance' => $vr->landlord_attendance,
+                    'marked_at' => $vr->landlord_attendance_at?->toISOString(),
+                ] : null,
+                'is_disputed' => $vr->disputed_at !== null,
+                'disputed_at' => $vr->disputed_at?->toISOString(),
+                'dispute_reason' => $vr->dispute_reason,
                 'created_at' => $vr->created_at->toISOString(),
             ];
         });

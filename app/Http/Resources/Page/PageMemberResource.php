@@ -26,7 +26,7 @@ class PageMemberResource extends JsonResource
             'status_label' => $this->status->label(),
             'user' => [
                 'id' => (int) $this->user?->id,
-                'name' => $this->user?->display_name ?? $this->user?->name,
+                'name' => $this->user?->display_name ?: $this->user?->name,
                 'handle' => $this->user?->handle,
                 'avatar_url' => $this->user?->avatar_url,
             ],

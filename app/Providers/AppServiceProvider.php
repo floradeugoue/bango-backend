@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Events\Listing\ListingPublished;
 use App\Events\Story\StoryReplyCreated;
 use App\Listeners\Listing\NotifyMatchingHousingSearches;
+use App\Listeners\Notification\SendPushOnNotificationSent;
 use App\Listeners\Story\CreateConversationFromStoryReply;
 use App\Models\Boost\Campaign;
 use App\Models\Message\Conversation;
@@ -30,9 +31,11 @@ use App\Services\Boost\CampaignEligibilityService;
 use App\Services\Payment\Contracts\PaymentGatewayInterface;
 use App\Services\Payment\PaymentGatewayManager;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Notifications\Events\NotificationSent;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
+use Laravel\Passport\Passport;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -55,6 +58,11 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Durée de vie par défaut des jetons d'accès et jetons de rafraîchissement
+        Passport::tokensExpireIn(now()->addDays(7));
+        Passport::refreshTokensExpireIn(now()->addDays(30));
+        Passport::personalAccessTokensExpireIn(now()->addDays(7));
+
         Gate::policy(
             Post::class,
             PostPolicy::class
@@ -121,6 +129,11 @@ class AppServiceProvider extends ServiceProvider
         Event::listen(
             ListingPublished::class,
             NotifyMatchingHousingSearches::class
+        );
+
+        Event::listen(
+            NotificationSent::class,
+            SendPushOnNotificationSent::class
         );
     }
 }

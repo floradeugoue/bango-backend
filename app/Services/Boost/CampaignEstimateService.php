@@ -192,9 +192,8 @@ class CampaignEstimateService
         if ($hasProfiling) {
             $query->where(function ($q) {
                 $q->whereNull('privacy_settings')
-                    ->orWhereRaw("JSON_EXTRACT(privacy_settings, '$.ads_personalization') IS NULL")
-                    ->orWhereRaw("JSON_EXTRACT(privacy_settings, '$.ads_personalization') = true")
-                    ->orWhereRaw("JSON_EXTRACT(privacy_settings, '$.ads_personalization') = 'true'");
+                    ->orWhereNull('privacy_settings->ads_personalization')
+                    ->orWhere('privacy_settings->ads_personalization', true);
             });
         }
 

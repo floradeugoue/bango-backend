@@ -25,7 +25,7 @@ class SubscriptionController extends Controller
         $user = $request->user();
 
         $subscriptions = $user->subscriptions()
-            ->with(['product', 'price'])
+            ->with(['product', 'price', 'page'])
             ->get();
 
         return SubscriptionResource::collection($subscriptions);
@@ -71,6 +71,92 @@ class SubscriptionController extends Controller
         return response()->json([
             'status' => $status,
             'subscriptions' => SubscriptionResource::collection($activeSubs),
+        ]);
+    }
+
+    /**
+     * POST /api/subscriptions/quote
+     * Calcule le devis d'abonnement ou d'ajout de badge avec prorata d'alignement (décision Marie 26/10).
+     */
+    public function quote(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'badge' => ['required', 'string', 'in:landlord,agent'],
+            'cadence' => ['required', 'string', 'in:monthly,yearly,quarterly'],
+            'align_with' => ['nullable', 'string', 'in:landlord,agent'],
+        ]);
+
+        /** @var User $user */
+        $user = $request->user();
+
+        // 1. Trouver le produit d'abonnement pour le badge demandé
+        $product = SubscriptionProduct::where('badge_type', $validated['badge'])
+            ->orWhere('code', $validated['badge'])
+            ->where('is_active', true)
+            ->first();
+
+        if (! $product) {
+            return response()->json([
+                'message' => 'Offre d\'abonnement introuvable pour ce badge.',
+            ], 404);
+        }
+
+        /** @var SubscriptionPrice|null $price */
+        $price = $product->activePrices()
+            ->where('cadence', $validated['cadence'])
+            ->first();
+
+        if (! $price) {
+            return response()->json([
+                'message' => 'Tarif indisponible pour la cadence demandée.',
+            ], 404);
+        }
+
+        $now = now();
+        $baseAmount = (float) $price->price_amount;
+        $currency = $price->currency;
+        $periodEnd = $now->copy()->addDays($price->duration_days ?: 30);
+        $amount = $baseAmount;
+        $prorated = false;
+
+        // 2. Si align_with est fourni, calculer le prorata jusqu'à la date du badge existant
+        if (! empty($validated['align_with'])) {
+            $alignBadge = $validated['align_with'];
+
+            $existingSub = $user->subscriptions()
+                ->where('badge_type', $alignBadge)
+                ->where('state', 'active')
+                ->where('current_period_end', '>', $now)
+                ->first();
+
+            if (! $existingSub) {
+                return response()->json([
+                    'message' => sprintf('Aucun abonnement actif trouvé pour le badge "%s" afin d\'aligner la date de renouvellement.', $alignBadge),
+                ], 422);
+            }
+
+            $periodEnd = $existingSub->current_period_end;
+            $remainingDays = max(1, $now->diffInDays($periodEnd, false));
+            $baseDurationDays = $price->duration_days ?: ($validated['cadence'] === 'yearly' ? 365 : 30);
+
+            // Facturation au prorata jusqu'à la date du premier abonnement
+            $ratio = min(1.0, max(0.0, $remainingDays / $baseDurationDays));
+            $amount = round($baseAmount * $ratio, 2);
+            $prorated = true;
+        }
+
+        return response()->json([
+            'data' => [
+                'amount' => $amount,
+                'currency' => $currency,
+                'period_end' => $periodEnd->toISOString(),
+                'price_id' => $price->id,
+                'badge' => $validated['badge'],
+                'cadence' => $validated['cadence'],
+                'align_with' => $validated['align_with'] ?? null,
+                'prorated' => $prorated,
+                'base_amount' => $baseAmount,
+            ],
         ]);
     }
 

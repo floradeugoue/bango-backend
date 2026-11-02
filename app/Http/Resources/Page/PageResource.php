@@ -58,7 +58,7 @@ class PageResource extends JsonResource
             'is_following' => $viewer ? $this->isFollowedBy($viewer) : false,
             'inbox_assigned_to' => $this->inbox_assigned_to_id ? [
                 'id' => (int) $this->inbox_assigned_to_id,
-                'name' => $this->inboxAssignee?->name,
+                'name' => $this->inboxAssignee?->display_name ?: $this->inboxAssignee?->name,
                 'handle' => $this->inboxAssignee?->handle,
             ] : null,
             'created_at' => $this->created_at?->toIso8601String(),
@@ -84,7 +84,7 @@ class PageResource extends JsonResource
         if ($this->relationLoaded('owner')) {
             $data['owner'] = [
                 'id' => $this->owner->id,
-                'name' => $this->owner->name,
+                'name' => $this->owner->display_name ?: $this->owner->name,
                 'handle' => $this->owner->handle,
             ];
         }

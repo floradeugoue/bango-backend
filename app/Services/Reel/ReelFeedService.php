@@ -60,9 +60,14 @@ class ReelFeedService
             }
         }
 
-        // Filtre par sujet/thème
+        // Filtre par sujet/thème (supporte les alias ex: housing -> realestate, et les identifiants d'intérêts)
         if ($topic) {
-            $query->where('topic', $topic);
+            $normalizedTopic = app(ReelTopicResolver::class)->normalizeTopic($topic);
+            $topicsToMatch = array_unique([$topic, $normalizedTopic]);
+            if ($normalizedTopic === 'realestate' || $topic === 'housing') {
+                $topicsToMatch = array_unique(array_merge($topicsToMatch, ['realestate', 'housing']));
+            }
+            $query->whereIn('topic', $topicsToMatch);
         }
 
         // Gestion des portées du feed

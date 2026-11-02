@@ -26,23 +26,25 @@ class NewMessageNotification extends Notification implements ShouldQueue
      */
     public function toArray(object $notifiable): array
     {
-        $senderName = $this->message->sender?->name ?? 'Un utilisateur';
+        $locale = $notifiable->locale ?? 'fr';
+        $senderName = $this->message->sender?->display_name ?: ($this->message->sender?->name ?? 'Un utilisateur');
         $preview = match ($this->message->type->value) {
-            'voice' => 'Note vocale',
-            'image' => 'Photo',
-            'story_reply' => 'Réponse à une story',
-            default => $this->message->body ?? 'Nouveau message',
+            'voice' => trans('notifications.new_message.voice', [], $locale),
+            'image' => trans('notifications.new_message.photo', [], $locale),
+            'story_reply' => trans('notifications.new_message.story_reply', [], $locale),
+            default => $this->message->body ?? trans('notifications.new_message.default', [], $locale),
         };
 
         return [
             'type' => 'new_message',
             'message_id' => (string) $this->message->id,
             'conversation_id' => (string) $this->message->conversation_id,
+            'page_id' => $this->message->page_id ?? $this->message->conversation?->page_id,
             'sender_id' => $this->message->sender_id,
             'sender_name' => $senderName,
             'message_type' => $this->message->type->value,
             'preview' => $preview,
-            'title' => "Nouveau message de {$senderName}",
+            'title' => trans('notifications.new_message.title', ['user' => $senderName], $locale),
             'created_at' => $this->message->created_at?->toIso8601String(),
         ];
     }

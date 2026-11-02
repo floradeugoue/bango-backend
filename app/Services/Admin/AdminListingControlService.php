@@ -826,13 +826,22 @@ class AdminListingControlService
                 ->where('created_at', '<', $slaLimit);
         }
 
-        // 4. Recherche textuelle
+        // 3b. Filtre visites en litige (attendance contradictoire)
+        if (isset($filters['disputed']) && filter_var($filters['disputed'], FILTER_VALIDATE_BOOLEAN)) {
+            $query->whereNotNull('disputed_at');
+        }
+
+        // 4. Recherche textuelle (supporte également payment_reference, référence courte ou ID)
         if (! empty($filters['q'])) {
             $search = strtolower(trim((string) $filters['q']));
-            $query->where(function (Builder $q) use ($search) {
-                $q->whereHas('prospect', fn ($pq) => $pq->where('name', 'LIKE', "%{$search}%")->orWhere('email', 'LIKE', "%{$search}%"))
-                    ->orWhereHas('owner', fn ($oq) => $oq->where('name', 'LIKE', "%{$search}%")->orWhere('email', 'LIKE', "%{$search}%"))
-                    ->orWhereHas('listing', fn ($lq) => $lq->where('title', 'LIKE', "%{$search}%"));
+            $like = DB::connection()->getDriverName() === 'pgsql' ? 'ILIKE' : 'LIKE';
+
+            $query->where(function (Builder $q) use ($search, $like) {
+                $q->where('payment_reference', $like, "%{$search}%")
+                    ->orWhereRaw("CAST(id AS TEXT) {$like} ?", ["%{$search}%"])
+                    ->orWhereHas('prospect', fn ($pq) => $pq->where('name', $like, "%{$search}%")->orWhere('email', $like, "%{$search}%")->orWhere('phone', $like, "%{$search}%"))
+                    ->orWhereHas('owner', fn ($oq) => $oq->where('name', $like, "%{$search}%")->orWhere('email', $like, "%{$search}%")->orWhere('phone', $like, "%{$search}%"))
+                    ->orWhereHas('listing', fn ($lq) => $lq->where('title', $like, "%{$search}%"));
             });
         }
 

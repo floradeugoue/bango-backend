@@ -121,7 +121,7 @@ class ListingAnalyticsService
             }
         }
 
-        // 7. Calculer les totaux consolidés
+        // 7. Calculer les totaux consolidés et les sources de vues
         $totals = [
             'views' => 0,
             'video_views' => 0,
@@ -132,6 +132,27 @@ class ListingAnalyticsService
             'paid_visits' => 0,
             'paid_visits_count' => 0,
         ];
+
+        $sources = [
+            'feed' => 0,
+            'reel' => 0,
+            'search' => 0,
+            'link' => 0,
+        ];
+
+        foreach ($metrics as $metric) {
+            $sources['feed'] += (int) $metric->views_feed;
+            $sources['reel'] += (int) $metric->views_reel;
+            $sources['search'] += (int) $metric->views_search;
+            $sources['link'] += (int) $metric->views_link;
+        }
+
+        // Si des vues historiques existent sans détail par source, attribuer le reliquat au feed
+        $totalMetricViews = (int) $metrics->sum('views');
+        $categorizedViews = array_sum($sources);
+        if ($totalMetricViews > $categorizedViews) {
+            $sources['feed'] += ($totalMetricViews - $categorizedViews);
+        }
 
         foreach ($seriesMap as $dayData) {
             $totals['views'] += $dayData['views'];
@@ -150,6 +171,7 @@ class ListingAnalyticsService
             'period_days' => $days,
             'series' => array_values($seriesMap),
             'totals' => $totals,
+            'sources' => $sources,
             'messages_count' => $totals['messages'],
             'paid_visits_count' => $totals['paid_visits'],
         ];

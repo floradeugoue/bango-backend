@@ -112,9 +112,10 @@ class PostFeedService
 
             $query->whereIn('user_id', $followingIds);
         } elseif ($tab === 'neighbourhood' && $user) {
-            // Mon quartier uniquement (et la même ville) ; à défaut de lieu sur la publication, le quartier du profil de l'auteur
-            $neighbourhood = $user->getRawOriginal('neighbourhood');
-            $city = $user->getRawOriginal('city');
+            $activePage = request()?->attributes?->get('active_page');
+            // Mon quartier uniquement (et la même ville) ; à défaut de lieu sur la publication, le quartier de la page ou du profil de l'auteur
+            $neighbourhood = $activePage ? $activePage->neighbourhood : $user->getRawOriginal('neighbourhood');
+            $city = $activePage ? $activePage->city : $user->getRawOriginal('city');
 
             if (! $neighbourhood) {
                 $query->whereRaw('1 = 0');

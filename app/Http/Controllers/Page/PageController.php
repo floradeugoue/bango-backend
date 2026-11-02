@@ -14,6 +14,7 @@ use App\Http\Resources\Reel\ReelResource;
 use App\Http\Resources\Square\PostResource;
 use App\Models\Page\Page;
 use App\Models\User;
+use App\Notifications\Social\SocialNotification;
 use App\Services\Page\PageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -279,6 +280,17 @@ class PageController extends Controller
         if (! $page->followers()->where('user_id', $user->id)->exists()) {
             $page->followers()->attach($user->id);
             $page->increment('followers_count');
+
+            if ($page->owner_id && $page->owner_id !== $user->id) {
+                try {
+                    $page->owner?->notify(new SocialNotification('follow', $user, [
+                        'page_id' => $page->id,
+                        'page_name' => $page->name,
+                    ]));
+                } catch (\Throwable $e) {
+                    // Ignore notification failure
+                }
+            }
         }
 
         return response()->json([

@@ -10,9 +10,11 @@ use App\Models\Kyc\KycDocument;
 use App\Models\Kyc\KycDocumentAccessLog;
 use App\Models\Kyc\KycSubmission;
 use App\Models\User;
+use App\Notifications\Kyc\KycDecisionNotification;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
 
 uses(RefreshDatabase::class);
@@ -149,11 +151,26 @@ it('shows detailed submission and does not leak private file storage paths', fun
         'status' => 'pending',
     ]);
 
+    $submission->update([
+        'metadata' => [
+            'face_match' => ['score' => 97.4, 'passed' => true],
+            'liveness' => ['passed' => true],
+        ],
+    ]);
+
     $response = $this->withUnencryptedCookie('bango_admin_session', $sessionId)
         ->getJson("/api/admin/kyc/requests/{$submission->id}");
 
     $response->assertStatus(200)
         ->assertJsonPath('data.id', $submission->id)
+        ->assertJsonPath('data.face_match.score', 97.4)
+        ->assertJsonPath('data.face_match.passed', true)
+        ->assertJsonPath('data.liveness.passed', true)
+        ->assertJsonStructure([
+            'data' => [
+                'poses' => ['selfie', 'liveness_frames'],
+            ],
+        ])
         ->assertJsonPath('data.documents.0.id', $doc->id);
 
     // Verify raw internal storage path is never exposed in output
@@ -164,15 +181,21 @@ it('shows detailed submission and does not leak private file storage paths', fun
 it('approves a KYC submission with 24-month validity and awards the badge', function () {
     [$solange, $sessionId, $csrfToken] = createKycSession('verification');
 
-    $user = User::factory()->create(['name' => 'Bailleur Approuvé', 'badge' => 'none']);
+    $user = User::factory()->create([
+        'name' => 'Mon Pseudo Initial',
+        'display_name' => 'Mon Ancien Nom',
+        'badge' => 'none',
+    ]);
     $submission = KycSubmission::create([
         'user_id' => $user->id,
         'status' => KycStatus::Pending->value,
         'profile_category' => 'landlord',
-        'full_name' => 'Bailleur Approuvé',
+        'full_name' => 'Jean-Pierre Eto\'o',
         'id_type' => 'cni',
         'id_number' => 'CNI24M',
     ]);
+
+    Notification::fake();
 
     $response = $this->withUnencryptedCookie('bango_admin_session', $sessionId)
         ->withHeader('X-CSRF-TOKEN', $csrfToken)
@@ -195,10 +218,22 @@ it('approves a KYC submission with 24-month validity and awards the badge', func
     $expectedExpiration = Carbon::today()->addMonths(24);
     expect($submission->expires_on->toDateString())->toBe($expectedExpiration->toDateString());
 
-    // Check user is verified without giving badge (badges are strictly subscriptions)
+    // Check user is verified and display_name is updated to full_name written on the document
     $user->refresh();
     expect($user->is_verified)->toBeTrue()
+        ->and($user->display_name)->toBe('Jean-Pierre Eto\'o')
         ->and($user->badge)->toBe('none');
+
+    Notification::assertSentTo(
+        $user,
+        KycDecisionNotification::class,
+        function ($n) {
+            $data = $n->toArray($n->submission->user);
+
+            return $data['decision'] === 'approve'
+                && str_contains($data['message'], 'Jean-Pierre Eto\'o');
+        }
+    );
 });
 
 it('rejects a KYC submission with required reason and logs it into refusals queue', function () {

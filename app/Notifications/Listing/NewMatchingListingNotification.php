@@ -28,13 +28,14 @@ class NewMatchingListingNotification extends Notification implements ShouldQueue
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
         $priceFormatted = number_format((float) $this->listing->price, 0, ',', ' ').' '.($this->listing->currency ?? 'XAF');
         $location = trim(($this->listing->neighbourhood ? $this->listing->neighbourhood.', ' : '').$this->listing->city);
 
         return [
             'type' => 'new_matching_listing',
             'listing_id' => (string) $this->listing->id,
-            'title' => "Nouvelle annonce disponible : {$this->listing->title}",
+            'title' => trans('notifications.new_matching_listing.title', ['title' => $this->listing->title], $locale),
             'preview' => "{$priceFormatted} · {$location}",
             'price' => (float) $this->listing->price,
             'currency' => $this->listing->currency ?? 'XAF',

@@ -39,13 +39,13 @@ class AgentPropertyResource extends JsonResource
             'effective_capabilities' => $delegation?->capabilities ?? [],
             'owner' => [
                 'id' => $this->owner_id,
-                'name' => $this->owner->name ?? $this->owner->display_name ?? null,
+                'name' => $this->owner?->display_name ?: $this->owner?->name,
                 'handle' => $this->owner->handle ?? null,
                 'avatar_url' => $this->owner->avatar_url ?? null,
             ],
             'landlord' => [
                 'id' => $this->owner_id,
-                'name' => $this->owner->name ?? $this->owner->display_name ?? null,
+                'name' => $this->owner?->display_name ?: $this->owner?->name,
                 'handle' => $this->owner->handle ?? null,
                 'avatar_url' => $this->owner->avatar_url ?? null,
             ],

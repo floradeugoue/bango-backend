@@ -11,17 +11,21 @@ use App\Enums\Visit\VisitSlotStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\Visit\ListingVisitRequestResource;
 use App\Http\Resources\Visit\VisitReservationResource;
+use App\Models\Delegation\Delegation;
 use App\Models\Listing\Listing;
 use App\Models\Payment\PaymentTransaction;
 use App\Models\Visit\ListingVisitRequest;
 use App\Models\Visit\VisitReservation;
 use App\Models\Visit\VisitSlot;
+use App\Notifications\Visit\ListingVisitRequestedNotification;
+use App\Notifications\Visit\ListingVisitSlotChosenNotification;
 use App\Services\Listing\ListingService;
 use App\Services\Visit\VisitReservationService;
 use App\Services\Visit\VisitSlotService;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -75,13 +79,75 @@ class ListingVisitRequestController extends Controller
             'proposals' => $normalizedProposals,
             'message' => $validated['message'] ?? null,
             'status' => 'pending',
-            'expires_at' => now()->addDays(7),
+            'expires_at' => now()->addHours(24),
         ]);
 
-        return response()->json(
-            new ListingVisitRequestResource($visitRequest),
-            201
-        );
+        // Notification « Nouvelle demande de visite » au propriétaire (et agent habilité)
+        $listing->owner?->notify(new ListingVisitRequestedNotification($visitRequest));
+        if ($listing->agent && $listing->agent->id !== $listing->owner_id) {
+            $listing->agent->notify(new ListingVisitRequestedNotification($visitRequest));
+        }
+
+        return response()->json([
+            'data' => new ListingVisitRequestResource($visitRequest->load(['listing', 'prospect'])),
+        ], 201);
+    }
+
+    /**
+     * Liste des demandes de visites à créneaux proposés pour le bailleur ou l'agent habilité (IM-22).
+     * GET /api/landlord/listing-visit-requests
+     */
+    public function indexLandlordRequests(Request $request): AnonymousResourceCollection
+    {
+        $user = $request->user();
+
+        // Récupérer les biens délégués à l'agent ayant la capacité 'visits'
+        $delegatedListingIds = Delegation::where('agent_id', $user->id)
+            ->where('status', 'active')
+            ->get()
+            ->filter(fn (Delegation $d) => $d->isOperational() && $d->hasCapability('visits'))
+            ->pluck('listing_id');
+
+        $query = ListingVisitRequest::where(function ($q) use ($user, $delegatedListingIds) {
+            $q->where('owner_id', $user->id)
+                ->orWhere('agent_id', $user->id)
+                ->orWhereIn('listing_id', $delegatedListingIds);
+        })
+            ->with(['listing', 'prospect'])
+            ->latest('created_at');
+
+        if ($listingId = $request->query('listing_id')) {
+            $query->where('listing_id', $listingId);
+        }
+
+        if ($status = $request->query('status')) {
+            $query->where('status', $status);
+        }
+
+        $requests = $query->paginate($request->integer('per_page', 20));
+
+        return ListingVisitRequestResource::collection($requests);
+    }
+
+    /**
+     * Liste des demandes de visite soumises par le prospect connecté (IM-23).
+     * GET /api/visits/requests
+     */
+    public function indexProspectRequests(Request $request): AnonymousResourceCollection
+    {
+        $user = $request->user();
+
+        $query = ListingVisitRequest::where('prospect_id', $user->id)
+            ->with(['listing', 'reservation'])
+            ->latest('created_at');
+
+        if ($status = $request->query('status')) {
+            $query->where('status', $status);
+        }
+
+        $requests = $query->paginate($request->integer('per_page', 20));
+
+        return ListingVisitRequestResource::collection($requests);
     }
 
     /**
@@ -107,7 +173,9 @@ class ListingVisitRequestController extends Controller
             ]);
         }
 
-        return response()->json(new ListingVisitRequestResource($visitRequest));
+        return response()->json([
+            'data' => new ListingVisitRequestResource($visitRequest),
+        ]);
     }
 
     /**
@@ -282,9 +350,12 @@ class ListingVisitRequestController extends Controller
             ];
         });
 
+        // Notification au prospect quand un créneau est choisi
+        $visitRequest->prospect?->notify(new ListingVisitSlotChosenNotification($visitRequest));
+
         return response()->json([
             'message' => 'Créneau retenu avec succès. La réservation est en attente de paiement par le prospect.',
-            'data' => new ListingVisitRequestResource($result['request']->fresh()),
+            'data' => new ListingVisitRequestResource($result['request']->fresh()->load(['listing', 'prospect'])),
             'reservation' => new VisitReservationResource($result['reservation']->load(['listing', 'slot'])),
             'quote' => $result['quote'],
             'transaction' => $result['transaction'] ? [

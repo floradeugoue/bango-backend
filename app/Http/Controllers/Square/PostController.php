@@ -10,6 +10,7 @@ use App\Services\Square\PostCreationService;
 use App\Services\Square\PostManagementService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
 
 class PostController extends Controller
@@ -36,7 +37,9 @@ class PostController extends Controller
      */
     public function show(Request $request, Post $post): PostResource
     {
-        Gate::authorize('view', $post);
+        $user = $request->user() ?: Auth::guard('api')->user();
+
+        Gate::forUser($user)->authorize('view', $post);
 
         $post->load(['media.tags.user', 'hashtags', 'user']);
 

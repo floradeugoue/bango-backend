@@ -26,19 +26,27 @@ class MessageThreadService
      */
     public function listUserThreads(User $user, array $filters = [], int $perPage = 20): LengthAwarePaginator
     {
-        $query = Conversation::query()
-            ->forUser($user->id)
-            ->with([
-                'members.user' => function ($q): void {
-                    $q->select(['id', 'name', 'handle', 'avatar_url', 'is_verified', 'account_type']);
-                },
-                'latestMessage.sender' => function ($q): void {
-                    $q->select(['id', 'name', 'handle']);
-                },
-                'listing' => function ($q): void {
-                    $q->select(['id', 'title', 'price', 'currency', 'status', 'mode', 'kind', 'owner_id', 'agent_id']);
-                },
-            ]);
+        $activePage = request()?->attributes?->get('active_page');
+
+        $query = Conversation::query();
+
+        if ($activePage) {
+            $query->where('page_id', $activePage->id);
+        } else {
+            $query->forUser($user->id);
+        }
+
+        $query->with([
+            'members.user' => function ($q): void {
+                $q->select(['id', 'name', 'handle', 'avatar_url', 'is_verified', 'account_type']);
+            },
+            'latestMessage.sender' => function ($q): void {
+                $q->select(['id', 'name', 'handle']);
+            },
+            'listing' => function ($q): void {
+                $q->select(['id', 'title', 'price', 'currency', 'status', 'mode', 'kind', 'owner_id', 'agent_id']);
+            },
+        ]);
 
         // Filtrage par catégorie
         if (! empty($filters['type'])) {
@@ -52,17 +60,19 @@ class MessageThreadService
             }
         }
 
-        // Dans la boîte principale : exclure les demandes d'inconnus reçues en attente et les conversations rejetées
-        $query->where(function (Builder $q) use ($user): void {
-            $q->where(function (Builder $sub) {
-                $sub->where('status', 'active')->orWhereNull('status');
-            })->orWhere(function (Builder $sub) use ($user) {
-                $sub->where('status', 'pending')
-                    ->where('created_by_id', $user->id);
+        // Dans la boîte principale : si pas de page active, exclure les demandes en attente
+        if (! $activePage) {
+            $query->where(function (Builder $q) use ($user): void {
+                $q->where(function (Builder $sub) {
+                    $sub->where('status', 'active')->orWhereNull('status');
+                })->orWhere(function (Builder $sub) use ($user) {
+                    $sub->where('status', 'pending')
+                        ->where('created_by_id', $user->id);
+                });
+            })->where(function (Builder $q) {
+                $q->where('status', '!=', 'rejected')->orWhereNull('status');
             });
-        })->where(function (Builder $q) {
-            $q->where('status', '!=', 'rejected')->orWhereNull('status');
-        });
+        }
 
         // Recherche par titre ou nom d'interlocuteur
 
@@ -77,8 +87,20 @@ class MessageThreadService
             });
         }
 
-        // Tri par date du dernier message ou création
-        return $query->orderByRaw('COALESCE(last_message_at, created_at) DESC')
+        // Jointure ou sous-requête pour récupérer pinned_at du membre courant afin de trier les épinglées d'abord
+        $query->addSelect([
+            'conversations.*',
+            'current_user_pinned_at' => ConversationMember::query()
+                ->select('pinned_at')
+                ->whereColumn('conversation_members.conversation_id', 'conversations.id')
+                ->where('conversation_members.user_id', $user->id)
+                ->limit(1),
+        ]);
+
+        // Tri par conversations épinglées d'abord (pinned_at DESC NULLS LAST), puis date du dernier message ou création
+        return $query->orderByRaw('CASE WHEN current_user_pinned_at IS NOT NULL THEN 0 ELSE 1 END ASC')
+            ->orderByDesc('current_user_pinned_at')
+            ->orderByRaw('COALESCE(last_message_at, created_at) DESC')
             ->paginate($perPage);
     }
 

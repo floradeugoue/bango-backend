@@ -13,6 +13,7 @@ enum VisitReservationStatus: string
     case Expired = 'expired';
     case RefundPending = 'refund_pending';
     case Refunded = 'refunded';
+    case Visited = 'visited';
 
     /**
      * Determine if this reservation currently holds/blocks a capacity slot.
@@ -32,7 +33,7 @@ enum VisitReservationStatus: string
      */
     public function grantsPrivateAddressAccess(): bool
     {
-        return $this === self::Confirmed;
+        return in_array($this, [self::Confirmed, self::Visited], true);
     }
 
     /**
@@ -48,7 +49,8 @@ enum VisitReservationStatus: string
             self::PendingPayment => in_array($target, [self::Requested, self::Confirmed, self::Expired, self::Cancelled], true),
             self::Requested => in_array($target, [self::Confirmed, self::Proposed, self::Declined, self::Cancelled], true),
             self::Proposed => in_array($target, [self::Confirmed, self::Declined, self::Cancelled], true),
-            self::Confirmed => in_array($target, [self::Cancelled, self::RefundPending, self::Refunded], true),
+            self::Confirmed => in_array($target, [self::Visited, self::Cancelled, self::RefundPending, self::Refunded], true),
+            self::Visited => in_array($target, [self::Cancelled, self::RefundPending, self::Refunded], true),
             self::Declined => in_array($target, [self::RefundPending, self::Refunded], true),
             self::Cancelled => in_array($target, [self::RefundPending, self::Refunded], true),
             self::RefundPending => in_array($target, [self::Refunded], true),

@@ -40,14 +40,17 @@ class PageMemberAcceptedNotification extends Notification implements ShouldQueue
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
+
         return [
             'type' => 'page_member_accepted',
             'page_id' => $this->member->page_id,
             'page_name' => $this->member->page->name ?? 'Page',
             'user_id' => $this->member->user_id,
-            'user_name' => $this->member->user->name ?? 'Utilisateur',
+            'user_name' => $this->member->user->display_name ?: ($this->member->user->name ?? 'Utilisateur'),
             'role' => $this->member->role->value,
-            'message' => "Un utilisateur a accepté l'invitation à rejoindre la Page.",
+            'title' => trans('notifications.page_member_accepted.title', [], $locale),
+            'message' => trans('notifications.page_member_accepted.body', [], $locale),
         ];
     }
 }

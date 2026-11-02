@@ -40,6 +40,8 @@ class ListingAlertResource extends JsonResource
             'frequency' => $this->frequency ?? 'instant',
             'push' => (bool) $this->push,
             'email' => (bool) $this->email,
+            'enabled' => $this->enabled ?? true,
+            'disabled_at' => $this->disabled_at?->toIso8601String(),
             'last_triggered_at' => $this->last_triggered_at?->toIso8601String(),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),

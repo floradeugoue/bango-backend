@@ -11,6 +11,7 @@ use App\Models\Square\PostMedia;
 use App\Models\Square\PostTag;
 use App\Models\User;
 use App\Services\Admin\AutomatedTextFilterService;
+use App\Services\Translation\TranslationService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
@@ -91,11 +92,15 @@ class PostCreationService
                 }
             }
 
+            // Détection de la langue de la publication
+            $language = app(TranslationService::class)->detectLanguage($body);
+
             // Création du post principal
             $post = Post::create([
                 'user_id' => $user->id,
                 'page_id' => $asPageId,
                 'body' => $body,
+                'language' => $language,
                 'audience' => $audience,
                 'comments_by' => $commentsBy,
                 'comments_closed' => (bool) ($data['comments_closed'] ?? false),

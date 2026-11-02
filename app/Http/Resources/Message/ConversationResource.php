@@ -27,10 +27,18 @@ class ConversationResource extends JsonResource
                 $unreadCount = $this->messages()
                     ->where('created_at', '>', $member->last_read_at)
                     ->where('sender_id', '!=', $currentUserId)
+                    ->where(function ($q) {
+                        $q->whereNull('metadata->undelivered')
+                            ->orWhere('metadata->undelivered', false);
+                    })
                     ->count();
             } elseif ($member) {
                 $unreadCount = $this->messages()
                     ->where('sender_id', '!=', $currentUserId)
+                    ->where(function ($q) {
+                        $q->whereNull('metadata->undelivered')
+                            ->orWhere('metadata->undelivered', false);
+                    })
                     ->count();
             }
         }
@@ -39,17 +47,19 @@ class ConversationResource extends JsonResource
         $title = $this->title;
         $isMuted = false;
         $isArchived = false;
+        $pinnedAt = null;
 
         if ($currentUserId) {
             $currentMember = $this->members->firstWhere('user_id', $currentUserId);
             $isMuted = (bool) ($currentMember?->is_muted);
+            $pinnedAt = $currentMember?->pinned_at?->toIso8601String();
             $isArchived = in_array($currentUserId, $this->metadata['archived_by'] ?? [], true);
 
             if (! $title && $this->type === ConversationType::Direct) {
                 $otherMember = $this->members->firstWhere('user_id', '!=', $currentUserId);
                 $otherUser = $otherMember?->user;
                 if ($otherUser) {
-                    $title = $otherUser->name ?: ($otherUser->handle ?: 'Utilisateur');
+                    $title = $otherUser->display_name ?: ($otherUser->name ?: ($otherUser->handle ?: 'Utilisateur'));
                 }
             }
         }
@@ -62,6 +72,8 @@ class ConversationResource extends JsonResource
             'avatar_url' => $this->avatar_url,
             'is_muted' => $isMuted,
             'is_archived' => $isArchived,
+            'pinned_at' => $pinnedAt,
+            'is_pinned' => $pinnedAt !== null,
             'listing_id' => $this->listing_id ? (string) $this->listing_id : null,
             'listing' => $this->whenLoaded('listing', function () {
                 if (! $this->listing) {
@@ -82,9 +94,25 @@ class ConversationResource extends JsonResource
                 ];
             }),
             'members' => ConversationMemberResource::collection($this->whenLoaded('members')),
-            'latest_message' => $this->relationLoaded('latestMessage') && $this->latestMessage
-                ? new MessageResource($this->latestMessage)
-                : null,
+            'latest_message' => (function () use ($currentUserId) {
+                if (! $this->relationLoaded('latestMessage') || ! $this->latestMessage) {
+                    return null;
+                }
+                $latest = $this->latestMessage;
+                $isUndelivered = (bool) ($latest->metadata['undelivered'] ?? false);
+                if ($isUndelivered && $currentUserId && $latest->sender_id !== $currentUserId) {
+                    // Trouver le dernier message visible pour cet utilisateur
+                    $fallback = $this->messages()
+                        ->visibleTo($currentUserId)
+                        ->with(['sender:id,name,display_name,handle,avatar_url,is_verified,is_certified'])
+                        ->orderByDesc('created_at')
+                        ->first();
+
+                    return $fallback ? new MessageResource($fallback) : null;
+                }
+
+                return new MessageResource($latest);
+            })(),
             'last_message_at' => $this->last_message_at?->toIso8601String(),
             'unread_count' => $unreadCount,
             'status' => $this->status ?? 'active',

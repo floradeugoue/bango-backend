@@ -15,19 +15,25 @@ class SecurityController extends Controller
 
         $place = $user->city ?? $user->country?->name ?? 'Douala, Cameroun';
 
-        $sessions = $user->tokens->map(function ($token) use ($currentTokenId, $place) {
-            $isAcknowledged = Cache::get('session.ack.'.$token->id, false);
+        $sessions = $user->tokens
+            ->filter(fn ($token) => ! $token->revoked && ($token->expires_at === null || ! $token->expires_at->isPast()))
+            ->values()
+            ->map(function ($token) use ($currentTokenId, $place) {
+                $isAcknowledged = Cache::get('session.ack.'.$token->id, false);
 
-            return [
-                'id' => $token->id,
-                'device' => (! empty($token->name) && $token->name !== 'auth_token') ? $token->name : 'Application mobile',
-                'current' => $currentTokenId !== null && $token->id === $currentTokenId,
-                'unusual' => ! $isAcknowledged && ($token->id !== $currentTokenId),
-                'acknowledged' => (bool) $isAcknowledged,
-                'place' => $place,
-                'last_used_at' => $token->updated_at?->toIso8601String(),
-            ];
-        });
+                $rawName = (! empty($token->name) && $token->name !== 'auth_token') ? $token->name : 'Application mobile';
+                $deviceName = str_contains($rawName, '::') ? explode('::', $rawName)[0] : $rawName;
+
+                return [
+                    'id' => $token->id,
+                    'device' => $deviceName,
+                    'current' => $currentTokenId !== null && $token->id === $currentTokenId,
+                    'unusual' => ! $isAcknowledged && ($token->id !== $currentTokenId),
+                    'acknowledged' => (bool) $isAcknowledged,
+                    'place' => $place,
+                    'last_used_at' => $token->updated_at?->toIso8601String(),
+                ];
+            });
 
         return response()->json([
             'sessions' => $sessions,

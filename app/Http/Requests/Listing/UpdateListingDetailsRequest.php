@@ -33,6 +33,7 @@ class UpdateListingDetailsRequest extends FormRequest
             'charges' => ['sometimes', 'numeric', 'min:0'],
             'negotiable' => ['sometimes', 'boolean'],
             'utilities_included' => ['sometimes', 'boolean'],
+            'uses_agenda' => ['sometimes', 'nullable', 'boolean'],
             'amenities' => ['sometimes', 'nullable', 'array'],
             'amenities.*' => ['string', 'max:50'],
         ];

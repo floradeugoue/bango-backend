@@ -7,6 +7,7 @@ use App\Enums\Visit\VisitReservationStatus;
 use App\Enums\Visit\VisitSlotStatus;
 use App\Models\Delegation\Delegation;
 use App\Models\Kyc\KycDocument;
+use App\Models\Kyc\KycSubmission;
 use App\Models\Listing\Listing;
 use App\Models\Subscription\Subscription;
 use App\Models\Subscription\SubscriptionPrice;
@@ -564,4 +565,56 @@ test('user can submit KYC documents securely to private storage', function (): v
 
     // Verify submitting KYC does NOT automatically verify user or activate badge
     expect($user->fresh()->is_verified)->toBeFalse();
+});
+
+it('accepts guided liveness frames, stores them and calculates face_match and liveness scores', function () {
+    Notification::fake();
+    Storage::fake('local');
+
+    $user = User::factory()->create([
+        'is_verified' => false,
+    ]);
+
+    Passport::actingAs($user);
+
+    $frontFile = UploadedFile::fake()->create('cni_front.jpg', 500, 'image/jpeg');
+    $backFile = UploadedFile::fake()->create('cni_back.jpg', 500, 'image/jpeg');
+    $selfieFront = UploadedFile::fake()->create('selfie_front.jpg', 600, 'image/jpeg');
+    $livenessLeft = UploadedFile::fake()->create('liveness_left.jpg', 600, 'image/jpeg');
+    $livenessRight = UploadedFile::fake()->create('liveness_right.jpg', 600, 'image/jpeg');
+
+    $response = $this->postJson('/api/landlord/kyc/submit', [
+        'id_type' => 'cni',
+        'id_number' => '1234567890',
+        'identity_front' => $frontFile,
+        'identity_back' => $backFile,
+        'selfie' => $selfieFront,
+        'liveness_frames' => [
+            $livenessLeft,
+            $livenessRight,
+        ],
+    ]);
+
+    $response->assertStatus(201)
+        ->assertJsonStructure([
+            'data' => [
+                'id',
+                'status',
+                'face_match' => ['score', 'passed'],
+                'liveness' => ['passed'],
+                'documents',
+            ],
+        ]);
+
+    expect($response->json('data.face_match.passed'))->toBeTrue();
+    expect($response->json('data.face_match.score'))->toBeGreaterThanOrEqual(80.0);
+    expect($response->json('data.liveness.passed'))->toBeTrue();
+
+    // 5 documents: front, back, selfie, 2 liveness frames
+    expect($response->json('data.documents'))->toHaveCount(5);
+
+    $submission = KycSubmission::findOrFail($response->json('data.id'));
+    expect($submission->documents()->where('kind', 'liveness_frame')->count())->toBe(2);
+    expect($submission->metadata['face_match']['passed'])->toBeTrue();
+    expect($submission->metadata['liveness']['passed'])->toBeTrue();
 });

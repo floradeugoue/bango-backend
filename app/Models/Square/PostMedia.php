@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Storage;
 
 class PostMedia extends Model
 {
@@ -41,6 +42,30 @@ class PostMedia extends Model
             'display_order' => 'integer',
             'edit_metadata' => 'array',
         ];
+    }
+
+    /**
+     * Retourne l'URL absolue du média.
+     */
+    public function getMediaUrlAttribute(?string $value): ?string
+    {
+        if (empty($value)) {
+            return null;
+        }
+
+        if (str_starts_with($value, 'http://') || str_starts_with($value, 'https://')) {
+            return $value;
+        }
+
+        if (str_starts_with($value, '/storage/')) {
+            return url($value);
+        }
+
+        if (str_starts_with($value, 'storage/')) {
+            return url('/'.$value);
+        }
+
+        return Storage::disk('public')->url($value);
     }
 
     /**

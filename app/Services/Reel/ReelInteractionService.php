@@ -8,6 +8,7 @@ use App\Models\Reel\ReelReaction;
 use App\Models\Reel\ReelShare;
 use App\Models\Reel\ReelView;
 use App\Models\User;
+use App\Notifications\Social\SocialNotification;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 
@@ -24,22 +25,40 @@ class ReelInteractionService
      */
     public function react(Reel $reel, User $user, ReelReactionType $type): array
     {
-        return DB::transaction(function () use ($reel, $user, $type) {
-            $existing = ReelReaction::where('reel_id', $reel->id)
-                ->where('user_id', $user->id)
-                ->lockForUpdate()
-                ->first();
+        $activePage = request()?->attributes?->get('active_page');
+
+        return DB::transaction(function () use ($reel, $user, $type, $activePage) {
+            $query = ReelReaction::where('reel_id', $reel->id);
+            if ($activePage) {
+                $query->where('page_id', $activePage->id);
+            } else {
+                $query->where('user_id', $user->id)->whereNull('page_id');
+            }
+
+            $existing = $query->lockForUpdate()->first();
 
             if (! $existing) {
                 // Création d'une nouvelle réaction
                 ReelReaction::create([
                     'reel_id' => $reel->id,
                     'user_id' => $user->id,
+                    'page_id' => $activePage?->id,
                     'type' => $type,
                 ]);
 
                 if ($type === ReelReactionType::Like) {
                     $reel->increment('likes_count');
+                    if ($reel->user_id && $reel->user_id !== $user->id) {
+                        $author = User::find($reel->user_id);
+                        if ($author) {
+                            $targetPageId = $reel->page_id ?? null;
+                            $author->notify(new SocialNotification('like', $user, [
+                                'reel_id' => (string) $reel->id,
+                                'page_id' => $targetPageId,
+                                'actor_page_id' => $activePage?->id,
+                            ]));
+                        }
+                    }
                 } else {
                     $reel->increment('dislikes_count');
                 }
@@ -216,35 +235,103 @@ class ReelInteractionService
      */
     public function toggleSave(Reel $reel, User $user): array
     {
-        $isSaved = $reel->savedByUsers()->where('users.id', $user->id)->exists();
+        $activePage = request()?->attributes?->get('active_page');
 
-        if ($isSaved) {
-            $reel->savedByUsers()->detach($user->id);
-            $next = false;
-        } else {
-            $reel->savedByUsers()->attach($user->id);
-            $next = true;
-        }
+        return DB::transaction(function () use ($reel, $user, $activePage) {
+            $lockedReel = Reel::where('id', $reel->id)->lockForUpdate()->first() ?? $reel;
 
-        return ['saved' => $next];
+            if ($activePage) {
+                $record = DB::table('user_saved_reels')
+                    ->where('reel_id', $lockedReel->id)
+                    ->where('page_id', $activePage->id)
+                    ->first();
+
+                if ($record) {
+                    DB::table('user_saved_reels')
+                        ->where('reel_id', $lockedReel->id)
+                        ->where('page_id', $activePage->id)
+                        ->delete();
+                    $lockedReel->decrement('saves_count');
+                    $next = false;
+                } else {
+                    DB::table('user_saved_reels')->insert([
+                        'user_id' => $user->id,
+                        'reel_id' => $lockedReel->id,
+                        'page_id' => $activePage->id,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                    $lockedReel->increment('saves_count');
+                    $next = true;
+                }
+            } else {
+                $isSaved = $lockedReel->savedByUsers()->where('users.id', $user->id)->exists();
+
+                if ($isSaved) {
+                    $lockedReel->savedByUsers()->detach($user->id);
+                    $lockedReel->decrement('saves_count');
+                    $next = false;
+                } else {
+                    $lockedReel->savedByUsers()->attach($user->id);
+                    $lockedReel->increment('saves_count');
+                    $next = true;
+                }
+            }
+
+            $currentCount = (int) Reel::where('id', $lockedReel->id)->value('saves_count');
+
+            return [
+                'saved' => $next,
+                'saves_count' => $currentCount,
+            ];
+        });
     }
 
     /**
-     * Liste des Reels sauvegardés par l'utilisateur.
+     * Liste des Reels sauvegardés par l'utilisateur ou la page.
      */
     public function listSavedReels(User $user, int $perPage = 20): LengthAwarePaginator
     {
-        return $user->savedReels()
+        $activePage = request()?->attributes?->get('active_page');
+
+        if ($activePage) {
+            return Reel::query()
+                ->join('user_saved_reels', 'reels.id', '=', 'user_saved_reels.reel_id')
+                ->where('user_saved_reels.page_id', $activePage->id)
+                ->select('reels.*')
+                ->with(['user', 'sound'])
+                ->orderByDesc('user_saved_reels.created_at')
+                ->paginate($perPage);
+        }
+
+        return Reel::query()
+            ->join('user_saved_reels', 'reels.id', '=', 'user_saved_reels.reel_id')
+            ->where('user_saved_reels.user_id', $user->id)
+            ->whereNull('user_saved_reels.page_id')
+            ->select('reels.*')
             ->with(['user', 'sound'])
             ->orderByDesc('user_saved_reels.created_at')
             ->paginate($perPage);
     }
 
     /**
-     * Liste des Reels aimés par l'utilisateur (les plus récents d'abord).
+     * Liste des Reels aimés par l'utilisateur ou la page.
      */
     public function listLikedReels(User $user, int $perPage = 20): LengthAwarePaginator
     {
+        $activePage = request()?->attributes?->get('active_page');
+
+        if ($activePage) {
+            return Reel::query()
+                ->join('reel_reactions', 'reels.id', '=', 'reel_reactions.reel_id')
+                ->where('reel_reactions.page_id', $activePage->id)
+                ->where('reel_reactions.type', ReelReactionType::Like->value)
+                ->select('reels.*')
+                ->with(['user', 'sound'])
+                ->orderByDesc('reel_reactions.created_at')
+                ->paginate($perPage);
+        }
+
         return $user->likedReels()
             ->with(['user', 'sound'])
             ->orderByDesc('reel_reactions.created_at')

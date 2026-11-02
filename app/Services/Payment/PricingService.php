@@ -98,7 +98,7 @@ class PricingService
         ?float $customAmount
     ): array {
         return match ($serviceType) {
-            PaymentServiceType::Subscription => $this->resolveSubscriptionPrice($priceId),
+            PaymentServiceType::Subscription => $this->resolveSubscriptionPrice($priceId, $customAmount),
             PaymentServiceType::Certification => $this->resolveCertificationPrice($priceId),
             PaymentServiceType::Boost => $this->resolveBoostPrice($priceId),
             PaymentServiceType::Visit => $this->resolveVisitPrice($customAmount),
@@ -109,7 +109,7 @@ class PricingService
     /**
      * @return array{0: SubscriptionProduct, 1: SubscriptionPrice, 2: string, 3: string}
      */
-    protected function resolveSubscriptionPrice(?int $priceId): array
+    protected function resolveSubscriptionPrice(?int $priceId, ?float $customAmount = null): array
     {
         if ($priceId === null) {
             throw new InvalidPriceException('Un identifiant de tarif (price_id) est obligatoire pour les abonnements.');
@@ -135,10 +135,14 @@ class PricingService
             throw new InvalidPriceException('Ce tarif a expiré.');
         }
 
+        $baseAmount = ($customAmount !== null && $customAmount > 0)
+            ? (float) $customAmount
+            : (float) $price->price_amount;
+
         return [
             $price->product,
             $price,
-            number_format((float) $price->price_amount, 2, '.', ''),
+            number_format($baseAmount, 2, '.', ''),
             $price->currency ?: config('payment.currency', 'XAF'),
         ];
     }
@@ -337,6 +341,25 @@ class PricingService
                 ];
             }
 
+            $settings = match ($product->code) {
+                'listing_boost' => [
+                    'min_budget' => 100,
+                    'max_budget' => 50000,
+                    'budget_step' => 500,
+                    'budget_steps' => [2000, 6000, 15000, 30000],
+                    'durations' => [3, 7, 14, 30],
+                    'operator_fee' => [
+                        'type' => 'percentage_with_min',
+                        'rate' => 0.02,
+                        'min' => 100,
+                    ],
+                ],
+                'page_pro' => [
+                    'free_corrections' => 2,
+                ],
+                default => null,
+            };
+
             $offers[] = [
                 'product_id' => $product->id,
                 'code' => $product->code,
@@ -346,6 +369,7 @@ class PricingService
                 'badge_type' => $product->badge_type,
                 'is_purchasable' => $isPurchasable,
                 'availability_status' => $availabilityStatus,
+                'settings' => $settings,
                 'prices' => $priceItems,
             ];
         }

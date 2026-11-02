@@ -36,9 +36,12 @@ class SupportTicketService
                     ? (TicketPriority::tryFrom($data['priority']) ?? TicketPriority::Normal)
                     : TicketPriority::Normal;
 
+                $activePage = request()?->attributes?->get('acting_page') ?? request()?->attributes?->get('active_page');
+
                 $ticket = SupportTicket::create([
                     'reference' => SupportTicket::generateReference(),
                     'user_id' => $user->id,
+                    'page_id' => $activePage?->id,
                     'subject' => $data['subject'],
                     'category' => $data['category'],
                     'status' => TicketStatus::Open,
@@ -185,11 +188,19 @@ class SupportTicketService
     public function listUserTickets(User $user, array $filters = [], int $perPage = 15): LengthAwarePaginator
     {
         $perPage = min(max($perPage, 1), 50);
+        $activePage = request()?->attributes?->get('acting_page') ?? request()?->attributes?->get('active_page');
 
-        return SupportTicket::query()
-            ->forUser($user->id)
+        $query = SupportTicket::query()
             ->status($filters['status'] ?? null)
-            ->withCount('messages')
+            ->withCount('messages');
+
+        if ($activePage) {
+            $query->where('page_id', $activePage->id);
+        } else {
+            $query->forUser($user->id)->whereNull('page_id');
+        }
+
+        return $query
             ->orderBy('last_reply_at', 'desc')
             ->orderBy('id', 'desc')
             ->paginate($perPage);

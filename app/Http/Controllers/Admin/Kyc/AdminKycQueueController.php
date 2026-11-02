@@ -40,12 +40,18 @@ class AdminKycQueueController extends Controller
         $items = collect($submissions->items())->map(function (KycSubmission $sub) {
             $user = $sub->user;
 
+            $requestedBadge = $sub->metadata['requested_badge'] ?? $sub->profile_category;
+
             $badge = match ($sub->profile_category) {
                 'landlord' => 'bailleur',
                 'agent' => 'agent',
+                'double' => 'double',
                 'page' => 'page',
                 default => ($user?->badge && $user->badge !== 'none') ? $user->badge : null,
             };
+            if ($requestedBadge === 'double') {
+                $badge = 'double';
+            }
 
             $accountKind = ($sub->profile_category === 'page' || ($user?->account_type ?? null) === 'page') ? 'page' : 'person';
             $kind = $sub->metadata['kind'] ?? 'new';
@@ -63,6 +69,7 @@ class AdminKycQueueController extends Controller
                 ],
                 'accountKind' => $accountKind,
                 'badge' => $badge,
+                'requested_badge' => $requestedBadge,
                 'kind' => $kind,
                 'city' => $user?->city,
                 'country' => $user?->country_code,
@@ -231,6 +238,12 @@ class AdminKycQueueController extends Controller
                 'property_right' => $sub->property_right,
                 'deed_type' => $sub->deed_type,
                 'rejection_reason' => $sub->rejection_reason,
+                'face_match' => $sub->metadata['face_match'] ?? null,
+                'liveness' => $sub->metadata['liveness'] ?? null,
+                'poses' => [
+                    'selfie' => $documents->firstWhere('kind', 'selfie'),
+                    'liveness_frames' => $documents->where('kind', 'liveness_frame')->values(),
+                ],
                 'documents' => $documents,
                 'submitted_at' => $sub->created_at->toISOString(),
                 'expires_on' => $sub->expires_on?->toDateString(),

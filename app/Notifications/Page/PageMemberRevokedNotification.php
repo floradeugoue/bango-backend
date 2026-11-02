@@ -38,12 +38,15 @@ class PageMemberRevokedNotification extends Notification implements ShouldQueue
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
+
         return [
             'type' => 'page_member_revoked',
             'page_id' => $this->member->page_id,
             'page_name' => $this->member->page->name ?? 'Page',
             'member_id' => $this->member->id,
-            'message' => "Vos droits sur la Page Professionnelle ont été révoqués avec prise d'effet immédiate.",
+            'title' => trans('notifications.page_member_revoked.title', [], $locale),
+            'message' => trans('notifications.page_member_revoked.body', [], $locale),
         ];
     }
 }

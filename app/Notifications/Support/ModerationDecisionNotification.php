@@ -62,10 +62,15 @@ class ModerationDecisionNotification extends Notification implements ShouldQueue
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
         $message = match ($this->action) {
-            'warn_author' => "Avertissement de modération : {$this->justification}",
-            'suspend_author' => "Compte suspendu jusqu'au ".($this->suspendedUntil ? $this->suspendedUntil->format('d/m/Y') : 'nouvel ordre').". Motif : {$this->justification}",
-            default => "Action de modération ({$this->action}) : {$this->justification}",
+            'warn_author' => ($locale === 'en' ? 'Moderation warning: ' : 'Avertissement de modération : ').$this->justification,
+            'suspend_author' => ($locale === 'en'
+                ? 'Account suspended until '.($this->suspendedUntil ? $this->suspendedUntil->format('d/m/Y') : 'further notice').'. Reason: '.$this->justification
+                : "Compte suspendu jusqu'au ".($this->suspendedUntil ? $this->suspendedUntil->format('d/m/Y') : 'nouvel ordre').'. Motif : '.$this->justification),
+            default => ($locale === 'en'
+                ? "Moderation action ({$this->action}): {$this->justification}"
+                : "Action de modération ({$this->action}) : {$this->justification}"),
         };
 
         return [

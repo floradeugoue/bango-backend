@@ -2,9 +2,11 @@
 
 namespace App\Http\Resources\Square;
 
+use App\Models\Page\Page;
 use App\Models\Square\PostComment;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
 
 /**
@@ -17,7 +19,7 @@ class PostCommentResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
-        $currentUser = $request->user();
+        $currentUser = $request->user() ?: Auth::guard('api')->user();
         $author = $this->user;
         $myReaction = $currentUser ? $this->reactionOf($currentUser) : null;
         $isMine = $currentUser ? (int) $this->user_id === (int) $currentUser->id : false;
@@ -30,6 +32,7 @@ class PostCommentResource extends JsonResource
             'parent_id' => $this->parent_id ? (int) $this->parent_id : null,
             'answer_to_id' => $this->parent_id ? (int) $this->parent_id : null,
             'body' => (string) $this->body,
+            'language' => (string) ($this->language ?? 'fr'),
 
             // Compteurs & réactions
             'likes' => (int) $this->likes_count,
@@ -52,15 +55,29 @@ class PostCommentResource extends JsonResource
             'canDelete' => $currentUser ? Gate::forUser($currentUser)->allows('delete', $this->resource) : false,
 
             // Auteur du commentaire
-            'user' => [
+            'page_id' => $this->page_id ? (int) $this->page_id : null,
+            'user' => $userArray = ($page = $this->page_id ? ($this->relationLoaded('page') ? $this->page : Page::find($this->page_id)) : null) ? [
+                'id' => (string) $page->id,
+                'name' => $page->name,
+                'displayName' => $page->name,
+                'handle' => $page->handle,
+                'avatarUrl' => $page->logo_url,
+                'badge' => $page->isCertified() ? 'page_certified' : 'none',
+                'verified' => $page->isCertified(),
+                'certified' => $page->isCertified(),
+                'is_certified' => $page->isCertified(),
+            ] : [
                 'id' => $author?->id,
-                'name' => $author?->display_name ?? $author?->name ?? 'Utilisateur Bango',
-                'displayName' => $author?->display_name ?? $author?->name ?? 'Utilisateur Bango',
+                'name' => $author?->display_name ?: ($author?->name ?? 'Utilisateur Bango'),
+                'displayName' => $author?->display_name ?: ($author?->name ?? 'Utilisateur Bango'),
                 'handle' => $author?->handle,
                 'avatarUrl' => $author?->avatar_url,
                 'badge' => $author?->badge,
                 'verified' => (bool) ($author?->is_verified ?? false),
+                'certified' => (bool) ($author?->is_certified ?? false),
+                'is_certified' => (bool) ($author?->is_certified ?? false),
             ],
+            'author' => $userArray,
 
             // Horodatage
             'createdAt' => $this->created_at?->toISOString(),

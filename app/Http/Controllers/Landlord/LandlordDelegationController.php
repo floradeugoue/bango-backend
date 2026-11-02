@@ -115,4 +115,29 @@ class LandlordDelegationController extends Controller
 
         return (new DelegationResource($reinstated))->response();
     }
+
+    /**
+     * Modifie les capacités d'un agent pour plusieurs ou tous ses biens.
+     * PUT /api/landlord/delegations/agents/{agent_id}
+     */
+    public function updateByAgent(Request $request, string $agent_id): JsonResponse
+    {
+        $validated = $request->validate([
+            'capabilities' => ['required', 'array'],
+            'capabilities.*' => ['string', 'in:visits,reply,edit'],
+            'listing_ids' => ['nullable', 'array'],
+            'listing_ids.*' => ['string'],
+        ]);
+
+        $updated = $this->delegationService->updateAgentDelegations(
+            $request->user(),
+            $agent_id,
+            $validated
+        );
+
+        return response()->json([
+            'message' => 'Capacités de l\'agent mises à jour avec succès.',
+            'data' => DelegationResource::collection($updated),
+        ]);
+    }
 }

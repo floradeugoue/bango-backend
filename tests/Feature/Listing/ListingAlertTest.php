@@ -197,3 +197,61 @@ test('publishing an unmatching listing does not notify user', function (): void 
 
     Notification::assertNotSentTo($this->user, NewMatchingListingNotification::class);
 });
+
+test('alert can be disabled with enabled=false and disabled_at is populated', function (): void {
+    Passport::actingAs($this->user);
+
+    $createRes = $this->postJson('/api/listings/alerts', [
+        'name' => 'Alerte Bonanjo',
+        'city' => 'Douala',
+    ])->assertCreated();
+
+    expect($createRes->json('enabled'))->toBeTrue()
+        ->and($createRes->json('disabled_at'))->toBeNull();
+
+    $alertId = $createRes->json('id');
+
+    // Désactiver l'alerte
+    $updateRes = $this->patchJson("/api/listings/alerts/{$alertId}", [
+        'enabled' => false,
+    ])->assertOk();
+
+    expect($updateRes->json('enabled'))->toBeFalse()
+        ->and($updateRes->json('disabled_at'))->not->toBeNull();
+
+    // Réactiver l'alerte
+    $reactivateRes = $this->patchJson("/api/listings/alerts/{$alertId}", [
+        'enabled' => true,
+    ])->assertOk();
+
+    expect($reactivateRes->json('enabled'))->toBeTrue()
+        ->and($reactivateRes->json('disabled_at'))->toBeNull();
+});
+
+test('disabled alert does not receive notifications when matching listing is published', function (): void {
+    Notification::fake();
+
+    // Alerte éteinte (enabled = false)
+    ListingAlert::create([
+        'user_id' => $this->user->id,
+        'name' => 'Alerte Éteinte',
+        'city' => 'Douala',
+        'frequency' => 'instant',
+        'enabled' => false,
+        'disabled_at' => now(),
+    ]);
+
+    $matchingListing = Listing::factory()->create([
+        'owner_id' => $this->owner->id,
+        'title' => 'Appartement Douala',
+        'status' => ListingStatus::Published,
+        'city' => 'Douala',
+        'published_at' => now(),
+    ]);
+
+    $listener = new NotifyMatchingHousingSearches;
+    $listener->handle(new ListingPublished($matchingListing));
+
+    // Aucune notification car l'alerte est désactivée
+    Notification::assertNotSentTo($this->user, NewMatchingListingNotification::class);
+});

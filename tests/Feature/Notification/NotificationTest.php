@@ -1,13 +1,16 @@
 <?php
 
+use App\Enums\Page\PageStatus;
 use App\Jobs\Notification\SendPushNotificationJob;
 use App\Models\Notification\DeviceToken;
+use App\Models\Page\Page;
 use App\Models\User;
 use App\Services\Notification\PushNotificationService;
 use Database\Seeders\SubscriptionCatalogSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Notifications\DatabaseNotification;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Laravel\Passport\Passport;
@@ -277,9 +280,17 @@ test('DELETE /api/notifications/device-token désactive le token lors de la déc
 });
 
 test('PushNotificationService transmet les pushs sans casser les in-app en cas d\'erreur', function () {
+    Http::fake([
+        PushNotificationService::EXPO_PUSH_URL => Http::response([
+            'data' => [
+                ['status' => 'ok', 'id' => 'ticket-123'],
+            ],
+        ], 200),
+    ]);
+
     DeviceToken::create([
         'user_id' => $this->user->id,
-        'token' => 'valid_token_123',
+        'token' => 'ExponentPushToken[valid_token_123]',
         'platform' => 'android',
         'is_active' => true,
     ]);
@@ -310,4 +321,77 @@ test('SendPushNotificationJob est dispatchable sur la file d\'attente', function
     Queue::assertPushed(SendPushNotificationJob::class, function ($job) {
         return $job->user->id === $this->user->id && $job->title === 'Visite confirmée';
     });
+});
+
+test('GET /api/notifications isole les notifications de page et de compte et renvoie unread_by_identity', function () {
+    Passport::actingAs($this->user);
+
+    $page = Page::create([
+        'owner_id' => $this->user->id,
+        'name' => 'Agence Immobilière Test',
+        'handle' => 'agence_test_'.Str::random(5),
+        'status' => PageStatus::Active,
+    ]);
+
+    // 2 notifications compte (sans page_id), 1 lue, 1 non lue
+    DatabaseNotification::create([
+        'id' => (string) Str::uuid(),
+        'type' => 'App\Notifications\Social\SocialNotification',
+        'notifiable_type' => User::class,
+        'notifiable_id' => $this->user->id,
+        'data' => ['type' => 'follow', 'message' => 'Quelqu\'un vous suit'],
+        'read_at' => null,
+    ]);
+    DatabaseNotification::create([
+        'id' => (string) Str::uuid(),
+        'type' => 'App\Notifications\Social\SocialNotification',
+        'notifiable_type' => User::class,
+        'notifiable_id' => $this->user->id,
+        'data' => ['type' => 'follow', 'message' => 'Notification lue'],
+        'read_at' => now(),
+    ]);
+
+    // 2 notifications page (avec page_id), non lues
+    DatabaseNotification::create([
+        'id' => (string) Str::uuid(),
+        'type' => 'App\Notifications\Social\SocialNotification',
+        'notifiable_type' => User::class,
+        'notifiable_id' => $this->user->id,
+        'data' => ['type' => 'like', 'page_id' => $page->id, 'message' => 'J\'aime sur la page'],
+        'read_at' => null,
+    ]);
+    DatabaseNotification::create([
+        'id' => (string) Str::uuid(),
+        'type' => 'App\Notifications\Social\SocialNotification',
+        'notifiable_type' => User::class,
+        'notifiable_id' => $this->user->id,
+        'data' => ['type' => 'comment', 'page_id' => $page->id, 'message' => 'Commentaire sur la page'],
+        'read_at' => null,
+    ]);
+
+    // Appel sans header X-Bango-Page : uniquement les notifications compte
+    $resAccount = $this->getJson('/api/notifications');
+    $resAccount->assertOk()
+        ->assertJsonCount(2, 'data')
+        ->assertJsonPath('unread_count', 1)
+        ->assertJsonPath('unread_by_identity.account', 1)
+        ->assertJsonPath('unread_by_identity.pages.'.$page->id, 2);
+
+    expect(collect($resAccount->json('data'))->pluck('data.message')->all())
+        ->toContain('Quelqu\'un vous suit')
+        ->not->toContain('J\'aime sur la page');
+
+    // Appel avec header X-Bango-Page : uniquement les notifications de la page
+    $resPage = $this->withHeader('X-Bango-Page', (string) $page->id)
+        ->getJson('/api/notifications');
+    $resPage->assertOk()
+        ->assertJsonCount(2, 'data')
+        ->assertJsonPath('unread_count', 2)
+        ->assertJsonPath('unread_by_identity.account', 1)
+        ->assertJsonPath('unread_by_identity.pages.'.$page->id, 2);
+
+    expect(collect($resPage->json('data'))->pluck('data.message')->all())
+        ->toContain('J\'aime sur la page')
+        ->toContain('Commentaire sur la page')
+        ->not->toContain('Quelqu\'un vous suit');
 });

@@ -54,8 +54,10 @@ class RenewalUpcomingReminderNotification extends Notification implements Should
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
         $productName = $this->subscription->product->name ?? 'Abonnement BANGO';
         $expiryDate = $this->subscription->current_period_end?->toIso8601String();
+        $dateFormatted = $this->subscription->current_period_end?->format('d/m/Y') ?? '';
         $amount = (float) $this->subscription->amount;
 
         return [
@@ -69,8 +71,8 @@ class RenewalUpcomingReminderNotification extends Notification implements Should
             'amount' => $amount,
             'currency' => $this->subscription->currency,
             'action_url' => "/subscriptions/{$this->subscription->id}/renewal",
-            'title' => "Échéance proche ({$this->daysRemaining}j) — {$productName}",
-            'message' => "Votre abonnement {$productName} expire le ".($this->subscription->current_period_end?->format('d/m/Y'))." ({$amount} {$this->subscription->currency}). Renouvelez manuellement pour conserver votre badge.",
+            'title' => trans('notifications.renewal_reminder.title', ['days' => $this->daysRemaining, 'product' => $productName], $locale),
+            'message' => trans('notifications.renewal_reminder.body', ['product' => $productName, 'date' => $dateFormatted, 'amount' => $amount, 'currency' => $this->subscription->currency], $locale),
             'requires_manual_confirmation' => true,
         ];
     }

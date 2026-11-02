@@ -55,10 +55,18 @@ class ListingAlertController extends Controller
             'frequency' => ['nullable', 'string', 'in:instant,daily,weekly'],
             'push' => ['nullable', 'boolean'],
             'email' => ['nullable', 'boolean'],
+            'enabled' => ['nullable', 'boolean'],
+            'disabled_at' => ['nullable', 'date'],
         ]);
 
         if (isset($validated['country_code'])) {
             $validated['country_code'] = strtoupper($validated['country_code']);
+        }
+
+        if (isset($validated['enabled']) && ! $validated['enabled'] && ! isset($validated['disabled_at'])) {
+            $validated['disabled_at'] = now();
+        } elseif (isset($validated['enabled']) && $validated['enabled']) {
+            $validated['disabled_at'] = null;
         }
 
         $alert = $request->user()->listingAlerts()->create($validated);
@@ -102,10 +110,20 @@ class ListingAlertController extends Controller
             'frequency' => ['nullable', 'string', 'in:instant,daily,weekly'],
             'push' => ['nullable', 'boolean'],
             'email' => ['nullable', 'boolean'],
+            'enabled' => ['nullable', 'boolean'],
+            'disabled_at' => ['nullable', 'date'],
         ]);
 
         if (isset($validated['country_code'])) {
             $validated['country_code'] = strtoupper($validated['country_code']);
+        }
+
+        if (array_key_exists('enabled', $validated)) {
+            if (! $validated['enabled']) {
+                $validated['disabled_at'] = $validated['disabled_at'] ?? now();
+            } else {
+                $validated['disabled_at'] = null;
+            }
         }
 
         $alert->update($validated);

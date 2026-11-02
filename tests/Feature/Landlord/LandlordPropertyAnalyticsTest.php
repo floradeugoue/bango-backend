@@ -152,3 +152,43 @@ it('accurately aggregates daily metrics, favorites, and contacts over the 30-day
         ->assertJsonPath('data.totals.video_views', 15)
         ->assertJsonPath('data.totals.favorites', 1);
 });
+
+it('increments listing_daily_metrics views and sources on listing view and returns sources in analytics', function () {
+    $landlord = User::factory()->create(['name' => 'Bailleur Makepe']);
+    $viewer = User::factory()->create(['name' => 'Visiteur Makepe']);
+
+    $listing = Listing::factory()->create([
+        'owner_id' => $landlord->id,
+        'title' => 'Chambre moderne à Makepe',
+        'status' => ListingStatus::Published,
+        'views_count' => 0,
+    ]);
+
+    // Visite 1 : par défaut (feed)
+    Passport::actingAs($viewer);
+    getJson("/api/listings/{$listing->id}?source=feed")->assertStatus(200);
+
+    // Visite 2 : depuis un reel
+    getJson("/api/listings/{$listing->id}?source=reel&is_video=1")->assertStatus(200);
+
+    // Visite 3 : depuis la recherche
+    getJson("/api/listings/{$listing->id}?source=search")->assertStatus(200);
+
+    // Visite 4 : depuis un lien partagé
+    getJson("/api/listings/{$listing->id}?source=link")->assertStatus(200);
+
+    // Vérification compteur direct sur le modèle listing
+    expect($listing->fresh()->views_count)->toBe(4);
+
+    // Vérification analytics pour le bailleur
+    Passport::actingAs($landlord);
+    $analyticsRes = getJson("/api/landlord/properties/{$listing->id}/analytics")
+        ->assertStatus(200);
+
+    $analyticsRes->assertJsonPath('data.totals.views', 4)
+        ->assertJsonPath('data.totals.video_views', 1)
+        ->assertJsonPath('data.sources.feed', 1)
+        ->assertJsonPath('data.sources.reel', 1)
+        ->assertJsonPath('data.sources.search', 1)
+        ->assertJsonPath('data.sources.link', 1);
+});

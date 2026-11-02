@@ -3,6 +3,7 @@
 namespace App\Models\Reel;
 
 use App\Enums\Reel\ReelReactionType;
+use App\Models\Page\Page;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -17,13 +18,20 @@ class ReelComment extends Model
     protected $fillable = [
         'reel_id',
         'user_id',
+        'page_id',
         'parent_id',
         'body',
+        'language',
         'likes_count',
         'dislikes_count',
         'replies_count',
         'is_edited',
     ];
+
+    public function page(): BelongsTo
+    {
+        return $this->belongsTo(Page::class);
+    }
 
     protected function casts(): array
     {

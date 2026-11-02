@@ -29,19 +29,21 @@ class NewStoryReplyNotification extends Notification implements ShouldQueue
      */
     public function toArray(object $notifiable): array
     {
-        $senderName = $this->message->sender?->name ?? 'Un utilisateur';
+        $locale = $notifiable->locale ?? 'fr';
+        $senderName = $this->message->sender?->display_name ?: ($this->message->sender?->name ?? 'Un utilisateur');
 
         return [
             'type' => 'new_story_reply',
             'message_id' => (string) $this->message->id,
             'conversation_id' => (string) $this->message->conversation_id,
+            'page_id' => $this->message->page_id ?? $this->message->conversation?->page_id,
             'sender_id' => $this->message->sender_id,
             'sender_name' => $senderName,
             'story_id' => $this->message->metadata['story_id'] ?? null,
             'body' => $this->message->body,
             'reaction' => $this->message->metadata['reaction'] ?? null,
             'story_preview_card' => $this->storyPreviewCard,
-            'title' => "{$senderName} a répondu à votre story",
+            'title' => trans('notifications.new_story_reply.title', ['user' => $senderName], $locale),
             'created_at' => $this->message->created_at?->toIso8601String(),
         ];
     }

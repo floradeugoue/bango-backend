@@ -32,6 +32,8 @@ class UpdatePropertySlotsRequest extends FormRequest
             'grouped' => ['nullable', 'boolean'],
             'group_size' => ['nullable', 'integer', 'min:1', 'max:50'],
             'minimum_hours' => ['nullable', 'integer', 'min:0', 'max:72'],
+            'auto_confirm' => ['nullable', 'boolean'],
+            'uses_agenda' => ['nullable', 'boolean'],
         ];
     }
 

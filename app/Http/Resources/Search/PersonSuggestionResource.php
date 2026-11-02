@@ -26,7 +26,7 @@ class PersonSuggestionResource extends JsonResource
 
         return [
             'id' => (string) $this->id,
-            'name' => $this->display_name ?? $this->name,
+            'name' => $this->display_name ?: $this->name,
             'handle' => $this->handle ?? '',
             'avatar_url' => $this->avatar_url,
             'is_verified' => (bool) ($this->is_verified ?? false),

@@ -38,6 +38,8 @@ it('returns the active password security policy', function () {
 });
 
 it('allows submitting internal access request only with @bango.app email and handles idempotently', function () {
+    config(['auth.admin_allowed_email_domains' => '@bango.app']);
+
     // 1. Rejette les adresses non @bango.app
     $invalidDomainResponse = $this->postJson('/api/admin/auth/access-requests', [
         'first_name' => 'Jean',

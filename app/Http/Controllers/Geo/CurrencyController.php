@@ -18,7 +18,19 @@ class CurrencyController extends Controller
             $query->where('is_active', filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN));
         }
 
-        return response()->json($query->get());
+        $currencies = $query->get()->map(function (Currency $currency) {
+            return [
+                'id' => $currency->id,
+                'name' => $currency->name,
+                'code' => $currency->code,
+                'symbol' => $currency->symbol,
+                'rate_from_xaf' => (float) ($currency->rate_from_xaf ?? 1.0),
+                'round_to' => (int) ($currency->round_to ?? 0),
+                'is_active' => (bool) $currency->is_active,
+            ];
+        });
+
+        return response()->json($currencies);
     }
 
     /**

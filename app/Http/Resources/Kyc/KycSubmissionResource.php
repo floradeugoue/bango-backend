@@ -19,6 +19,8 @@ class KycSubmissionResource extends JsonResource
         return [
             'id' => $this->id,
             'status' => $this->status->value,
+            'requested_badge' => $this->metadata['requested_badge'] ?? $this->profile_category,
+            'profile_category' => $this->profile_category,
             'full_name' => $this->full_name,
             'id_type' => $this->id_type,
             'id_number' => $this->id_number,
@@ -27,6 +29,8 @@ class KycSubmissionResource extends JsonResource
             'deed_type' => $this->deed_type,
             'rejection_reason' => $this->rejection_reason,
             'decided_at' => $this->decided_at?->toIso8601String(),
+            'face_match' => $this->metadata['face_match'] ?? null,
+            'liveness' => $this->metadata['liveness'] ?? null,
             'documents' => KycDocumentResource::collection($this->whenLoaded('documents')),
             'created_at' => $this->created_at?->toIso8601String(),
         ];

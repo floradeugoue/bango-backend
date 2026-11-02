@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Message\StoreMessageThreadRequest;
 use App\Http\Resources\Message\ConversationResource;
 use App\Models\Message\Conversation;
+use App\Models\Message\ConversationMember;
 use App\Services\Message\MessageService;
 use App\Services\Message\MessageThreadService;
 use Illuminate\Http\JsonResponse;
@@ -245,5 +246,74 @@ class MessageThreadController extends Controller
         $thread->save();
 
         return response()->json(['success' => true, 'is_archived' => false]);
+    }
+
+    /**
+     * Épingler la conversation pour l'utilisateur (3 au plus).
+     *
+     * POST /api/messages/threads/{id}/pin
+     */
+    public function pin(string $id, Request $request): JsonResponse
+    {
+        /** @var Conversation $thread */
+        $thread = Conversation::query()->findOrFail($id);
+        Gate::authorize('view', $thread);
+
+        $userId = $request->user()->id;
+        $member = $thread->members()->where('user_id', $userId)->firstOrFail();
+
+        // Si déjà épinglée, on retourne succès idempotent
+        if ($member->pinned_at) {
+            return response()->json([
+                'success' => true,
+                'is_pinned' => true,
+                'pinned_at' => $member->pinned_at->toIso8601String(),
+            ]);
+        }
+
+        // Vérifier le quota : 3 conversations épinglées au plus
+        $pinnedCount = ConversationMember::query()
+            ->where('user_id', $userId)
+            ->whereNotNull('pinned_at')
+            ->count();
+
+        if ($pinnedCount >= 3) {
+            return response()->json([
+                'message' => 'Vous ne pouvez pas épingler plus de 3 conversations.',
+                'errors' => [
+                    'pinned' => ['Vous ne pouvez pas épingler plus de 3 conversations.'],
+                ],
+            ], 422);
+        }
+
+        $now = now();
+        $member->update(['pinned_at' => $now]);
+
+        return response()->json([
+            'success' => true,
+            'is_pinned' => true,
+            'pinned_at' => $now->toIso8601String(),
+        ]);
+    }
+
+    /**
+     * Désépingler la conversation pour l'utilisateur.
+     *
+     * POST /api/messages/threads/{id}/unpin
+     */
+    public function unpin(string $id, Request $request): JsonResponse
+    {
+        /** @var Conversation $thread */
+        $thread = Conversation::query()->findOrFail($id);
+        Gate::authorize('view', $thread);
+
+        $member = $thread->members()->where('user_id', $request->user()->id)->firstOrFail();
+        $member->update(['pinned_at' => null]);
+
+        return response()->json([
+            'success' => true,
+            'is_pinned' => false,
+            'pinned_at' => null,
+        ]);
     }
 }

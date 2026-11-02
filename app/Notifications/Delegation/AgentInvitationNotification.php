@@ -41,16 +41,19 @@ class AgentInvitationNotification extends Notification implements ShouldQueue
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
+
         return [
             'type' => 'agent_invitation',
             'delegation_id' => $this->delegation->id,
             'listing_id' => $this->delegation->listing_id,
             'bailleur_id' => $this->delegation->bailleur_id,
-            'bailleur_name' => $this->delegation->bailleur->name ?? 'Bailleur',
+            'bailleur_name' => $this->delegation->bailleur->display_name ?: ($this->delegation->bailleur->name ?? 'Bailleur'),
             'listing_title' => $this->delegation->listing->title ?? 'Bien',
             'capabilities' => $this->delegation->capabilities,
             'expires_at' => $this->delegation->expires_at?->toIso8601String(),
-            'message' => 'Nouvelle invitation de mandat reçue',
+            'title' => trans('notifications.agent_invitation.title', [], $locale),
+            'message' => trans('notifications.agent_invitation.body', [], $locale),
         ];
     }
 }

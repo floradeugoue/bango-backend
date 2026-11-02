@@ -42,7 +42,7 @@ class PublicProfileResource extends JsonResource
 
         return [
             'id' => $this->id,
-            'name' => $this->display_name ?? $this->name,
+            'name' => $this->display_name ?: $this->name,
             'handle' => $this->handle,
             'avatarUrl' => $this->avatar_url,
             'place' => $place,

@@ -10,6 +10,7 @@ use App\Http\Requests\Listing\UpdateListingStatusRequest;
 use App\Http\Resources\Listing\ListingDetailResource;
 use App\Http\Resources\Listing\ListingResource;
 use App\Models\Listing\Listing;
+use App\Models\Listing\ListingDailyMetric;
 use App\Policies\ListingPolicy;
 use App\Services\Delegation\DelegationService;
 use App\Services\Listing\ListingSearchService;
@@ -18,6 +19,7 @@ use App\Services\Subscription\BadgeResolutionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\DB;
 
 class ListingController extends Controller
 {
@@ -101,6 +103,54 @@ class ListingController extends Controller
         // Incrémenter le compteur de vues uniquement pour les visiteurs tiers
         if (! $viewer || $viewer->id !== $listing->owner_id) {
             $listing->increment('views_count');
+
+            // Synchronisation de la métrique quotidienne et de la provenance de la vue
+            $today = now()->startOfDay()->toDateString();
+            $source = $request->input('source');
+            $sourceColumn = match ($source) {
+                'reel' => 'views_reel',
+                'search' => 'views_search',
+                'link' => 'views_link',
+                default => 'views_feed',
+            };
+
+            $metric = ListingDailyMetric::where('listing_id', $listing->id)
+                ->whereDate('metric_date', $today)
+                ->first();
+
+            if (! $metric) {
+                try {
+                    $metric = ListingDailyMetric::create([
+                        'listing_id' => $listing->id,
+                        'metric_date' => $today,
+                        'views' => 0,
+                        'views_feed' => 0,
+                        'views_reel' => 0,
+                        'views_search' => 0,
+                        'views_link' => 0,
+                        'video_views' => 0,
+                        'favorites' => 0,
+                        'contacts' => 0,
+                    ]);
+                } catch (\Throwable $e) {
+                    $metric = ListingDailyMetric::where('listing_id', $listing->id)
+                        ->whereDate('metric_date', $today)
+                        ->first();
+                }
+            }
+
+            if ($metric) {
+                $updates = [
+                    'views' => DB::raw('views + 1'),
+                    $sourceColumn => DB::raw("{$sourceColumn} + 1"),
+                ];
+
+                if ($request->boolean('is_video') || $request->input('media_type') === 'video') {
+                    $updates['video_views'] = DB::raw('video_views + 1');
+                }
+
+                ListingDailyMetric::where('id', $metric->id)->update($updates);
+            }
         }
 
         return (new ListingDetailResource($listing))->response();
@@ -216,5 +266,34 @@ class ListingController extends Controller
         );
 
         return (new ListingDetailResource($updated))->response();
+    }
+
+    /**
+     * Enregistre un partage du bien immobilier avec la même règle d'idempotence que les reels.
+     * POST /listings/{id}/share
+     */
+    public function share(Request $request, string $id): JsonResponse
+    {
+        /** @var Listing $listing */
+        $listing = Listing::findOrFail($id);
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'platform' => ['nullable', 'string', 'max:50'],
+            'client_mutation_id' => ['nullable', 'string', 'max:100'],
+        ]);
+
+        $result = $this->listingService->recordShare(
+            listing: $listing,
+            user: $user,
+            platform: $validated['platform'] ?? null,
+            clientMutationId: $validated['client_mutation_id'] ?? null,
+        );
+
+        return response()->json([
+            'success' => true,
+            'shares_count' => $result['shares_count'],
+            'listing_id' => $listing->id,
+        ]);
     }
 }

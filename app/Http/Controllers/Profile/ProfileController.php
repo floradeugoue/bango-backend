@@ -74,6 +74,64 @@ class ProfileController extends Controller
     }
 
     /**
+     * Update full or partial profile (PUT /profile or PUT /profile/).
+     */
+    public function update(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'handle' => ['sometimes', 'required', 'string', 'min:3', 'max:20', 'regex:/^[a-z0-9.]+$/', 'unique:users,handle,'.$user->id],
+            'displayName' => ['nullable', 'string', 'max:50'],
+            'display_name' => ['nullable', 'string', 'max:50'],
+            'name' => ['nullable', 'string', 'max:50'],
+            'bio' => ['nullable', 'string', 'max:500'],
+            'website' => ['nullable', 'url', 'max:120'],
+            'locale' => ['sometimes', 'required', 'string', 'in:fr,en'],
+            'uses_agenda' => ['sometimes', 'boolean'],
+        ]);
+
+        $updates = [];
+
+        if (isset($validated['handle'])) {
+            $updates['handle'] = strtolower($validated['handle']);
+        }
+
+        if (array_key_exists('displayName', $validated)) {
+            $updates['display_name'] = $validated['displayName'];
+        } elseif (array_key_exists('display_name', $validated)) {
+            $updates['display_name'] = $validated['display_name'];
+        } elseif (array_key_exists('name', $validated)) {
+            $updates['display_name'] = $validated['name'];
+        }
+
+        if (array_key_exists('bio', $validated)) {
+            $updates['bio'] = $validated['bio'];
+        }
+
+        if (array_key_exists('website', $validated)) {
+            $updates['website'] = $validated['website'];
+        }
+
+        if (isset($validated['locale'])) {
+            $updates['locale'] = $validated['locale'];
+        }
+
+        if (array_key_exists('uses_agenda', $validated)) {
+            $updates['uses_agenda'] = (bool) $validated['uses_agenda'];
+        }
+
+        if (! empty($updates)) {
+            $user->update($updates);
+        }
+
+        return response()->json([
+            'success' => true,
+            'user' => new UserResource($user->fresh()),
+        ]);
+    }
+
+    /**
      * Update identity: handle, displayName, and optionally bio.
      */
     public function updateIdentity(Request $request): JsonResponse
@@ -83,6 +141,7 @@ class ProfileController extends Controller
             'displayName' => ['nullable', 'string', 'max:50'],
             'bio' => ['nullable', 'string', 'max:500'],
             'website' => ['nullable', 'url', 'max:120'],
+            'locale' => ['nullable', 'string', 'in:fr,en'],
         ]);
 
         $updates = [
@@ -96,6 +155,10 @@ class ProfileController extends Controller
 
         if ($request->has('website')) {
             $updates['website'] = $request->website;
+        }
+
+        if ($request->has('locale')) {
+            $updates['locale'] = $request->locale;
         }
 
         $request->user()->update($updates);

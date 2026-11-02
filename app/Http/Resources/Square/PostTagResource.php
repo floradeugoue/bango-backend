@@ -17,7 +17,7 @@ class PostTagResource extends JsonResource
             'accountId' => (string) $this->user_id,
             'account_id' => (string) $this->user_id,
             'handle' => $this->user?->handle ?? '',
-            'name' => $this->user?->display_name ?? $this->user?->name ?? '',
+            'name' => ($this->user?->display_name ?: $this->user?->name) ?? '',
             'avatar' => $this->user?->avatar_url,
             'x' => (float) $this->x,
             'y' => (float) $this->y,

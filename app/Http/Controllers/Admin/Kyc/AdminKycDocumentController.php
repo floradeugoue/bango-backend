@@ -7,7 +7,9 @@ use App\Models\Admin\AdminAuditLog;
 use App\Models\Kyc\KycDocument;
 use App\Models\Kyc\KycDocumentAccessLog;
 use App\Models\Kyc\KycSubmission;
+use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\Response;
@@ -76,16 +78,25 @@ class AdminKycDocumentController extends Controller
             ]);
         }
 
-        // 3. Téléchargement ou affichage sécurisé en flux binaire contrôlé
+        // 3. Téléchargement ou affichage sécurisé en flux binaire contrôlé déchiffré
         if (! Storage::disk('local')->exists($document->file_path)) {
             abort(404, 'Fichier introuvable sur le stockage sécurisé.');
         }
 
-        return Storage::disk('local')->response(
-            $document->file_path,
+        $rawContent = Storage::disk('local')->get($document->file_path);
+        try {
+            $decryptedContent = Crypt::decrypt($rawContent);
+        } catch (DecryptException) {
+            $decryptedContent = $rawContent;
+        }
+
+        return response()->streamDownload(
+            function () use ($decryptedContent) {
+                echo $decryptedContent;
+            },
             $document->original_name,
             [
-                'Content-Type' => $document->mime_type,
+                'Content-Type' => $document->mime_type ?: 'application/octet-stream',
                 'Cache-Control' => 'no-store, no-cache, must-revalidate, private',
                 'X-Content-Type-Options' => 'nosniff',
             ]

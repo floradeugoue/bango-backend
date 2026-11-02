@@ -45,10 +45,15 @@ test('la commande stories:expire archive les Stories expirées autorisant l arch
         ->and($expiredNonArchivable->fresh()->status)->toBe(StoryStatus::Expired);
 });
 
-test('l utilisateur peut récupérer l ensemble de ses Stories archivées', function () {
+test('l utilisateur peut récupérer l ensemble de ses Stories dans son archive, y compris actives', function () {
     $archivedStory1 = Story::factory()->archived()->create(['user_id' => $this->user->id]);
     $archivedStory2 = Story::factory()->archived()->create(['user_id' => $this->user->id]);
-    $activeStory = Story::factory()->create(['user_id' => $this->user->id]);
+    $activeStory = Story::factory()->create([
+        'user_id' => $this->user->id,
+        'status' => StoryStatus::Active,
+        'published_at' => now()->subHour(),
+        'expires_at' => now()->addHours(23),
+    ]);
 
     StorySlide::factory()->create(['story_id' => $archivedStory1->id]);
     StorySlide::factory()->create(['story_id' => $archivedStory2->id]);
@@ -57,7 +62,13 @@ test('l utilisateur peut récupérer l ensemble de ses Stories archivées', func
     $response = $this->getJson('/api/stories/archived');
 
     $response->assertStatus(200)
-        ->assertJsonCount(2, 'data');
+        ->assertJsonCount(3, 'data');
+
+    $items = collect($response->json('data'));
+    $activeItem = $items->firstWhere('id', (string) $activeStory->id);
+    expect($activeItem)->not->toBeNull()
+        ->and($activeItem['is_active'])->toBeTrue()
+        ->and($activeItem['is_expired'])->toBeFalse();
 });
 
 test('un utilisateur peut supprimer définitivement sa Story', function () {

@@ -23,6 +23,7 @@ class InviteAgentRequest extends FormRequest
             'capabilities' => ['nullable', 'array'],
             'capabilities.*' => ['string', 'in:visits,reply,edit'],
             'expires_days' => ['nullable', 'integer', 'min:1', 'max:30'],
+            'visit_share_percent' => ['nullable', 'numeric', 'min:0', 'max:100'],
         ];
     }
 

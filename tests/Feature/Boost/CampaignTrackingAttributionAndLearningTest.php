@@ -2,6 +2,7 @@
 
 use App\Enums\Boost\CampaignObjective;
 use App\Enums\Boost\CampaignStatus;
+use App\Enums\Square\PostMediaKind;
 use App\Models\Boost\Campaign;
 use App\Models\Boost\CampaignImpression;
 use App\Models\Boost\CampaignResult;
@@ -9,6 +10,7 @@ use App\Models\Message\Conversation;
 use App\Models\Message\ConversationMember;
 use App\Models\Profile\Interest;
 use App\Models\Square\Post;
+use App\Models\Square\PostMedia;
 use App\Models\User;
 use App\Services\Boost\AdDeliveryService;
 use App\Services\Boost\CampaignAttributionService;
@@ -355,10 +357,10 @@ test('BO-07 : CampaignResource retourne thumbnail_url et audience_breakdown calc
     Passport::actingAs($this->sponsor);
 
     // Ajouter un média sur le post de la campagne pour le thumbnail_url
-    \App\Models\Square\PostMedia::create([
+    PostMedia::create([
         'post_id' => $this->post->id,
         'media_url' => 'https://res.cloudinary.com/bango/image/upload/v1234/test_post_thumb.jpg',
-        'media_type' => \App\Enums\Square\PostMediaKind::Photo,
+        'media_type' => PostMediaKind::Photo,
         'display_order' => 0,
     ]);
 
@@ -423,3 +425,35 @@ test('BO-07 : CampaignResource retourne thumbnail_url et audience_breakdown calc
         ->assertJsonPath('data.0.audience_breakdown.neighbourhoods.0.name', 'Almadies');
 });
 
+test('BO-07 : la portée par jour (daily.reach) compte les personnes distinctes de campaign_impressions et non les affichages répétés', function () {
+    Passport::actingAs($this->sponsor);
+
+    $viewerArnaud = User::factory()->create([
+        'name' => 'Arnaud Testeur',
+        'city' => 'Douala',
+        'neighbourhood' => 'Akwa',
+    ]);
+
+    // Arnaud voit la campagne DEUX fois le même jour
+    Passport::actingAs($viewerArnaud);
+    $this->postJson("/api/boost/campaigns/{$this->campaign->id}/impression")->assertOk();
+    $this->postJson("/api/boost/campaigns/{$this->campaign->id}/impression")->assertOk();
+
+    // Consultation de la campagne par le propriétaire
+    Passport::actingAs($this->sponsor);
+    $res = $this->getJson("/api/boost/campaigns/{$this->campaign->id}");
+    $res->assertOk();
+
+    // Arnaud a vu 2 fois : impressions_count = 2, reach_count = 1
+    $res->assertJsonPath('data.impressions_count', 2)
+        ->assertJsonPath('data.reach_count', 1);
+
+    // Dans daily[0], reach doit être 1 (personne distincte) et impressions = 2
+    $daily = $res->json('data.daily');
+    expect($daily)->not->toBeEmpty();
+
+    $todayDaily = collect($daily)->firstWhere('date', now()->toDateString());
+    expect($todayDaily)->not->toBeNull()
+        ->and($todayDaily['impressions'])->toBe(2)
+        ->and($todayDaily['reach'])->toBe(1); // Exactement 1 personne distincte (Arnaud), pas 2 affichages !
+});

@@ -3,6 +3,7 @@
 use App\Http\Controllers\Admin\Auth\AdminDeviceController;
 use App\Http\Controllers\Admin\Auth\AdminInvitationController;
 use App\Http\Controllers\Agent\AgentDirectoryController;
+use App\Http\Controllers\Agent\AgentEarningsController;
 use App\Http\Controllers\Agent\AgentInvitationController;
 use App\Http\Controllers\Agent\AgentPortfolioController;
 use App\Http\Controllers\Auth\AccountStateController;
@@ -20,6 +21,7 @@ use App\Http\Controllers\Boost\CreditWalletController;
 use App\Http\Controllers\Content\LinkResolverController;
 use App\Http\Controllers\Credits\CreditPurchaseController;
 use App\Http\Controllers\Credits\CreditTransactionController;
+use App\Http\Controllers\Delegation\VisitShareController;
 use App\Http\Controllers\Geo\CityController;
 use App\Http\Controllers\Geo\CountryController;
 use App\Http\Controllers\Geo\CurrencyController;
@@ -28,9 +30,11 @@ use App\Http\Controllers\Geo\NeighbourhoodController;
 use App\Http\Controllers\Geo\OperatorController;
 use App\Http\Controllers\Housing\HousingSearchController;
 use App\Http\Controllers\Landlord\LandlordDelegationController;
+use App\Http\Controllers\Landlord\LandlordEarningsController;
 use App\Http\Controllers\Landlord\LandlordKycController;
 use App\Http\Controllers\Landlord\LandlordPropertyAnalyticsController;
 use App\Http\Controllers\Landlord\LandlordPropertyController;
+use App\Http\Controllers\Landlord\LandlordSlotRuleController;
 use App\Http\Controllers\Legal\CopyrightClaimController;
 use App\Http\Controllers\Legal\DataExportController;
 use App\Http\Controllers\Legal\LegalDocumentController;
@@ -101,6 +105,7 @@ use App\Http\Controllers\Square\PostCommentsStatusController;
 use App\Http\Controllers\Square\PostController;
 use App\Http\Controllers\Square\PostFeedController;
 use App\Http\Controllers\Square\PostLikeController;
+use App\Http\Controllers\Square\PostSaveController;
 use App\Http\Controllers\Square\PostShareController;
 use App\Http\Controllers\Square\PostViewController;
 use App\Http\Controllers\Story\CloseListController;
@@ -116,6 +121,7 @@ use App\Http\Controllers\Support\ReportController;
 use App\Http\Controllers\Support\SupportTicketController;
 use App\Http\Controllers\Sync\OfflineSyncController;
 use App\Http\Controllers\System\AppVersionController;
+use App\Http\Controllers\Translation\TranslationController;
 use App\Http\Controllers\Upload\TusUploadController;
 use App\Http\Controllers\Visit\LandlordVisitController;
 use App\Http\Controllers\Visit\ListingVisitRequestController;
@@ -212,6 +218,9 @@ Route::prefix('catalog')->group(function () {
     Route::get('/{code}', [CatalogController::class, 'show']);
 });
 
+// Devises et taux de change (public)
+Route::get('/currencies', [CurrencyController::class, 'index']);
+
 // --------------------------------------------------------------------------
 // GEO (public, lecture seule)
 // --------------------------------------------------------------------------
@@ -277,7 +286,17 @@ Route::prefix('listings')->group(function () {
     // Créneaux disponibles pour une annonce immobilière (IM-05 / slots.tsx)
     // Ressource : VisitSlot (grille 5 jours, capacité, verrous de 15min déduits) | Accès : Public
     Route::get('/{id}/slots', [ProspectVisitController::class, 'slots'])->whereUuid('id')->name('api.listings.slots');
+
+    // Enregistrer un partage d'annonce de manière atomique et idempotente
+    // POST /listings/{id}/share
+    Route::post('/{id}/share', [ListingController::class, 'share'])->whereUuid('id')->name('api.listings.share');
 });
+
+// --------------------------------------------------------------------------
+// SQUARE & PUBLICATIONS (Consultation Publique avec enrichissement utilisateur optionnel)
+// --------------------------------------------------------------------------
+// Consulter les détails d'une publication spécifique (public, enrichi si connecté)
+Route::get('/posts/{post}', [PostController::class, 'show'])->whereNumber('post')->name('api.posts.show.public');
 
 // --------------------------------------------------------------------------
 // MODULE 12 : PG — PAGES PROFESSIONNELLES (Consultation & Recherche Publiques)
@@ -346,6 +365,12 @@ Route::options('/uploads/tus/{id}', [TusUploadController::class, 'options'])->na
 Route::get('/system/version', AppVersionController::class)->name('api.system.version');
 
 // --------------------------------------------------------------------------
+// TRADUCTION DE CONTENUS (Publications, Reels, Commentaires)
+// --------------------------------------------------------------------------
+// Traduire à la demande un texte de publication, légende de reel ou commentaire
+Route::post('/translate', [TranslationController::class, 'translate'])->name('api.translate');
+
+// --------------------------------------------------------------------------
 // SESSION (Requiert un Token Passport valide)
 // --------------------------------------------------------------------------
 Route::middleware('auth:api')->group(function () {
@@ -371,6 +396,8 @@ Route::middleware('auth:api')->group(function () {
     Route::prefix('profile')->group(function () {
         // Afficher les données complètes du profil de l'utilisateur
         Route::get('/', [ProfileController::class, 'show']);
+        // Mettre à jour le profil (y compris locale fr/en)
+        Route::put('/', [ProfileController::class, 'update']);
         // Consulter un profil public (par ID ou handle, PR-07 / PR-08 / PR-09)
         Route::get('/public/{identifier}', [ProfileController::class, 'showPublic']);
         // Alias : consulter un profil utilisateur public par ID ou handle
@@ -592,11 +619,15 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/mine', [ProspectVisitController::class, 'mine'])->name('api.visits.mine');
 
         // Demandes de visites sans agenda préalable (IM-22 / IM-23)
+        Route::get('/requests', [ListingVisitRequestController::class, 'indexProspectRequests'])->name('api.visits.requests.index');
         Route::get('/requests/{id}', [ListingVisitRequestController::class, 'show'])->whereUuid('id')->name('api.visits.requests.show');
         Route::post('/requests/{id}/cancel', [ListingVisitRequestController::class, 'cancel'])->whereUuid('id')->name('api.visits.requests.cancel');
 
         // Consultation détaillée d'une réservation de visite
         Route::get('/{id}', [ProspectVisitController::class, 'show'])->whereUuid('id')->name('api.visits.show');
+
+        // Régler une réservation de visite existante (Crédit BANGO ou Mobile Money)
+        Route::post('/{id}/pay', [ProspectVisitController::class, 'pay'])->whereUuid('id')->name('api.visits.pay');
 
         // Confirmation post-paiement côté client (vérification de preuve serveur)
         Route::post('/{id}/confirm', [ProspectVisitController::class, 'confirm'])->whereUuid('id')->name('api.visits.confirm');
@@ -610,6 +641,9 @@ Route::middleware('auth:api')->group(function () {
         // Télécharger ou consulter le reçu officiel de visite (JSON et PDF signé)
         Route::get('/{id}/receipt', [ProspectVisitController::class, 'receipt'])->whereUuid('id')->name('api.visits.receipt');
         Route::get('/{id}/receipt.pdf', [ProspectVisitController::class, 'receiptPdf'])->whereUuid('id')->name('api.visits.receipt.pdf');
+
+        // Déclarer la présence / émargement d'une visite après la fin du créneau (prospect, bailleur, agent)
+        Route::post('/{id}/attendance', [ProspectVisitController::class, 'attendance'])->whereUuid('id')->name('api.visits.attendance');
     });
 
     // --------------------------------------------------------------------------
@@ -623,6 +657,10 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/kyc', [LandlordKycController::class, 'show'])->name('api.landlord.kyc.show');
         // Télécharger ou visualiser une pièce justificative du dossier KYC bailleur
         Route::get('/kyc/documents/{id}', [LandlordKycController::class, 'downloadDocument'])->whereUuid('id')->name('api.landlord.kyc.download');
+        // Ajouter un justificatif de propriété supplémentaire pour un bien
+        Route::post('/kyc/property-deeds', [LandlordKycController::class, 'storePropertyDeed'])->name('api.landlord.kyc.property-deeds.store');
+        // Lister les justificatifs de propriété du bailleur avec leur état
+        Route::get('/kyc/property-deeds', [LandlordKycController::class, 'listPropertyDeeds'])->name('api.landlord.kyc.property-deeds.index');
 
         // Actions réservées au bailleur certifié avec badge actif
         Route::middleware('subscribed:landlord')->group(function () {
@@ -635,6 +673,15 @@ Route::middleware('auth:api')->group(function () {
 
         // Changement de statut d'un bien (BL-18 : published, reserved, taken)
         Route::patch('/properties/{id}/status', [LandlordPropertyController::class, 'updateStatus'])->whereUuid('id')->name('api.landlord.properties.status');
+
+        // Règles d'agenda globales du bailleur (BL-08 compte)
+        Route::get('/slot-rules', [LandlordSlotRuleController::class, 'showRules'])->name('api.landlord.slot_rules.show');
+        Route::put('/slot-rules', [LandlordSlotRuleController::class, 'updateRules'])->name('api.landlord.slot_rules.update');
+
+        // Congés et indisponibilités du bailleur
+        Route::get('/unavailability', [LandlordSlotRuleController::class, 'indexUnavailability'])->name('api.landlord.unavailability.index');
+        Route::post('/unavailability', [LandlordSlotRuleController::class, 'storeUnavailability'])->name('api.landlord.unavailability.store');
+        Route::delete('/unavailability/{id?}', [LandlordSlotRuleController::class, 'destroyUnavailability'])->name('api.landlord.unavailability.destroy');
 
         // Gestion globale ou par lot des créneaux de visite (BL-04 / BL-08)
         Route::put('/properties/{id}/slots', [LandlordPropertyController::class, 'updateSlots'])->whereUuid('id')->name('api.landlord.properties.slots.update');
@@ -651,6 +698,9 @@ Route::middleware('auth:api')->group(function () {
         // Consulter toutes les demandes de visite entrantes du bailleur (BL-07)
         Route::get('/visit-requests', [LandlordPropertyController::class, 'visitRequests'])->name('api.landlord.visit_requests');
 
+        // Consulter les demandes de visite à créneaux proposés (IM-22)
+        Route::get('/listing-visit-requests', [ListingVisitRequestController::class, 'indexLandlordRequests'])->name('api.landlord.listing_visit_requests');
+
         // Choisir un créneau parmi les propositions d'une demande de visite (IM-22 / IM-23)
         Route::post('/visit-requests/{id}/choose', [ListingVisitRequestController::class, 'choose'])->whereUuid('id')->name('api.landlord.visit_requests.choose');
 
@@ -663,6 +713,8 @@ Route::middleware('auth:api')->group(function () {
         // Délégations émises par le bailleur
         // Lister les mandats de délégation de gestion immobilière émis par le bailleur
         Route::get('/delegations', [LandlordDelegationController::class, 'index'])->name('api.landlord.delegations.index');
+        // Modifier les capacités d'un agent pour plusieurs ou tous ses biens
+        Route::put('/delegations/agents/{agent_id}', [LandlordDelegationController::class, 'updateByAgent'])->name('api.landlord.delegations.updateByAgent');
         // Révoquer ou annuler une délégation de gestion confiée à un agent
         Route::delete('/delegations/{id}', [LandlordDelegationController::class, 'destroy'])->whereUuid('id')->name('api.landlord.delegations.destroy');
         // Relancer un agent immobilier invité pour une délégation en attente
@@ -674,6 +726,18 @@ Route::middleware('auth:api')->group(function () {
 
         // Analytique immobilière chronologique sur 30 jours (BL-19 / Étape 10)
         Route::get('/properties/{id}/analytics', [LandlordPropertyAnalyticsController::class, 'show'])->whereUuid('id')->name('api.landlord.properties.analytics');
+
+        // Gains des visites du bailleur (BL-11)
+        Route::get('/earnings', [LandlordEarningsController::class, 'index'])->name('api.landlord.earnings');
+        Route::get('/payout-method', [LandlordEarningsController::class, 'getPayoutMethod'])->name('api.landlord.payout_method.get');
+        Route::put('/payout-method', [LandlordEarningsController::class, 'updatePayoutMethod'])->name('api.landlord.payout_method.update');
+        Route::get('/payouts', [LandlordEarningsController::class, 'payouts'])->name('api.landlord.payouts');
+    });
+
+    // Négociation du partage des frais de visite (Bailleur - Agent)
+    Route::prefix('delegations/visit-share')->group(function () {
+        Route::post('/', [VisitShareController::class, 'propose'])->name('api.delegations.visit_share.propose');
+        Route::post('/accept', [VisitShareController::class, 'accept'])->name('api.delegations.visit_share.accept');
     });
 
     // --------------------------------------------------------------------------
@@ -687,6 +751,9 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/invitations/{id}/accept', [AgentInvitationController::class, 'accept'])->whereUuid('id')->name('api.agent.invitations.accept');
         // Refuser une proposition de mandat de délégation immobilière
         Route::post('/invitations/{id}/reject', [AgentInvitationController::class, 'reject'])->whereUuid('id')->name('api.agent.invitations.reject');
+
+        // Gains des visites de l'agent immobilier
+        Route::get('/earnings', [AgentEarningsController::class, 'index'])->name('api.agent.earnings');
 
         // Actions réservées à l'agent avec badge actif
         Route::middleware('subscribed:agent')->group(function () {
@@ -775,6 +842,8 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/plans', [CatalogController::class, 'index']);
         // Obtenir le statut courant des abonnements et badges actifs de l'utilisateur
         Route::get('/status', [SubscriptionController::class, 'status']);
+        // Devis pour souscription ou ajout de badge avec prorata d'alignement
+        Route::post('/quote', [SubscriptionController::class, 'quote']);
         // Souscrire à une nouvelle formule d'abonnement
         Route::post('/subscribe', [SubscriptionController::class, 'subscribe']);
         // Afficher les détails d'un abonnement spécifique
@@ -808,6 +877,8 @@ Route::middleware('auth:api')->group(function () {
     Route::prefix('payments')->group(function () {
         // Consulter le catalogue des offres et prestations payantes
         Route::get('/catalog', [PaymentController::class, 'catalog']);
+        // Calculer les frais d'opérateur Mobile Money pour un montant donné
+        Route::post('/fees', [PaymentController::class, 'calculateFees'])->name('api.payments.fees');
         // Établir un devis certifié serveur avant confirmation
         Route::post('/quote', [PaymentController::class, 'quote']);
         // Initier un paiement Mobile Money (Push USSD) ou Crédit BANGO
@@ -854,8 +925,6 @@ Route::middleware('auth:api')->group(function () {
     // --------------------------------------------------------------------------
     // Alias racine pour consulter le fil d'actualité Square
     Route::get('/square/feed', [PostFeedController::class, 'index'])->name('api.square.feed.alias');
-    // Alias racine pour afficher une publication Square spécifique
-    Route::get('/posts/{post}', [PostController::class, 'show'])->whereNumber('post')->name('api.posts.show.alias');
     // Enregistrer une vue de publication (au plus une par compte et par 24 h)
     Route::post('/posts/{post}/view', [PostViewController::class, 'store'])->name('api.posts.view');
     // Alias racine pour lister les mentions « J'aime » d'une publication
@@ -883,8 +952,14 @@ Route::middleware('auth:api')->group(function () {
         // Publications aimées par l'utilisateur connecté (les plus récentes d'abord)
         Route::get('/posts/liked', [PostLikeController::class, 'likedPosts'])->name('api.posts.liked.list');
 
+        // Publications enregistrées par l'utilisateur connecté (les plus récentes d'abord)
+        Route::get('/posts/saved', [PostSaveController::class, 'index'])->name('api.posts.saved.list');
+
         // Afficher les détails d'une publication spécifique selon les règles d'audience
         Route::get('/posts/{post}', [PostController::class, 'show'])->whereNumber('post')->name('api.posts.show');
+
+        // Enregistrer ou retirer des enregistrements une publication (bascule)
+        Route::post('/posts/{post}/save', [PostSaveController::class, 'toggle'])->whereNumber('post')->name('api.posts.save');
 
         // Enregistrer une vue de publication (au plus une par compte et par 24 h)
         Route::post('/posts/{post}/view', [PostViewController::class, 'store'])->name('api.square.posts.view');
@@ -1033,6 +1108,12 @@ Route::middleware('auth:api')->group(function () {
         // Verrouiller ou déverrouiller la réutilisation d'un son original (réservé au créateur)
         Route::put('/{id}/original-sound/lock', [SoundController::class, 'lockOriginal'])->name('api.reels.sounds.lock');
 
+        // Favoris / Sauvegardes
+        // Lister tous les Reels sauvegardés dans les favoris de l'utilisateur
+        Route::get('/user/saved', [ReelInteractionController::class, 'listSaved'])->name('api.reels.saved.list');
+        // Lister tous les Reels aimés par l'utilisateur connecté
+        Route::get('/user/liked', [ReelInteractionController::class, 'listLiked'])->name('api.reels.liked.list');
+
         // Vues et consultation individuelle
         // Enregistrement d'une vue (avec déduplication anti-abus 30 minutes et anonymisation IP)
         Route::post('/{reel}/view', [ReelInteractionController::class, 'view'])->whereUuid('reel')->name('api.reels.view');
@@ -1061,11 +1142,7 @@ Route::middleware('auth:api')->group(function () {
 
         // Favoris / Sauvegardes
         // Ajouter ou retirer un Reel de ses favoris (sauvegardes)
-        Route::post('/{reel}/save', [ReelInteractionController::class, 'toggleSave'])->name('api.reels.save');
-        // Lister tous les Reels sauvegardés dans les favoris de l'utilisateur
-        Route::get('/user/saved', [ReelInteractionController::class, 'listSaved'])->name('api.reels.saved.list');
-        // Lister tous les Reels aimés par l'utilisateur connecté
-        Route::get('/user/liked', [ReelInteractionController::class, 'listLiked'])->name('api.reels.liked.list');
+        Route::post('/{reel}/save', [ReelInteractionController::class, 'toggleSave'])->whereUuid('reel')->name('api.reels.save');
 
         // Pas intéressé (RL-06)
         // Masquer un Reel et le marquer comme « Ça ne m'intéresse pas »
@@ -1246,6 +1323,12 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/threads/{id}/archive', [MessageThreadController::class, 'archive'])->name('api.messages.threads.archive');
         // Désarchiver une conversation
         Route::post('/threads/{id}/unarchive', [MessageThreadController::class, 'unarchive'])->name('api.messages.threads.unarchive');
+
+        // Épinglage (pin / unpin)
+        // Épingler une conversation en tête de liste (max 3)
+        Route::post('/threads/{id}/pin', [MessageThreadController::class, 'pin'])->name('api.messages.threads.pin');
+        // Désépingler une conversation
+        Route::post('/threads/{id}/unpin', [MessageThreadController::class, 'unpin'])->name('api.messages.threads.unpin');
 
         // Conversations de groupe
         // Créer un groupe de discussion avec nom, avatar et membres initiaux

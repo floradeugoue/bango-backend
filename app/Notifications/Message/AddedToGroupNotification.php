@@ -30,16 +30,18 @@ class AddedToGroupNotification extends Notification implements ShouldQueue
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
         $groupTitle = $this->conversation->title ?? 'un groupe';
+        $addedByName = $this->addedBy->display_name ?: $this->addedBy->name;
 
         return [
             'type' => 'added_to_group',
             'conversation_id' => (string) $this->conversation->id,
             'group_title' => $groupTitle,
             'added_by_id' => $this->addedBy->id,
-            'added_by_name' => $this->addedBy->name,
-            'title' => "Ajouté au groupe « {$groupTitle} »",
-            'message' => "{$this->addedBy->name} vous a ajouté au groupe « {$groupTitle} »",
+            'added_by_name' => $addedByName,
+            'title' => trans('notifications.added_to_group.title', [], $locale),
+            'message' => trans('notifications.added_to_group.body', ['user' => $addedByName, 'group' => $groupTitle], $locale),
             'created_at' => now()->toIso8601String(),
         ];
     }

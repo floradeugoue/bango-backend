@@ -37,6 +37,8 @@ class CampaignCompletedNotification extends Notification implements ShouldQueue
      */
     public function toArray(object $notifiable): array
     {
+        $locale = $notifiable->locale ?? 'fr';
+
         return [
             'type' => 'campaign_completed',
             'campaign_id' => $this->campaign->id,
@@ -45,7 +47,8 @@ class CampaignCompletedNotification extends Notification implements ShouldQueue
             'clicks_count' => $this->campaign->clicks_count,
             'reach_count' => $this->campaign->reach_count,
             'spent' => (float) $this->campaign->spent_amount,
-            'message' => 'Votre campagne de boost est terminée. Consultez vos statistiques.',
+            'title' => trans('notifications.campaign_completed.title', [], $locale),
+            'message' => trans('notifications.campaign_completed.body', [], $locale),
         ];
     }
 }

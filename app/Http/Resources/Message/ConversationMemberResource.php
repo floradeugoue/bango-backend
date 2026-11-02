@@ -50,10 +50,13 @@ class ConversationMemberResource extends JsonResource
 
                 return [
                     'id' => $this->user->id,
-                    'name' => $this->user->name,
+                    'name' => $this->user->display_name ?: $this->user->name,
+                    'handle' => $this->user->handle,
                     'username' => $this->user->username ?? $this->user->handle,
                     'avatar_url' => $this->user->avatar_url ?? $this->user->avatar,
                     'is_verified' => (bool) $this->user->is_verified,
+                    'certified' => (bool) ($this->user->is_certified ?? false),
+                    'is_certified' => (bool) ($this->user->is_certified ?? false),
                     'account_type' => $this->user->account_type?->value ?? 'personal',
                     'is_online' => $isOnline,
                     'last_seen_at' => $renderedLastSeen,

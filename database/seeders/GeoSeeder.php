@@ -15,34 +15,39 @@ class GeoSeeder extends Seeder
     public function run(): void
     {
         // 1. Currencies
-        $xaf = Currency::firstOrCreate(
+        $xaf = Currency::updateOrCreate(
             ['code' => 'XAF'],
-            ['name' => 'Franc CFA BEAC', 'symbol' => 'FCFA']
+            ['name' => 'Franc CFA BEAC', 'symbol' => 'FCFA', 'rate_from_xaf' => 1.0, 'round_to' => 0, 'is_active' => true]
         );
 
-        $xof = Currency::firstOrCreate(
+        $xof = Currency::updateOrCreate(
             ['code' => 'XOF'],
-            ['name' => 'Franc CFA BCEAO', 'symbol' => 'FCFA']
+            ['name' => 'Franc CFA BCEAO', 'symbol' => 'FCFA', 'rate_from_xaf' => 1.0, 'round_to' => 0, 'is_active' => true]
         );
 
-        $eur = Currency::firstOrCreate(
+        $eur = Currency::updateOrCreate(
             ['code' => 'EUR'],
-            ['name' => 'Euro', 'symbol' => '€']
+            ['name' => 'Euro', 'symbol' => '€', 'rate_from_xaf' => 0.00152449, 'round_to' => 2, 'is_active' => true]
         );
 
-        $ghs = Currency::firstOrCreate(
+        $ghs = Currency::updateOrCreate(
             ['code' => 'GHS'],
-            ['name' => 'Ghanaian Cedi', 'symbol' => 'GH₵']
+            ['name' => 'Ghanaian Cedi', 'symbol' => 'GH₵', 'rate_from_xaf' => 0.026, 'round_to' => 2, 'is_active' => true]
         );
 
-        $ngn = Currency::firstOrCreate(
+        $ngn = Currency::updateOrCreate(
             ['code' => 'NGN'],
-            ['name' => 'Nigerian Naira', 'symbol' => '₦']
+            ['name' => 'Nigerian Naira', 'symbol' => '₦', 'rate_from_xaf' => 2.75, 'round_to' => 0, 'is_active' => true]
         );
 
-        $kes = Currency::firstOrCreate(
+        $kes = Currency::updateOrCreate(
             ['code' => 'KES'],
-            ['name' => 'Kenyan Shilling', 'symbol' => 'KSh']
+            ['name' => 'Kenyan Shilling', 'symbol' => 'KSh', 'rate_from_xaf' => 0.21, 'round_to' => 0, 'is_active' => true]
+        );
+
+        $gnf = Currency::updateOrCreate(
+            ['code' => 'GNF'],
+            ['name' => 'Franc Guinéen', 'symbol' => 'FG', 'rate_from_xaf' => 14.2, 'round_to' => 0, 'is_active' => true]
         );
 
         // 2. Countries
