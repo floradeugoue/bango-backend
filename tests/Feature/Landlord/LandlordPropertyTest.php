@@ -618,3 +618,97 @@ it('accepts guided liveness frames, stores them and calculates face_match and li
     expect($submission->metadata['face_match']['passed'])->toBeTrue();
     expect($submission->metadata['liveness']['passed'])->toBeTrue();
 });
+
+it('reopens closed future slots when listing transitions from taken back to published or reserved', function () {
+    $landlord = ($this->createLandlord)();
+    Passport::actingAs($landlord);
+
+    $listing = Listing::factory()->create([
+        'owner_id' => $landlord->id,
+        'created_by_id' => $landlord->id,
+        'status' => ListingStatus::Published,
+        'uses_agenda' => true,
+        'auto_confirm' => true,
+    ]);
+
+    // Créer des créneaux futurs pour le bien
+    $slot1 = VisitSlot::create([
+        'listing_id' => $listing->id,
+        'owner_id' => $landlord->id,
+        'start_at' => now()->addDays(2),
+        'end_at' => now()->addDays(2)->addMinutes(30),
+        'capacity' => 2,
+        'booked_count' => 0,
+        'status' => VisitSlotStatus::Open,
+    ]);
+    $slot2 = VisitSlot::create([
+        'listing_id' => $listing->id,
+        'owner_id' => $landlord->id,
+        'start_at' => now()->addDays(3),
+        'end_at' => now()->addDays(3)->addMinutes(30),
+        'capacity' => 2,
+        'booked_count' => 0,
+        'status' => VisitSlotStatus::Open,
+    ]);
+
+    // 1. Passer en taken ferme les créneaux futurs
+    $this->patchJson("/api/landlord/properties/{$listing->id}/status", [
+        'status' => 'taken',
+    ])->assertStatus(200);
+
+    $slot1->refresh();
+    $slot2->refresh();
+    expect($slot1->status)->toBe(VisitSlotStatus::Closed)
+        ->and($slot2->status)->toBe(VisitSlotStatus::Closed);
+
+    // 2. Remettre en published rouvre les créneaux futurs
+    $this->patchJson("/api/landlord/properties/{$listing->id}/status", [
+        'status' => 'published',
+    ])->assertStatus(200);
+
+    $slot1->refresh();
+    $slot2->refresh();
+    expect($slot1->status)->toBe(VisitSlotStatus::Open)
+        ->and($slot2->status)->toBe(VisitSlotStatus::Open);
+});
+
+it('PUT /api/landlord/properties/{id}/slots reopens closed future slots and regenerates schedule', function () {
+    $landlord = ($this->createLandlord)();
+    Passport::actingAs($landlord);
+
+    $listing = Listing::factory()->create([
+        'owner_id' => $landlord->id,
+        'created_by_id' => $landlord->id,
+        'status' => ListingStatus::Published,
+        'uses_agenda' => true,
+    ]);
+
+    $slot = VisitSlot::create([
+        'listing_id' => $listing->id,
+        'owner_id' => $landlord->id,
+        'start_at' => now()->addDays(2),
+        'end_at' => now()->addDays(2)->addMinutes(30),
+        'capacity' => 2,
+        'booked_count' => 0,
+        'status' => VisitSlotStatus::Closed,
+    ]);
+
+    // Envoi des horaires par PUT .../slots
+    $res = $this->putJson("/api/landlord/properties/{$listing->id}/slots", [
+        'days' => [
+            [
+                'day' => now()->addDays(2)->dayOfWeek,
+                'from' => '09:00',
+                'to' => '17:00',
+                'closed' => false,
+            ],
+        ],
+        'slot_duration_minutes' => 30,
+        'horizon_days' => 7,
+    ]);
+
+    $res->assertStatus(200);
+
+    $slot->refresh();
+    expect($slot->status)->toBe(VisitSlotStatus::Open);
+});

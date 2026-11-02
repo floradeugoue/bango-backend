@@ -36,6 +36,68 @@ class MonetbilGateway implements PaymentGatewayInterface
         return $enabled && ! empty($serviceKey) && ! empty($serviceSecret);
     }
 
+    public const SUPPORTED_COUNTRIES = ['CM', 'CI', 'SN', 'GA', 'BJ', 'TG'];
+
+    public const COUNTRY_PHONE_CODES = [
+        'CM' => '237',
+        'CI' => '225',
+        'SN' => '221',
+        'GA' => '241',
+        'BJ' => '229',
+        'TG' => '228',
+    ];
+
+    public const COUNTRY_CURRENCIES = [
+        'CM' => 'XAF',
+        'GA' => 'XAF',
+        'CI' => 'XOF',
+        'SN' => 'XOF',
+        'BJ' => 'XOF',
+        'TG' => 'XOF',
+    ];
+
+    /**
+     * Détermine le pays du paiement à partir du paramètre explicite, de l'indicatif du téléphone ou de l'utilisateur.
+     */
+    public function detectCountryCode(string $phone, ?PaymentTransaction $transaction = null, ?string $explicitCountry = null): ?string
+    {
+        if (! empty($explicitCountry)) {
+            return strtoupper(trim($explicitCountry));
+        }
+
+        $clean = preg_replace('/[^0-9]/', '', $phone);
+        if (str_starts_with($clean, '00')) {
+            $clean = substr($clean, 2);
+        }
+
+        // Vérification par indicatif international dans le numéro
+        foreach (self::COUNTRY_PHONE_CODES as $cCode => $prefix) {
+            if (str_starts_with($clean, $prefix)) {
+                return $cCode;
+            }
+        }
+
+        // Fallback sur le pays de l'utilisateur
+        if ($transaction && $transaction->relationLoaded('user') && $transaction->user?->country_code) {
+            return strtoupper($transaction->user->country_code);
+        }
+
+        if ($transaction && $transaction->user_id) {
+            $userCountry = $transaction->user?->country_code ?? null;
+            if ($userCountry) {
+                return strtoupper($userCountry);
+            }
+        }
+
+        // Si devise XOF mais sans indicatif, fallback SN par défaut
+        if ($transaction && strtoupper((string) $transaction->currency) === 'XOF') {
+            return 'SN';
+        }
+
+        // Par défaut CM si devise XAF ou non spécifiée
+        return 'CM';
+    }
+
     /**
      * Initie un paiement Push USSD auprès de l'API Monetbil (v1/placePayment).
      */
@@ -50,9 +112,26 @@ class MonetbilGateway implements PaymentGatewayInterface
             throw new MissingPricingConfigurationException('La clé de service Monetbil (service_key) n\'est pas configurée.');
         }
 
+        $rawPhone = $params['phone'] ?? $params['phonenumber'] ?? '';
+        $explicitCountry = $params['country'] ?? $params['country_code'] ?? null;
+        $countryCode = $this->detectCountryCode($rawPhone, $transaction, $explicitCountry);
+
+        // Validation du support pays par Monetbil
+        if (! $countryCode || ! in_array($countryCode, self::SUPPORTED_COUNTRIES, true)) {
+            return GatewayInitiateResult::failure(
+                errorCode: 'COUNTRY_NOT_SUPPORTED',
+                errorMessage: sprintf(
+                    'Les paiements mobiles dans ce pays (%s) ne sont pas encore pris en charge par notre passerelle.',
+                    $countryCode ?? 'INCONNU'
+                ),
+                raw: ['country' => $countryCode]
+            );
+        }
+
+        $currency = self::COUNTRY_CURRENCIES[$countryCode] ?? ($transaction->currency ?: 'XAF');
         $baseUrl = rtrim(config('payment.gateways.monetbil.api_base_url', 'https://api.monetbil.com'), '/');
         $notifyUrl = config('payment.gateways.monetbil.notify_url') ?: route('api.webhooks.payments.monetbil');
-        $phone = $this->normalizePhoneNumber($params['phone'] ?? $params['phonenumber'] ?? '');
+        $phone = $this->normalizePhoneNumber($rawPhone, $countryCode);
 
         // Montant total figé, frais inclus
         $amount = (float) $transaction->total_amount;
@@ -61,8 +140,8 @@ class MonetbilGateway implements PaymentGatewayInterface
             'service' => $serviceKey,
             'phonenumber' => $phone,
             'amount' => $amount,
-            'currency' => $transaction->currency ?: 'XAF',
-            'country' => 'CM',
+            'currency' => $currency,
+            'country' => $countryCode,
             'item_ref' => $transaction->reference,
             'payment_ref' => $transaction->reference,
             'user' => (string) $transaction->user_id,
@@ -70,11 +149,7 @@ class MonetbilGateway implements PaymentGatewayInterface
         ];
 
         if (! empty($params['operator'])) {
-            $operatorCode = match (strtolower((string) $params['operator'])) {
-                'orange', 'orange_money', 'cm_orangemoney' => 'CM_ORANGEMONEY',
-                'mtn', 'mtn_momo', 'mobile_money', 'cm_mtn', 'cm_mtnmobilemoney' => 'CM_MTN',
-                default => $params['operator'],
-            };
+            $operatorCode = $this->mapOperatorCode((string) $params['operator'], $countryCode);
             $payload['operator'] = $operatorCode;
         }
 
@@ -316,9 +391,60 @@ class MonetbilGateway implements PaymentGatewayInterface
     }
 
     /**
+     * Fait correspondre le code opérateur au format attendu par Monetbil pour chaque pays.
+     */
+    public function mapOperatorCode(string $operator, string $countryCode): string
+    {
+        $op = strtolower(trim($operator));
+        $prefix = strtoupper($countryCode);
+
+        // Si l'opérateur a déjà le préfixe pays (ex: 'CM_ORANGEMONEY', 'SN_ORANGEMONEY')
+        if (str_starts_with(strtoupper($operator), $prefix.'_')) {
+            return strtoupper($operator);
+        }
+
+        return match ($prefix) {
+            'CM' => match ($op) {
+                'orange', 'orange_money', 'orange_cm' => 'CM_ORANGEMONEY',
+                'mtn', 'mtn_momo', 'mobile_money', 'mtn_cm' => 'CM_MTN',
+                default => $operator,
+            },
+            'SN' => match ($op) {
+                'orange', 'orange_money', 'orange_sn' => 'SN_ORANGEMONEY',
+                'wave', 'wave_sn' => 'SN_WAVE',
+                'free', 'free_money', 'free_sn' => 'SN_FREE',
+                default => $operator,
+            },
+            'CI' => match ($op) {
+                'orange', 'orange_money', 'orange_ci' => 'CI_ORANGEMONEY',
+                'mtn', 'mtn_momo', 'mtn_ci' => 'CI_MTN',
+                'moov', 'moov_money', 'moov_ci' => 'CI_MOOV',
+                'wave', 'wave_ci' => 'CI_WAVE',
+                default => $operator,
+            },
+            'GA' => match ($op) {
+                'airtel', 'airtel_money', 'airtel_ga' => 'GA_AIRTEL',
+                'moov', 'moov_money', 'moov_ga' => 'GA_MOOV',
+                default => $operator,
+            },
+            'BJ' => match ($op) {
+                'mtn', 'mtn_momo', 'mtn_bj' => 'BJ_MTN',
+                'moov', 'moov_money', 'moov_bj' => 'BJ_MOOV',
+                default => $operator,
+            },
+            'TG' => match ($op) {
+                'tmoney', 'tmoney_tg' => 'TG_TMONEY',
+                'moov', 'moov_money', 'moov_tg' => 'TG_MOOV',
+                default => $operator,
+            },
+            default => $operator,
+        };
+    }
+
+    /**
      * Normalise un numéro de téléphone au format attendu par Monetbil (indicatif pays sans '+').
      */
-    public function normalizePhoneNumber(string $phone): string
+    public function normalizePhoneNumber(string $phone, ?string $countryCode = null): string
     {
         $clean = preg_replace('/[^0-9]/', '', $phone);
 
@@ -327,12 +453,34 @@ class MonetbilGateway implements PaymentGatewayInterface
             $clean = substr($clean, 2);
         }
 
-        // Si 9 chiffres camerounais commençant par 6, ajouter 237
-        if (strlen($clean) === 9 && str_starts_with($clean, '6')) {
-            $clean = '237'.$clean;
+        // Si aucun indicatif pays n'est passé, tenter de le déduire
+        $country = $countryCode ? strtoupper($countryCode) : null;
+        if (! $country) {
+            foreach (self::COUNTRY_PHONE_CODES as $cCode => $prefix) {
+                if (str_starts_with($clean, $prefix)) {
+                    $country = $cCode;
+                    break;
+                }
+            }
         }
 
-        return $clean;
+        $country = $country ?: 'CM';
+        $countryPrefix = self::COUNTRY_PHONE_CODES[$country] ?? '237';
+
+        // Si le numéro commence déjà par l'indicatif du pays, on le conserve tel quel
+        if (str_starts_with($clean, $countryPrefix)) {
+            return $clean;
+        }
+
+        // Normalisation spécifique par pays pour les numéros locaux sans indicatif
+        return match ($country) {
+            'CM' => (strlen($clean) === 9 && str_starts_with($clean, '6')) ? $countryPrefix.$clean : (strlen($clean) === 8 ? $countryPrefix.'6'.$clean : $countryPrefix.$clean),
+            'SN' => (strlen($clean) === 9 && str_starts_with($clean, '7')) ? $countryPrefix.$clean : $countryPrefix.$clean,
+            'CI' => (strlen($clean) === 10 && str_starts_with($clean, '0')) ? $countryPrefix.$clean : $countryPrefix.$clean,
+            'GA' => ((strlen($clean) === 7 || strlen($clean) === 8)) ? $countryPrefix.ltrim($clean, '0') : $countryPrefix.$clean,
+            'BJ', 'TG' => (strlen($clean) === 8) ? $countryPrefix.$clean : $countryPrefix.$clean,
+            default => $countryPrefix.$clean,
+        };
     }
 
     public static function fakeInitiate(?Closure $fake): void

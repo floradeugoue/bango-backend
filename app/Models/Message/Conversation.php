@@ -55,6 +55,9 @@ class Conversation extends Model
         'created_by_id',
         'last_message_at',
         'metadata',
+        'admins_only',
+        'is_read_only',
+        'invite_token',
     ];
 
     protected function casts(): array
@@ -63,6 +66,8 @@ class Conversation extends Model
             'type' => ConversationType::class,
             'last_message_at' => 'datetime',
             'metadata' => 'array',
+            'admins_only' => 'boolean',
+            'is_read_only' => 'boolean',
         ];
     }
 

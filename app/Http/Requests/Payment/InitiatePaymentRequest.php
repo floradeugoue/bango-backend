@@ -33,6 +33,8 @@ class InitiatePaymentRequest extends FormRequest
             'key' => ['sometimes', 'string', 'max:128'],
             'channel' => ['nullable', 'string', 'in:mobile_money,credit_wallet,card'],
             'align_with' => ['nullable', 'string', 'in:landlord,agent'],
+            'country' => ['nullable', 'string', 'max:5'],
+            'country_code' => ['nullable', 'string', 'max:5'],
         ];
     }
 

@@ -61,18 +61,47 @@ class ProspectVisitController extends Controller
             payload: $request->validated()
         );
 
-        return response()->json([
-            'message' => 'Réservation initiée avec succès. Veuillez finaliser le règlement dans les 15 minutes.',
-            'data' => new VisitReservationResource($result['reservation']),
-            'transaction' => $result['transaction'] ? [
+        $prompt = $result['prompt'] ?? null;
+        if (! $prompt && $result['transaction']) {
+            $latestAttempt = $result['transaction']->attempts()->latest('attempt_number')->first();
+            $ussdPrompt = $latestAttempt?->metadata['ussd_prompt'] ?? null;
+            if ($ussdPrompt) {
+                $timeoutSeconds = (int) config('payment.timeout_seconds', 120);
+                $prompt = [
+                    'ussd' => $ussdPrompt,
+                    'message' => $ussdPrompt,
+                    'timeout_seconds' => $timeoutSeconds,
+                    'expires_at' => $result['transaction']->created_at ? $result['transaction']->created_at->addSeconds($timeoutSeconds)->toIso8601String() : now()->addSeconds($timeoutSeconds)->toIso8601String(),
+                ];
+            }
+        }
+
+        $transactionData = null;
+        if ($result['transaction']) {
+            $transactionData = [
                 'id' => $result['transaction']->id,
                 'reference' => $result['transaction']->reference,
                 'status' => $result['transaction']->status->value,
                 'amount' => (float) $result['transaction']->amount,
                 'currency' => $result['transaction']->currency,
-            ] : null,
+            ];
+            if ($prompt) {
+                $transactionData['prompt'] = $prompt;
+            }
+        }
+
+        $responsePayload = [
+            'message' => 'Réservation initiée avec succès. Veuillez finaliser le règlement dans les 15 minutes.',
+            'data' => new VisitReservationResource($result['reservation']),
+            'transaction' => $transactionData,
             'quote' => $result['quote'],
-        ], 201);
+        ];
+
+        if ($prompt) {
+            $responsePayload['prompt'] = $prompt;
+        }
+
+        return response()->json($responsePayload, 201);
     }
 
     /**
@@ -116,18 +145,47 @@ class ProspectVisitController extends Controller
             payload: $validated
         );
 
-        return response()->json([
-            'message' => 'Paiement initié avec succès.',
-            'data' => new VisitReservationResource($result['reservation']),
-            'transaction' => $result['transaction'] ? [
+        $prompt = $result['prompt'] ?? null;
+        if (! $prompt && $result['transaction']) {
+            $latestAttempt = $result['transaction']->attempts()->latest('attempt_number')->first();
+            $ussdPrompt = $latestAttempt?->metadata['ussd_prompt'] ?? null;
+            if ($ussdPrompt) {
+                $timeoutSeconds = (int) config('payment.timeout_seconds', 120);
+                $prompt = [
+                    'ussd' => $ussdPrompt,
+                    'message' => $ussdPrompt,
+                    'timeout_seconds' => $timeoutSeconds,
+                    'expires_at' => $result['transaction']->created_at ? $result['transaction']->created_at->addSeconds($timeoutSeconds)->toIso8601String() : now()->addSeconds($timeoutSeconds)->toIso8601String(),
+                ];
+            }
+        }
+
+        $transactionData = null;
+        if ($result['transaction']) {
+            $transactionData = [
                 'id' => $result['transaction']->id,
                 'reference' => $result['transaction']->reference,
                 'status' => $result['transaction']->status->value,
                 'amount' => (float) $result['transaction']->amount,
                 'currency' => $result['transaction']->currency,
-            ] : null,
+            ];
+            if ($prompt) {
+                $transactionData['prompt'] = $prompt;
+            }
+        }
+
+        $responsePayload = [
+            'message' => 'Paiement initié avec succès.',
+            'data' => new VisitReservationResource($result['reservation']),
+            'transaction' => $transactionData,
             'quote' => $result['quote'],
-        ], 200);
+        ];
+
+        if ($prompt) {
+            $responsePayload['prompt'] = $prompt;
+        }
+
+        return response()->json($responsePayload, 200);
     }
 
     /**

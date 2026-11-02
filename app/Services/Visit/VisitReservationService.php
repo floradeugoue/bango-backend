@@ -328,10 +328,22 @@ class VisitReservationService
                 );
             }
 
+            $prompt = null;
+            if (isset($initiateResult) && $initiateResult->isSuccessful && $initiateResult->ussdPrompt) {
+                $timeoutSeconds = (int) config('payment.timeout_seconds', 120);
+                $prompt = [
+                    'ussd' => $initiateResult->ussdPrompt,
+                    'message' => $initiateResult->ussdPrompt,
+                    'timeout_seconds' => $timeoutSeconds,
+                    'expires_at' => $transaction->created_at ? $transaction->created_at->addSeconds($timeoutSeconds)->toIso8601String() : now()->addSeconds($timeoutSeconds)->toIso8601String(),
+                ];
+            }
+
             return [
                 'reservation' => $reservation,
                 'transaction' => $transaction->fresh(),
                 'quote' => $quote,
+                'prompt' => $prompt,
             ];
         });
     }
@@ -538,10 +550,22 @@ class VisitReservationService
                 );
             }
 
+            $prompt = null;
+            if (isset($initiateResult) && $initiateResult->isSuccessful && $initiateResult->ussdPrompt) {
+                $timeoutSeconds = (int) config('payment.timeout_seconds', 120);
+                $prompt = [
+                    'ussd' => $initiateResult->ussdPrompt,
+                    'message' => $initiateResult->ussdPrompt,
+                    'timeout_seconds' => $timeoutSeconds,
+                    'expires_at' => $transaction->created_at ? $transaction->created_at->addSeconds($timeoutSeconds)->toIso8601String() : now()->addSeconds($timeoutSeconds)->toIso8601String(),
+                ];
+            }
+
             return [
                 'reservation' => $lockedReservation->fresh(),
                 'transaction' => $transaction->fresh(),
                 'quote' => $quote,
+                'prompt' => $prompt,
             ];
         });
     }

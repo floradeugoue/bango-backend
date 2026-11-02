@@ -166,7 +166,12 @@ class ListingAnalyticsService
         $totals['messages_count'] = $totals['messages'];
         $totals['paid_visits_count'] = $totals['paid_visits'];
 
+        // Vues comptées avant l'enregistrement daté : impossibles à répartir par jour
+        $datedLifetimeViews = (int) ListingDailyMetric::where('listing_id', $listing->id)->sum('views');
+        $undatedViews = max(0, (int) $listing->views_count - $datedLifetimeViews);
+
         return [
+            'undated_views' => $undatedViews,
             'listing_id' => (string) $listing->id,
             'period_days' => $days,
             'series' => array_values($seriesMap),

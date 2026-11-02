@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Models\Visit\VisitReservation;
 use App\Models\Visit\VisitSlot;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Laravel\Passport\Passport;
 
 uses(RefreshDatabase::class);
@@ -123,6 +124,43 @@ test('prospect acquires 15-minute lock and initializes PAY transaction', functio
         ->and($transaction->payable_id)->toBe($reservation->id)
         ->and((float) $transaction->amount)->toBe(5000.0)
         ->and($transaction->status)->toBe(PaymentStatus::Pending);
+});
+
+test('POST /listings/{id}/visits returns transaction.prompt with ussd code and expiration when Monetbil responds', function (): void {
+    Passport::actingAs($this->prospect);
+
+    Http::fake([
+        'https://api.monetbil.com/payment/v1/placePayment' => Http::response([
+            'status' => 'REQUEST_ACCEPTED',
+            'paymentId' => 'mb_pay_test_prompt_123',
+            'message' => 'Composer le code USSD pour confirmer',
+            'channel_ussd' => '#150*50#',
+            'operator' => 'CM_ORANGEMONEY',
+        ], 200),
+    ]);
+
+    $response = $this->postJson("/api/listings/{$this->listing->id}/visits", [
+        'slot_id' => $this->slot->id,
+        'message' => 'Visite avec vérification USSD',
+        'channel' => 'mobile_money',
+        'operator' => 'orange',
+        'phone_number' => '+237699112233',
+    ]);
+
+    $response->assertCreated();
+
+    // Vérifier transaction.prompt dans la réponse
+    $txPrompt = $response->json('transaction.prompt');
+    expect($txPrompt)->not->toBeNull()
+        ->and($txPrompt['ussd'])->toBe('#150*50#')
+        ->and($txPrompt['message'])->toBe('#150*50#')
+        ->and($txPrompt['timeout_seconds'])->toBe(120)
+        ->and($txPrompt['expires_at'])->not->toBeNull();
+
+    // Vérifier également prompt à la racine de la réponse
+    $rootPrompt = $response->json('prompt');
+    expect($rootPrompt)->not->toBeNull()
+        ->and($rootPrompt['ussd'])->toBe('#150*50#');
 });
 
 test('concurrent booking attempt on locked slot is rejected', function (): void {

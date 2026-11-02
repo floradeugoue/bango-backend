@@ -417,6 +417,7 @@ class PaymentController extends Controller
             metadata: [
                 'phone' => $request->getPhone(),
                 'operator' => $request->input('operator'),
+                'country' => $request->input('country') ?? $request->input('country_code'),
             ]
         );
 
@@ -425,6 +426,7 @@ class PaymentController extends Controller
         $initiateResult = $gateway->initiatePayment($transaction, [
             'phone' => $request->getPhone(),
             'operator' => $request->input('operator'),
+            'country' => $request->input('country') ?? $request->input('country_code'),
         ]);
 
         if ($initiateResult->isSuccessful) {
@@ -463,6 +465,16 @@ class PaymentController extends Controller
             errorCode: $initiateResult->errorCode ?? 'GATEWAY_ERROR',
             errorMessage: $initiateResult->errorMessage ?? 'Erreur lors de l\'appel à la passerelle'
         );
+
+        if ($initiateResult->errorCode === 'COUNTRY_NOT_SUPPORTED') {
+            return $this->paymentError(
+                code: 'COUNTRY_NOT_SUPPORTED',
+                message: $initiateResult->errorMessage ?? 'Ce pays n\'est pas pris en charge pour le paiement mobile.',
+                status: 422,
+                details: $initiateResult->raw ?? [],
+                retryable: false
+            );
+        }
 
         if ($initiateResult->errorCode === 'GATEWAY_TIMEOUT') {
             return $this->paymentError(

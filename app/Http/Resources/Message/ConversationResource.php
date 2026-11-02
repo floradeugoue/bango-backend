@@ -117,6 +117,8 @@ class ConversationResource extends JsonResource
             'unread_count' => $unreadCount,
             'status' => $this->status ?? 'active',
             'is_request' => $this->status === 'pending',
+            'admins_only' => (bool) $this->admins_only,
+            'is_read_only' => (bool) $this->is_read_only,
             'metadata' => $this->metadata ?? [],
             'created_at' => $this->created_at?->toIso8601String(),
         ];

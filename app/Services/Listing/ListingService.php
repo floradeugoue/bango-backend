@@ -8,6 +8,7 @@ use App\Enums\Listing\ListingMode;
 use App\Enums\Listing\ListingPhotoRoom;
 use App\Enums\Listing\ListingStatus;
 use App\Enums\Visit\VisitReservationStatus;
+use App\Enums\Visit\VisitSlotStatus;
 use App\Events\Listing\ListingPublished;
 use App\Models\Delegation\Delegation;
 use App\Models\Landlord\LandlordSlotRule;
@@ -16,9 +17,11 @@ use App\Models\Listing\ListingMedia;
 use App\Models\Listing\ListingSave;
 use App\Models\Listing\ListingShare;
 use App\Models\User;
+use App\Models\Visit\VisitSlot;
 use App\Services\Admin\AdminListingControlService;
 use App\Services\Media\MediaStorageService;
 use App\Services\Subscription\BadgeResolutionService;
+use App\Services\Visit\VisitSlotService;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\UploadedFile;
@@ -403,6 +406,9 @@ class ListingService
             $listing->city = trim((string) ($data['city'] ?? ''));
             $listing->neighbourhood = trim((string) ($data['neighbourhood'] ?? ''));
             $listing->location = trim((string) ($data['landmark'] ?? $data['location'] ?? ''));
+            if (array_key_exists('address', $data)) {
+                $listing->address = ! empty($data['address']) ? mb_substr(trim((string) $data['address']), 0, 160) : null;
+            }
 
             if (isset($data['pin']) && is_array($data['pin'])) {
                 $listing->lat = (float) ($data['pin']['lat'] ?? 0);
@@ -506,6 +512,9 @@ class ListingService
             if (isset($patch['landmark'])) {
                 $listing->location = trim((string) $patch['landmark']);
             }
+            if (array_key_exists('address', $patch)) {
+                $listing->address = ! empty($patch['address']) ? mb_substr(trim((string) $patch['address']), 0, 160) : null;
+            }
             if (array_key_exists('amenities', $patch)) {
                 $listing->amenities = is_array($patch['amenities']) ? array_values($patch['amenities']) : [];
             }
@@ -559,8 +568,44 @@ class ListingService
                 $listing->published_at = now();
             }
 
-            if ($newStatus === ListingStatus::Published && $oldStatus !== ListingStatus::Published) {
+            if (($newStatus === ListingStatus::Published || $newStatus === ListingStatus::Reserved)
+                && $oldStatus === ListingStatus::Taken
+            ) {
+                // Au retour en published ou reserved après taken, rouvrir les créneaux futurs fermés sans réservation active
+                $reopened = VisitSlot::where('listing_id', $listing->id)
+                    ->where('start_at', '>', now())
+                    ->where('status', VisitSlotStatus::Closed->value)
+                    ->whereDoesntHave('activeReservations')
+                    ->update(['status' => VisitSlotStatus::Open->value]);
+
+                // Si aucun créneau n'a pu être rouvert, régénérer depuis la règle d'horaires du bien
+                $hasOpenFuture = VisitSlot::where('listing_id', $listing->id)
+                    ->where('start_at', '>', now())
+                    ->where('status', VisitSlotStatus::Open->value)
+                    ->exists();
+
+                if (! $hasOpenFuture) {
+                    app(VisitSlotService::class)->ensureDefaultSlotsExist($listing, now(), 7);
+                }
+            } elseif ($newStatus === ListingStatus::Published && $oldStatus !== ListingStatus::Published) {
                 $publishedNow = true;
+
+                // Remettre un bien « disponible » rouvre les créneaux futurs fermés sans réservations
+                $reopened = VisitSlot::where('listing_id', $listing->id)
+                    ->where('start_at', '>', now())
+                    ->where('status', VisitSlotStatus::Closed->value)
+                    ->whereDoesntHave('activeReservations')
+                    ->update(['status' => VisitSlotStatus::Open->value]);
+
+                // Si aucun créneau futur ouvert n'existe, en régénérer
+                $hasOpenFuture = VisitSlot::where('listing_id', $listing->id)
+                    ->where('start_at', '>', now())
+                    ->where('status', VisitSlotStatus::Open->value)
+                    ->exists();
+
+                if (! $hasOpenFuture) {
+                    app(VisitSlotService::class)->ensureDefaultSlotsExist($listing, now(), 7);
+                }
             }
 
             if ($newStatus === ListingStatus::Taken) {

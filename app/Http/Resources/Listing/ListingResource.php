@@ -21,6 +21,9 @@ class ListingResource extends JsonResource
     public function toArray(Request $request): array
     {
         $viewer = $request->user() ?: Auth::guard('api')->user();
+        $canSeeLandmark = $viewer && ($viewer->isAdmin()
+            || $viewer->id === $this->owner_id
+            || ($this->agent_id && $viewer->id === $this->agent_id));
 
         // Photos sous forme d'URLs simples et qualifications de pièces
         $photosList = $this->photos->map(fn (ListingMedia $m) => $m->url)->values()->all();
@@ -99,6 +102,7 @@ class ListingResource extends JsonResource
             'is_liked' => $viewer ? $this->isLikedBy($viewer) : false,
             'visit_fee' => (float) $this->visit_fee,
             'uses_agenda' => $this->usesAgenda(),
+            'landmark' => $canSeeLandmark ? $this->location : null,
             'auto_confirm' => (bool) ($this->auto_confirm ?? false),
             'sponsored' => (bool) $this->sponsored,
             'is_sponsored' => $this->isSponsored(),

@@ -33,6 +33,8 @@ class VisitReceiptResource extends JsonResource
                 'city' => $this->listing->city,
                 'neighborhood' => $this->listing->neighborhood,
                 'address' => $this->grantsPrivateAddressAccess() ? $this->listing->address : null,
+                'lat' => $this->grantsPrivateAddressAccess() ? ($this->listing->lat !== null ? (float) $this->listing->lat : null) : null,
+                'lng' => $this->grantsPrivateAddressAccess() ? ($this->listing->lng !== null ? (float) $this->listing->lng : null) : null,
             ],
             'visit_scheduled_at' => $this->slot?->start_at->toIso8601String(),
             'fee_amount' => (float) $this->fee_amount,

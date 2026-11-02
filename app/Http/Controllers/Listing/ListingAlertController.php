@@ -55,6 +55,7 @@ class ListingAlertController extends Controller
             'frequency' => ['nullable', 'string', 'in:instant,daily,weekly'],
             'push' => ['nullable', 'boolean'],
             'email' => ['nullable', 'boolean'],
+            'is_active' => ['nullable', 'boolean'],
             'enabled' => ['nullable', 'boolean'],
             'disabled_at' => ['nullable', 'date'],
         ]);
@@ -63,9 +64,17 @@ class ListingAlertController extends Controller
             $validated['country_code'] = strtoupper($validated['country_code']);
         }
 
-        if (isset($validated['enabled']) && ! $validated['enabled'] && ! isset($validated['disabled_at'])) {
+        // Synchronisation entre is_active et enabled
+        if (array_key_exists('is_active', $validated) && ! array_key_exists('enabled', $validated)) {
+            $validated['enabled'] = (bool) $validated['is_active'];
+        } elseif (array_key_exists('enabled', $validated) && ! array_key_exists('is_active', $validated)) {
+            $validated['is_active'] = (bool) $validated['enabled'];
+        }
+
+        $isActive = $validated['is_active'] ?? $validated['enabled'] ?? true;
+        if (! $isActive && ! isset($validated['disabled_at'])) {
             $validated['disabled_at'] = now();
-        } elseif (isset($validated['enabled']) && $validated['enabled']) {
+        } elseif ($isActive) {
             $validated['disabled_at'] = null;
         }
 
@@ -110,6 +119,7 @@ class ListingAlertController extends Controller
             'frequency' => ['nullable', 'string', 'in:instant,daily,weekly'],
             'push' => ['nullable', 'boolean'],
             'email' => ['nullable', 'boolean'],
+            'is_active' => ['nullable', 'boolean'],
             'enabled' => ['nullable', 'boolean'],
             'disabled_at' => ['nullable', 'date'],
         ]);
@@ -118,8 +128,16 @@ class ListingAlertController extends Controller
             $validated['country_code'] = strtoupper($validated['country_code']);
         }
 
-        if (array_key_exists('enabled', $validated)) {
-            if (! $validated['enabled']) {
+        // Synchronisation entre is_active et enabled
+        if (array_key_exists('is_active', $validated) && ! array_key_exists('enabled', $validated)) {
+            $validated['enabled'] = (bool) $validated['is_active'];
+        } elseif (array_key_exists('enabled', $validated) && ! array_key_exists('is_active', $validated)) {
+            $validated['is_active'] = (bool) $validated['enabled'];
+        }
+
+        if (array_key_exists('is_active', $validated) || array_key_exists('enabled', $validated)) {
+            $isActive = (bool) ($validated['is_active'] ?? $validated['enabled']);
+            if (! $isActive) {
                 $validated['disabled_at'] = $validated['disabled_at'] ?? now();
             } else {
                 $validated['disabled_at'] = null;

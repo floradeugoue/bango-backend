@@ -239,7 +239,8 @@ Route::prefix('geo')->group(function () {
     Route::get('/genders', [GenderController::class, 'index'])->name('api.geo.genders');
 });
 
-// Alias pour GET /genders (AU-07)
+// Alias direct pour GET /api/operators et /api/genders
+Route::apiResource('operators', OperatorController::class)->only(['index', 'show']);
 Route::get('/genders', [GenderController::class, 'index'])->name('api.genders');
 
 // --------------------------------------------------------------------------
@@ -1333,12 +1334,24 @@ Route::middleware('auth:api')->group(function () {
         // Conversations de groupe
         // Créer un groupe de discussion avec nom, avatar et membres initiaux
         Route::post('/groups', [MessageGroupController::class, 'store'])->name('api.messages.groups.store');
+        // Rejoindre un groupe via son lien / token d'invitation
+        Route::post('/groups/join/{token}', [MessageGroupController::class, 'join'])->name('api.messages.groups.join');
         // Mettre à jour les paramètres ou le nom d'un groupe de discussion
         Route::put('/groups/{id}', [MessageGroupController::class, 'update'])->name('api.messages.groups.update');
+        // Supprimer un groupe de discussion (créateur ou admin)
+        Route::delete('/groups/{id}', [MessageGroupController::class, 'destroy'])->name('api.messages.groups.destroy');
         // Ajouter de nouveaux membres dans un groupe de discussion
         Route::post('/groups/{id}/members', [MessageGroupController::class, 'addMembers'])->name('api.messages.groups.members.add');
         // Retirer un membre d'un groupe de discussion (ou quitter le groupe)
         Route::delete('/groups/{id}/members/{userId}', [MessageGroupController::class, 'removeMember'])->name('api.messages.groups.members.remove');
+        // Nommer un membre administrateur du groupe
+        Route::post('/groups/{id}/admins/{userId}', [MessageGroupController::class, 'makeAdmin'])->name('api.messages.groups.admins.store');
+        // Retirer le rôle administrateur d'un membre du groupe
+        Route::delete('/groups/{id}/admins/{userId}', [MessageGroupController::class, 'removeAdmin'])->name('api.messages.groups.admins.destroy');
+        // Obtenir ou générer le lien d'invitation du groupe
+        Route::post('/groups/{id}/invite-link', [MessageGroupController::class, 'inviteLink'])->name('api.messages.groups.invite_link.store');
+        // Révoquer le lien d'invitation du groupe
+        Route::delete('/groups/{id}/invite-link', [MessageGroupController::class, 'revokeInviteLink'])->name('api.messages.groups.invite_link.destroy');
     });
 
     // --------------------------------------------------------------------------

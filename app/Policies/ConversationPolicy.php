@@ -43,7 +43,24 @@ class ConversationPolicy
             return $page ? $page->canUserAccessInbox($user) : false;
         }
 
+        if ($conversation->is_read_only) {
+            return false;
+        }
+
+        if ($conversation->type === ConversationType::Group && $conversation->admins_only && ! $conversation->isAdmin($user->id)) {
+            return false;
+        }
+
         return $conversation->isMember($user->id);
+    }
+
+    /**
+     * Détermine si l'utilisateur peut modifier les réglages du groupe.
+     */
+    public function update(User $user, Conversation $conversation): bool
+    {
+        return $conversation->type === ConversationType::Group &&
+            ($conversation->isAdmin($user->id) || (int) $conversation->created_by_id === (int) $user->id);
     }
 
     /**
@@ -68,7 +85,7 @@ class ConversationPolicy
      */
     public function delete(User $user, Conversation $conversation): bool
     {
-        return $user->isAdmin() || $conversation->isAdmin($user->id);
+        return $user->isAdmin() || $conversation->isAdmin($user->id) || (int) $conversation->created_by_id === (int) $user->id;
     }
 
     /**

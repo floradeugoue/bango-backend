@@ -46,6 +46,7 @@ class StoreListingRequest extends FormRequest
             'neighbourhood' => ['required', 'string', 'max:100'],
             'landmark' => ['nullable', 'string', 'max:80'],
             'location' => ['nullable', 'string', 'max:80'],
+            'address' => ['nullable', 'string', 'max:160'],
             'pin' => ['nullable', 'array'],
             'pin.lat' => ['required_with:pin', 'numeric', 'between:-85,85'],
             'pin.lng' => ['required_with:pin', 'numeric', 'between:-180,180'],

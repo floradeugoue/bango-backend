@@ -41,6 +41,8 @@ class VisitReservationResource extends JsonResource
                 'neighborhood' => $listing->neighbourhood ?? $listing->neighborhood,
                 'neighbourhood' => $listing->neighbourhood ?? $listing->neighborhood,
                 'address' => $canAccessAddress ? $listing->address : null,
+                'lat' => $canAccessAddress ? ($listing->lat !== null ? (float) $listing->lat : null) : null,
+                'lng' => $canAccessAddress ? ($listing->lng !== null ? (float) $listing->lng : null) : null,
                 'cover_url' => $listing->cover_image_url,
                 'cover_image_url' => $listing->cover_image_url,
             ] : null,

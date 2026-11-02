@@ -65,7 +65,7 @@ class MessageThreadController extends Controller
     public function show(string $id, Request $request): ConversationResource
     {
         /** @var Conversation $thread */
-        $thread = Conversation::query()
+        $thread = Conversation::withTrashed()
             ->with([
                 'members.user',
                 'listing',
