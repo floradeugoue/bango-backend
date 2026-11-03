@@ -9,6 +9,7 @@ use App\Models\Boost\Campaign;
 use App\Models\Page\Page;
 use App\Models\Support\ModerationAppeal;
 use App\Models\Support\Report;
+use App\Models\Support\UserAccountSanction;
 use App\Models\User;
 use App\Notifications\Support\ModerationAppealDecisionNotification;
 use Carbon\Carbon;
@@ -121,6 +122,68 @@ class ModerationAppealAdminService
                     $user->suspended_from = null;
                     $user->suspended_until = null;
                     $user->save();
+
+                    // Clôture des sanctions de suspension actives dans UserAccountSanction
+                    $suspensionQuery = UserAccountSanction::where('user_id', $user->id)
+                        ->where('type', 'suspension')
+                        ->where('is_active', true);
+
+                    if (! empty($appeal->sanction_reference) && is_numeric($appeal->sanction_reference)) {
+                        $targetSanction = UserAccountSanction::find((int) $appeal->sanction_reference);
+                        if ($targetSanction && (int) $targetSanction->user_id === (int) $user->id) {
+                            $suspensionQuery = UserAccountSanction::where('id', $targetSanction->id);
+                        }
+                    }
+
+                    $suspensionQuery->update([
+                        'is_active' => false,
+                        'lifted_at' => now(),
+                        'lifted_by_id' => $operator->id,
+                        'lift_reason' => $decisionNotes,
+                    ]);
+                } elseif ($appeal->sanction_type === 'warning') {
+                    $sanction = null;
+                    if (! empty($appeal->sanction_reference) && is_numeric($appeal->sanction_reference)) {
+                        $sanction = UserAccountSanction::find((int) $appeal->sanction_reference);
+                    }
+
+                    if (! $sanction && $user) {
+                        $sanction = UserAccountSanction::where('user_id', $user->id)
+                            ->where('type', 'warning')
+                            ->where('is_active', true)
+                            ->latest('id')
+                            ->first();
+                    }
+
+                    if ($sanction) {
+                        $sanction->update([
+                            'is_active' => false,
+                            'lifted_at' => now(),
+                            'lifted_by_id' => $operator->id,
+                            'lift_reason' => $decisionNotes,
+                        ]);
+                    }
+
+                    // Si l'avertissement comptait dans la gradation (1er, 2e...) ou appliquait une restriction, on le retire du compte
+                    if ($user) {
+                        $hasOtherActiveRestrictions = UserAccountSanction::where('user_id', $user->id)
+                            ->where('is_active', true)
+                            ->where(function ($q) {
+                                $q->where('type', 'restriction')
+                                    ->orWhere(function ($sub) {
+                                        $sub->where('type', 'warning')->where('level', 3);
+                                    })
+                                    ->orWhere(function ($sub) {
+                                        $sub->whereNotNull('ends_at')->where('ends_at', '>', now());
+                                    });
+                            })
+                            ->exists();
+
+                        if (! $hasOtherActiveRestrictions && $user->restricted_until) {
+                            $user->restricted_until = null;
+                            $user->save();
+                        }
+                    }
                 } elseif ($appeal->sanction_type === 'page_suspension' && $appeal->sanction_reference) {
                     $page = Page::find($appeal->sanction_reference);
                     if ($page && $page->status === 'suspended') {
@@ -154,6 +217,42 @@ class ModerationAppealAdminService
                             if ($campaign) {
                                 $campaign->status = CampaignStatus::Active;
                                 $campaign->save();
+                            }
+                        }
+                    }
+                }
+
+                // Filet de sécurité pour toute autre sanction de UserAccountSanction pointée par sanction_reference
+                if (! empty($appeal->sanction_reference) && is_numeric($appeal->sanction_reference)) {
+                    $residualSanction = UserAccountSanction::where('id', (int) $appeal->sanction_reference)
+                        ->where('is_active', true)
+                        ->first();
+
+                    if ($residualSanction) {
+                        $residualSanction->update([
+                            'is_active' => false,
+                            'lifted_at' => now(),
+                            'lifted_by_id' => $operator->id,
+                            'lift_reason' => $decisionNotes,
+                        ]);
+
+                        if ($user && $user->restricted_until) {
+                            $hasOtherActiveRestrictions = UserAccountSanction::where('user_id', $user->id)
+                                ->where('is_active', true)
+                                ->where(function ($q) {
+                                    $q->where('type', 'restriction')
+                                        ->orWhere(function ($sub) {
+                                            $sub->where('type', 'warning')->where('level', 3);
+                                        })
+                                        ->orWhere(function ($sub) {
+                                            $sub->whereNotNull('ends_at')->where('ends_at', '>', now());
+                                        });
+                                })
+                                ->exists();
+
+                            if (! $hasOtherActiveRestrictions) {
+                                $user->restricted_until = null;
+                                $user->save();
                             }
                         }
                     }

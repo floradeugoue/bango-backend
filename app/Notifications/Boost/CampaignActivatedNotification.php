@@ -3,6 +3,7 @@
 namespace App\Notifications\Boost;
 
 use App\Models\Boost\Campaign;
+use App\Notifications\Concerns\RespectsNotificationPreferences;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
@@ -10,19 +11,11 @@ use Illuminate\Notifications\Notification;
 
 class CampaignActivatedNotification extends Notification implements ShouldQueue
 {
-    use Queueable;
+    use Queueable, RespectsNotificationPreferences;
 
     public function __construct(
         public Campaign $campaign
     ) {}
-
-    /**
-     * @return array<int, string>
-     */
-    public function via(object $notifiable): array
-    {
-        return ['database'];
-    }
 
     public function toMail(object $notifiable): MailMessage
     {

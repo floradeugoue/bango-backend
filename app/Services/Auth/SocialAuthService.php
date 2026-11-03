@@ -293,7 +293,7 @@ class SocialAuthService
 
         while (
             strlen($candidate) < 3 ||
-            User::where('handle', $candidate)->exists() ||
+            User::withTrashed()->where('handle', $candidate)->exists() ||
             in_array($candidate, ['admin', 'bango', 'support', 'root'], true)
         ) {
             $suffix = (string) rand(100, 9999);
@@ -375,7 +375,15 @@ class SocialAuthService
             Passport::personalAccessTokensExpireIn(now()->addDays(7));
         }
 
-        return $user->createToken($deviceName)->accessToken;
+        $sessionService = app(SessionService::class);
+        $result = $sessionService->issueSessionToken(
+            user: $user,
+            tokenName: $deviceName,
+            request: request(),
+            deviceName: $deviceName
+        );
+
+        return $result['token'];
     }
 
     protected function formatUserPayload(User $user): array

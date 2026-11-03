@@ -166,6 +166,6 @@ class HandleSuggestionService
         }
 
         // Check real DB availability
-        return ! User::where('handle', $candidate)->exists();
+        return ! User::withTrashed()->where('handle', $candidate)->exists();
     }
 }

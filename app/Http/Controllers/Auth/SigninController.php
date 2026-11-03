@@ -6,6 +6,7 @@ use App\Enums\OtpChannel;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\SigninRequest;
 use App\Models\User;
+use App\Services\Auth\SessionService;
 use App\Services\Otp\OtpService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Cache;
@@ -16,7 +17,7 @@ use Laravel\Passport\Passport;
 
 class SigninController extends Controller
 {
-    public function __invoke(SigninRequest $request): JsonResponse
+    public function __invoke(SigninRequest $request, SessionService $sessionService): JsonResponse
     {
         $key = 'signin.'.Str::transliterate(Str::lower($request->identifier)).'|'.$request->ip();
 
@@ -142,23 +143,21 @@ class SigninController extends Controller
             ], 200);
         }
 
-        // Révoquer les anciens jetons du même appareil (par device_id ou device_name)
-        if ($deviceId) {
-            $user->tokens()->where(function ($query) use ($deviceId, $deviceName) {
-                $query->where('name', 'like', "%::{$deviceId}")
-                    ->orWhere('name', $deviceName);
-            })->delete();
-        } else {
-            $user->tokens()->where('name', $deviceName)->delete();
-        }
-
         if ($request->boolean('persistent')) {
             Passport::personalAccessTokensExpireIn(now()->addYear());
         } else {
             Passport::personalAccessTokensExpireIn(now()->addDays(7));
         }
 
-        $token = $user->createToken($tokenName)->accessToken;
+        $sessionResult = $sessionService->issueSessionToken(
+            user: $user,
+            tokenName: $tokenName,
+            request: $request,
+            deviceId: $deviceId,
+            deviceName: $deviceName,
+        );
+
+        $token = $sessionResult['token'];
 
         return response()->json([
             'token' => $token,

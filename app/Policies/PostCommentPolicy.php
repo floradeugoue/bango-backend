@@ -46,7 +46,13 @@ class PostCommentPolicy
             return true;
         }
 
-        // Vérification des restrictions de commentaires (comments_by)
+        // Vérification des réglages de confidentialité de l'auteur (commentPosts)
+        $author = $post->relationLoaded('user') ? $post->user : User::find($post->user_id);
+        if ($author && ! $author->canBeCommentedBy($user)) {
+            return false;
+        }
+
+        // Vérification des restrictions de commentaires propres au post (comments_by)
         $commentsBy = $post->comments_by instanceof PostCommentsBy
             ? $post->comments_by
             : PostCommentsBy::tryFrom((string) $post->comments_by);

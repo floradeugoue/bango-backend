@@ -5,6 +5,7 @@ namespace App\Services\Search;
 use App\Enums\Square\PostAudience;
 use App\Models\Square\Post;
 use App\Models\User;
+use App\Policies\PostPolicy;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
@@ -119,6 +120,10 @@ class PostSearchService
             });
         }
 
-        return $baseQuery->paginate($perPage);
+        $paginator = $baseQuery->paginate($perPage);
+        $policy = app(PostPolicy::class);
+        $paginator->setCollection($paginator->getCollection()->filter(fn ($post) => $policy->view($viewer, $post))->values());
+
+        return $paginator;
     }
 }

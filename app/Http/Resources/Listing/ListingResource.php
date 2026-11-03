@@ -38,6 +38,13 @@ class ListingResource extends JsonResource
             $tourDuration = sprintf('%d:%02d', $mins, $secs);
         }
 
+        $videoMetrics = $this->video_metrics ?? [];
+        $videoMediaMeta = $mainVideo?->metadata ?? [];
+        $videoTrim = $videoMediaMeta['video_trim'] ?? $videoMetrics['video_trim'] ?? null;
+        $videoCoverMs = $videoMediaMeta['video_cover_ms'] ?? $videoMetrics['video_cover_ms'] ?? null;
+        $videoPosterUrl = $mainVideo?->thumbnail_url ?: ($videoMediaMeta['video_poster_url'] ?? $videoMetrics['video_poster_url'] ?? null);
+        $videoChapters = $videoMediaMeta['video_chapters'] ?? $videoMetrics['video_chapters'] ?? [];
+
         // Métadonnées propriétaire
         $owner = $this->owner;
         $ownerData = null;
@@ -87,6 +94,10 @@ class ListingResource extends JsonResource
             'photo_rooms' => $photoRooms,
             'tour_url' => $mainVideo?->url,
             'tour_duration' => $tourDuration,
+            'video_trim' => $videoTrim,
+            'video_cover_ms' => $videoCoverMs,
+            'video_poster_url' => $videoPosterUrl,
+            'video_chapters' => $videoChapters,
             'agent_visited' => (bool) $this->agent_visited,
             'charges' => (float) $this->charges,
             'published_at' => $this->published_at?->toISOString(),

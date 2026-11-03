@@ -3,10 +3,16 @@
 use App\Enums\Boost\CampaignObjective;
 use App\Enums\Boost\CampaignStatus;
 use App\Enums\Legal\DataExportStatus;
+use App\Enums\Message\ConversationMemberRole;
+use App\Enums\Message\ConversationType;
+use App\Enums\Message\MessageType;
 use App\Jobs\Legal\GenerateDataExportJob;
 use App\Models\Boost\Campaign;
 use App\Models\Legal\DataExportRequest;
 use App\Models\Listing\Listing;
+use App\Models\Message\Conversation;
+use App\Models\Message\ConversationMember;
+use App\Models\Message\Message;
 use App\Models\Reel\Reel;
 use App\Models\Square\Post;
 use App\Models\User;
@@ -135,6 +141,7 @@ test('DataExportService assemble l\'archive ZIP avec les données réelles et ex
         ->and($zip->locateName('square_posts.json'))->not->toBeFalse()
         ->and($zip->locateName('reels.json'))->not->toBeFalse()
         ->and($zip->locateName('listings.json'))->not->toBeFalse()
+        ->and($zip->locateName('messages.json'))->not->toBeFalse()
         ->and($zip->locateName('boost_campaigns.json'))->not->toBeFalse();
 
     // Vérifier l'exclusion absolue des secrets dans profile.json
@@ -183,4 +190,137 @@ test('GET /api/user/data-export/download/{id} renvoie 410 si l\'archive a expir�
 
     $response = $this->getJson("/api/user/data-export/download/{$expiredExport->id}");
     $response->assertStatus(410);
+});
+
+test('POST /api/user/data-export valide le format (html|json) et les sections demandées', function () {
+    Passport::actingAs($this->user);
+
+    // Format invalide
+    $this->postJson('/api/user/data-export', ['format' => 'pdf'])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['format']);
+
+    // Section invalide
+    $this->postJson('/api/user/data-export', ['sections' => ['unknown_section']])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['sections.0']);
+
+    // Format et sections valides
+    $res = $this->postJson('/api/user/data-export', [
+        'format' => 'html',
+        'sections' => ['profile', 'messages'],
+    ]);
+
+    $res->assertStatus(202)
+        ->assertJsonPath('export.format', 'html')
+        ->assertJsonPath('export.sections', ['profile', 'messages']);
+});
+
+test('DataExportService n\'inclut que les sections demandées et extrait messages.json', function () {
+    Storage::fake('local');
+
+    // Créer une conversation et un message envoyé par l'utilisateur
+    $other = User::factory()->create();
+    $conv = Conversation::create([
+        'type' => ConversationType::Direct,
+        'created_by_id' => $this->user->id,
+    ]);
+    ConversationMember::create([
+        'conversation_id' => $conv->id,
+        'user_id' => $this->user->id,
+        'role' => ConversationMemberRole::Member,
+    ]);
+    ConversationMember::create([
+        'conversation_id' => $conv->id,
+        'user_id' => $other->id,
+        'role' => ConversationMemberRole::Member,
+    ]);
+    Message::create([
+        'conversation_id' => $conv->id,
+        'sender_id' => $this->user->id,
+        'type' => MessageType::Text,
+        'body' => 'Bonjour, ceci est mon message RGPD',
+    ]);
+
+    // Créer un post pour s'assurer qu'il sera exclu car la section "content" n'est pas demandée
+    Post::factory()->create(['user_id' => $this->user->id, 'body' => 'Post non inclus']);
+
+    $exportRequest = DataExportRequest::create([
+        'user_id' => $this->user->id,
+        'status' => DataExportStatus::Pending,
+        'sections' => ['profile', 'messages'],
+        'format' => 'json',
+        'disk' => 'local',
+    ]);
+
+    $service = app(DataExportService::class);
+    $service->generateExport($exportRequest);
+
+    $exportRequest->refresh();
+    expect($exportRequest->status)->toBe(DataExportStatus::Ready);
+
+    $zipPath = storage_path('app/'.$exportRequest->file_path);
+    $zip = new ZipArchive;
+    expect($zip->open($zipPath))->toBeTrue();
+
+    // Doivent être présents (sections: profile, messages)
+    expect($zip->locateName('profile.json'))->not->toBeFalse()
+        ->and($zip->locateName('preferences_and_privacy.json'))->not->toBeFalse()
+        ->and($zip->locateName('messages.json'))->not->toBeFalse();
+
+    // Doivent être ABSENTS (sections non demandées: content, listings, payments)
+    expect($zip->locateName('square_posts.json'))->toBeFalse()
+        ->and($zip->locateName('reels.json'))->toBeFalse()
+        ->and($zip->locateName('listings.json'))->toBeFalse()
+        ->and($zip->locateName('transactions.json'))->toBeFalse()
+        ->and($zip->locateName('subscriptions.json'))->toBeFalse()
+        ->and($zip->locateName('boost_campaigns.json'))->toBeFalse();
+
+    // Vérifier le contenu de messages.json
+    $messagesData = json_decode($zip->getFromName('messages.json'), true);
+    expect($messagesData)->toHaveCount(1)
+        ->and($messagesData[0]['conversation_id'])->toBe($conv->id)
+        ->and($messagesData[0]['messages_sent'])->toHaveCount(1)
+        ->and($messagesData[0]['messages_sent'][0]['body'])->toBe('Bonjour, ceci est mon message RGPD');
+
+    $zip->close();
+    if (file_exists($zipPath)) {
+        unlink($zipPath);
+    }
+});
+
+test('DataExportService génère index.html lisible dans un navigateur lorsque format est html', function () {
+    Storage::fake('local');
+
+    $exportRequest = DataExportRequest::create([
+        'user_id' => $this->user->id,
+        'status' => DataExportStatus::Pending,
+        'sections' => ['profile'],
+        'format' => 'html',
+        'disk' => 'local',
+    ]);
+
+    $service = app(DataExportService::class);
+    $service->generateExport($exportRequest);
+
+    $exportRequest->refresh();
+    expect($exportRequest->status)->toBe(DataExportStatus::Ready);
+
+    $zipPath = storage_path('app/'.$exportRequest->file_path);
+    $zip = new ZipArchive;
+    expect($zip->open($zipPath))->toBeTrue();
+
+    // index.html doit être présent dans l'archive
+    expect($zip->locateName('index.html'))->not->toBeFalse();
+
+    $html = $zip->getFromName('index.html');
+    expect($html)->toContain('<!DOCTYPE html>')
+        ->and($html)->toContain('Archive de vos données personnelles (RGPD)')
+        ->and($html)->toContain('Claire Export')
+        ->and($html)->toContain('claire.rgpd@bango.cm');
+
+    $zip->close();
+    if (file_exists($zipPath)) {
+        unlink($zipPath);
+    }
 });

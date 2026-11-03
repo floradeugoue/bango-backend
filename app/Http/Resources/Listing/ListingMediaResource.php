@@ -31,6 +31,12 @@ class ListingMediaResource extends JsonResource
             'order' => $this->order,
             'room' => $this->room?->value ?? (string) $this->room,
             'metadata' => $this->metadata,
+            'renditions' => $this->metadata['renditions'] ?? null,
+            'original_url' => $this->metadata['original_url'] ?? null,
+            'video_trim' => $this->metadata['video_trim'] ?? null,
+            'video_cover_ms' => $this->metadata['video_cover_ms'] ?? null,
+            'video_poster_url' => $this->thumbnail_url ?: ($this->metadata['video_poster_url'] ?? null),
+            'video_chapters' => $this->metadata['video_chapters'] ?? [],
         ];
     }
 }

@@ -5,6 +5,7 @@ namespace App\Jobs\Reel;
 use App\Enums\Reel\ReelStatus;
 use App\Models\Reel\Reel;
 use App\Models\Reel\Sound;
+use App\Services\Media\VideoTranscodingService;
 use App\Services\Reel\CloudflareStreamService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -70,17 +71,24 @@ class ProcessReelVideoJob implements ShouldQueue
                 }
             }
 
-            // 2. Génération des renditions adaptatives (480p, 720p, 1080p)
+            // 2. Génération et transcodage des renditions adaptatives (480p, 720p, 1080p)
             $videoUrl = $this->reel->video_url ?? '';
-            $renditions = $this->reel->renditions ?? [];
+            if (! empty($videoUrl)) {
+                /** @var VideoTranscodingService $transcoder */
+                $transcoder = app(VideoTranscodingService::class);
+                $transcoded = $transcoder->transcode($videoUrl, 'reels/renditions', $this->reel->user_id);
 
-            if (empty($renditions) && ! empty($videoUrl)) {
-                $renditions = [
-                    '480p' => $videoUrl,
-                    '720p' => $videoUrl,
-                    '1080p' => $videoUrl,
-                ];
-                $this->reel->renditions = $renditions;
+                // Garder l'original haute définition hors de la lecture
+                $this->reel->original_video_url = $this->reel->original_video_url ?? $videoUrl;
+
+                // Vidéo de lecture par défaut en 720p compressée (ou 480p) pour préserver la bande passante
+                $this->reel->video_url = $transcoded['default_url'];
+                $this->reel->renditions = $transcoded['renditions'];
+
+                // Vignette d'aperçu
+                if (empty($this->reel->thumbnail_url) && ! empty($transcoded['poster_url'])) {
+                    $this->reel->thumbnail_url = $transcoded['poster_url'];
+                }
             }
 
             // 3. Gestion du Son et 4. Finalisation de la publication atomique

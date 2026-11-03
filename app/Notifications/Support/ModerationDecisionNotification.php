@@ -3,6 +3,7 @@
 namespace App\Notifications\Support;
 
 use App\Models\Support\Report;
+use App\Notifications\Concerns\RespectsNotificationPreferences;
 use Carbon\Carbon;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -11,7 +12,7 @@ use Illuminate\Notifications\Notification;
 
 class ModerationDecisionNotification extends Notification implements ShouldQueue
 {
-    use Queueable;
+    use Queueable, RespectsNotificationPreferences;
 
     public function __construct(
         public Report $report,
@@ -20,19 +21,14 @@ class ModerationDecisionNotification extends Notification implements ShouldQueue
         public ?Carbon $suspendedUntil = null
     ) {}
 
-    /**
-     * @return array<int, string>
-     */
-    public function via(object $notifiable): array
-    {
-        return ['database'];
-    }
-
     public function toMail(object $notifiable): MailMessage
     {
         $subject = match ($this->action) {
             'warn_author' => 'Avertissement de modération — BANGO',
             'suspend_author' => 'Suspension temporaire de votre compte — BANGO',
+            'restrict_author', 'restriction' => 'Restriction temporaire de votre compte — BANGO',
+            'remove' => 'Retrait de contenu par la modération — BANGO',
+            'hide' => 'Masquage de contenu par la modération — BANGO',
             default => 'Notification de modération de contenu — BANGO',
         };
 
@@ -49,6 +45,19 @@ class ModerationDecisionNotification extends Notification implements ShouldQueue
             $mail->line("Votre compte a été suspendu jusqu'au {$untilFormatted} suite à un manquement aux règles communautaires.")
                 ->line("Motif : {$this->justification}")
                 ->line('Vous disposez d\'un droit de recours de 30 jours via notre centre de support.');
+        } elseif (in_array($this->action, ['restrict_author', 'restriction'], true)) {
+            $untilFormatted = $this->suspendedUntil ? $this->suspendedUntil->format('d/m/Y à H:i') : 'ultérieurement';
+            $mail->line("Votre compte a été restreint jusqu'au {$untilFormatted} suite à un manquement aux règles communautaires.")
+                ->line("Motif : {$this->justification}")
+                ->line('Durant cette période, vous ne pouvez pas publier ni commenter, mais vous pouvez toujours gérer vos biens et messages.');
+        } elseif ($this->action === 'remove') {
+            $mail->line('L\'un de vos contenus a été retiré par notre équipe de modération.')
+                ->line("Motif : {$this->justification}")
+                ->line('Vous pouvez consulter les détails et déposer un recours dans votre espace Support.');
+        } elseif ($this->action === 'hide') {
+            $mail->line('L\'un de vos contenus a été masqué par notre équipe de modération.')
+                ->line("Motif : {$this->justification}")
+                ->line('Vous pouvez consulter les détails et déposer un recours dans votre espace Support.');
         } else {
             $mail->line('Une action de modération a été appliquée sur l\'un de vos contenus.')
                 ->line("Motif : {$this->justification}");
@@ -68,6 +77,11 @@ class ModerationDecisionNotification extends Notification implements ShouldQueue
             'suspend_author' => ($locale === 'en'
                 ? 'Account suspended until '.($this->suspendedUntil ? $this->suspendedUntil->format('d/m/Y') : 'further notice').'. Reason: '.$this->justification
                 : "Compte suspendu jusqu'au ".($this->suspendedUntil ? $this->suspendedUntil->format('d/m/Y') : 'nouvel ordre').'. Motif : '.$this->justification),
+            'restrict_author', 'restriction' => ($locale === 'en'
+                ? 'Account restricted until '.($this->suspendedUntil ? $this->suspendedUntil->format('d/m/Y') : 'further notice').'. Reason: '.$this->justification
+                : "Compte restreint jusqu'au ".($this->suspendedUntil ? $this->suspendedUntil->format('d/m/Y') : 'nouvel ordre').'. Motif : '.$this->justification),
+            'remove' => ($locale === 'en' ? 'Content removed: ' : 'Contenu retiré : ').$this->justification,
+            'hide' => ($locale === 'en' ? 'Content hidden: ' : 'Contenu masqué : ').$this->justification,
             default => ($locale === 'en'
                 ? "Moderation action ({$this->action}): {$this->justification}"
                 : "Action de modération ({$this->action}) : {$this->justification}"),

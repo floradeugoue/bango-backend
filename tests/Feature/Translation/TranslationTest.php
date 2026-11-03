@@ -192,5 +192,38 @@ test('POST /api/translate translates reel comment', function () {
             'success' => true,
             'text' => 'This is great content',
             'source_language' => 'fr',
+            'data' => [
+                'translated' => 'This is great content',
+                'source' => 'fr',
+            ],
         ]);
+});
+
+test('POST /api/translate supports direct text and returns data.translated and data.source', function () {
+    Http::fake([
+        'translation.googleapis.com/*' => Http::response([
+            'data' => [
+                'translations' => [
+                    [
+                        'translatedText' => 'Bonjour, bienvenue sur Bango',
+                        'detectedSourceLanguage' => 'en',
+                    ],
+                ],
+            ],
+        ], 200),
+    ]);
+
+    config(['services.translation.driver' => 'google']);
+    config(['services.translation.google_api_key' => 'fake-key']);
+
+    $response = $this->postJson('/api/translate', [
+        'text' => 'Hello, welcome to Bango',
+        'target' => 'fr',
+    ]);
+
+    $response->assertStatus(200)
+        ->assertJsonPath('data.translated', 'Bonjour, bienvenue sur Bango')
+        ->assertJsonPath('data.source', 'en')
+        ->assertJsonPath('text', 'Bonjour, bienvenue sur Bango')
+        ->assertJsonPath('source_language', 'en');
 });

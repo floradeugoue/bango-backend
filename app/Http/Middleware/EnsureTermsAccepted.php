@@ -16,9 +16,19 @@ class EnsureTermsAccepted
      */
     protected array $exemptRoutes = [
         'api/auth/*',
+        'auth/*',
         'api/legal/*',
+        'legal/*',
         'api/otp/*',
+        'otp/*',
         'api/geo/*',
+        'geo/*',
+        'api/profile',
+        'api/profile/*',
+        'profile',
+        'profile/*',
+        'api/user',
+        'user',
         'up',
     ];
 

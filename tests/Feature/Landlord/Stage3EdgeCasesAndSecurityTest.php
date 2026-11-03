@@ -265,8 +265,13 @@ test('EC-21: Expired invitation cannot be accepted', function (): void {
     $response->assertStatus(422);
 });
 
-test('EC-22: Landlord subscription expired blocks access to landlord dashboard', function (): void {
+test('EC-22: Landlord subscription expired allows read-only access to preserved properties but blocks publishing and editing', function (): void {
     $landlord = ($this->createLandlord)();
+
+    $listing = Listing::factory()->published()->create([
+        'owner_id' => $landlord->id,
+        'title' => 'Villa conservée Almadies',
+    ]);
 
     // Expire landlord subscription
     Subscription::where('user_id', $landlord->id)->update([
@@ -274,9 +279,40 @@ test('EC-22: Landlord subscription expired blocks access to landlord dashboard',
         'current_period_end' => now()->subDay(),
     ]);
 
+    // Réévaluer le badge de l'utilisateur pour qu'il passe à 'none'
+    $landlord->update(['badge' => 'none']);
+
     Passport::actingAs($landlord);
 
+    // 1. Lecture autorisée des biens conservés (CGU article 7)
     $response = $this->getJson('/api/landlord/properties');
-    $response->assertStatus(403)
-        ->assertJson(['code' => 'SUBSCRIPTION_REQUIRED']);
+    $response->assertOk()
+        ->assertJsonFragment(['title' => 'Villa conservée Almadies']);
+
+    // 2. Publication bloquée (403)
+    $postResponse = $this->postJson('/api/listings', [
+        'title' => 'Nouvelle annonce bloquée',
+        'mode' => 'rent',
+        'kind' => 'flat',
+        'price' => 150000,
+        'bedrooms' => 2,
+        'showers' => 1,
+        'area' => 60,
+        'city' => 'Dakar',
+        'neighbourhood' => 'Almadies',
+    ]);
+    $postResponse->assertForbidden();
+
+    // 3. Modification bloquée (403)
+    $patchResponse = $this->patchJson("/api/listings/{$listing->id}", [
+        'title' => 'Titre modifié non autorisé',
+    ]);
+    $patchResponse->assertForbidden();
+
+    // 4. Invitation d'un agent bloquée (403)
+    $agentResponse = $this->postJson('/api/landlord/delegations', [
+        'listing_id' => $listing->id,
+        'agent_id' => 999,
+    ]);
+    $agentResponse->assertForbidden();
 });

@@ -2,10 +2,12 @@
 
 namespace App\Services\Message;
 
+use App\Enums\Delegation\DelegationStatus;
 use App\Enums\Message\ConversationMemberRole;
 use App\Enums\Message\ConversationType;
 use App\Enums\Message\MessageType;
 use App\Events\Message\ConversationCreated;
+use App\Models\Delegation\Delegation;
 use App\Models\Listing\Listing;
 use App\Models\Message\Conversation;
 use App\Models\Message\ConversationMember;
@@ -101,8 +103,7 @@ class MessageThreadService
         ]);
 
         // Tri par conversations épinglées d'abord (pinned_at DESC NULLS LAST), puis date du dernier message ou création
-        return $query->orderByRaw('CASE WHEN current_user_pinned_at IS NOT NULL THEN 0 ELSE 1 END ASC')
-            ->orderByDesc('current_user_pinned_at')
+        return $query->orderByRaw('current_user_pinned_at DESC NULLS LAST')
             ->orderByRaw('COALESCE(last_message_at, created_at) DESC')
             ->paginate($perPage);
     }
@@ -140,6 +141,16 @@ class MessageThreadService
                     $q->where('user_id', $peer->id)->whereNull('left_at');
                 });
 
+            $existing = (clone $existingQuery)->first();
+
+            // Vérification de la confidentialité messageMe (autorisé à démarrer ou envoyer le premier message)
+            if (! $peer->canBeMessagedBy($user)) {
+                $hasPeerReplied = $existing && $existing->messages()->where('sender_id', $peer->id)->exists();
+                if (! $hasPeerReplied) {
+                    abort(403, 'Cet utilisateur n\'accepte pas les messages.');
+                }
+            }
+
             if ($listingId) {
                 // Priorité au fil spécifique à cette annonce
                 $listingThread = (clone $existingQuery)->where('listing_id', $listingId)->first();
@@ -149,7 +160,6 @@ class MessageThreadService
             }
 
             // Si pas de listing ou pas encore de fil avec ce listing, chercher le fil direct existant
-            $existing = $existingQuery->first();
             if ($existing) {
                 // Si un listing est spécifié et que la conversation n'a pas de listing_id, on peut l'attacher
                 if ($listingId && ! $existing->listing_id) {
@@ -188,6 +198,29 @@ class MessageThreadService
                 'role' => ConversationMemberRole::Member,
                 'joined_at' => now(),
             ]);
+
+            // Si la conversation est liée à une annonce, ajouter les agents actifs avec la capacité 'reply'
+            if ($listingId) {
+                $activeAgentIds = Delegation::where('listing_id', $listingId)
+                    ->where('status', DelegationStatus::Active->value)
+                    ->whereNull('revoked_at')
+                    ->get()
+                    ->filter(fn (Delegation $d) => $d->hasCapability('reply'))
+                    ->pluck('agent_id')
+                    ->unique();
+
+                foreach ($activeAgentIds as $agentId) {
+                    if ($agentId !== $user->id && $agentId !== $peer->id) {
+                        ConversationMember::firstOrCreate([
+                            'conversation_id' => $conversation->id,
+                            'user_id' => $agentId,
+                        ], [
+                            'role' => ConversationMemberRole::Member,
+                            'joined_at' => now(),
+                        ]);
+                    }
+                }
+            }
 
             $conversation->load(['members.user', 'listing']);
 

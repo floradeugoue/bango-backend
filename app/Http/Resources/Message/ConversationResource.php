@@ -2,7 +2,9 @@
 
 namespace App\Http\Resources\Message;
 
+use App\Enums\Delegation\DelegationStatus;
 use App\Enums\Message\ConversationType;
+use App\Models\Delegation\Delegation;
 use App\Models\Message\Conversation;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -119,6 +121,35 @@ class ConversationResource extends JsonResource
             'is_request' => $this->status === 'pending',
             'admins_only' => (bool) $this->admins_only,
             'is_read_only' => (bool) $this->is_read_only,
+            'on_behalf_of' => (function () {
+                if (! $this->listing_id) {
+                    return null;
+                }
+                $listing = $this->listing;
+                if (! $listing) {
+                    return null;
+                }
+                $activeDelegation = Delegation::where('listing_id', $listing->id)
+                    ->where('status', DelegationStatus::Active->value)
+                    ->whereNull('revoked_at')
+                    ->with('agent')
+                    ->first();
+
+                if (! $activeDelegation || ! $activeDelegation->agent) {
+                    return null;
+                }
+
+                $agent = $activeDelegation->agent;
+
+                return [
+                    'agent_id' => $agent->id,
+                    'agent_name' => $agent->display_name ?: $agent->name,
+                    'agent_handle' => $agent->handle,
+                    'agent_avatar_url' => $agent->avatar_url,
+                    'landlord_id' => $listing->owner_id,
+                    'label' => "Au nom du bailleur ({$agent->name})",
+                ];
+            })(),
             'metadata' => $this->metadata ?? [],
             'created_at' => $this->created_at?->toIso8601String(),
         ];

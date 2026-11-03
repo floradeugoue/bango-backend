@@ -2,7 +2,13 @@
 
 namespace App\Http\Resources\Support;
 
+use App\Models\Listing\Listing;
+use App\Models\Page\Page;
+use App\Models\Reel\Reel;
+use App\Models\Square\Post;
+use App\Models\Support\ModerationRule;
 use App\Models\Support\Report;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -73,18 +79,18 @@ class ReportResource extends JsonResource
             }
 
             if (! $thumbnailUrl) {
-                if ($target instanceof \App\Models\Square\Post) {
+                if ($target instanceof Post) {
                     $media = $target->relationLoaded('media') ? $target->media : $target->media()->get();
                     $thumbnailUrl = $media->first()?->media_url;
-                } elseif ($target instanceof \App\Models\Reel\Reel) {
+                } elseif ($target instanceof Reel) {
                     $thumbnailUrl = $target->thumbnail_url;
-                } elseif ($target instanceof \App\Models\Listing\Listing) {
+                } elseif ($target instanceof Listing) {
                     $photos = $target->relationLoaded('photos') ? $target->photos : $target->photos()->get();
                     $firstPhoto = $photos->first();
                     $thumbnailUrl = $firstPhoto?->thumbnail_url ?? $firstPhoto?->url;
-                } elseif ($target instanceof \App\Models\User) {
+                } elseif ($target instanceof User) {
                     $thumbnailUrl = $target->avatar_url;
-                } elseif ($target instanceof \App\Models\Page\Page) {
+                } elseif ($target instanceof Page) {
                     $thumbnailUrl = $target->logo_url;
                 }
             }
@@ -127,11 +133,11 @@ class ReportResource extends JsonResource
 
         $ruleModel = null;
         if ($ruleCode) {
-            $ruleModel = \App\Models\Support\ModerationRule::where('code', $ruleCode)->first();
+            $ruleModel = ModerationRule::where('code', $ruleCode)->first();
         }
 
         if (! $ruleModel && $this->reason) {
-            $ruleModel = \App\Models\Support\ModerationRule::where('app_reason', $this->reason->value)->first();
+            $ruleModel = ModerationRule::where('app_reason', $this->reason->value)->first();
         }
 
         if ($ruleModel) {

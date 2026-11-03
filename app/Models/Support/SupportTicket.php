@@ -58,9 +58,12 @@ class SupportTicket extends Model
         ];
     }
 
+    /**
+     * Auteur du ticket, y compris un compte supprimé qui écrit depuis l'écran AU-27.
+     */
     public function user(): BelongsTo
     {
-        return $this->belongsTo(User::class);
+        return $this->belongsTo(User::class)->withTrashed();
     }
 
     public function page(): BelongsTo

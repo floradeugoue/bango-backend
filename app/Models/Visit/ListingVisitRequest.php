@@ -50,12 +50,12 @@ class ListingVisitRequest extends Model
 
     public function prospect(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'prospect_id');
+        return $this->belongsTo(User::class, 'prospect_id')->withTrashed();
     }
 
     public function owner(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'owner_id');
+        return $this->belongsTo(User::class, 'owner_id')->withTrashed();
     }
 
     public function agent(): BelongsTo

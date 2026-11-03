@@ -5,9 +5,12 @@ namespace App\Services\Delegation;
 use App\Enums\Delegation\DelegationCapability;
 use App\Enums\Delegation\DelegationStatus;
 use App\Enums\Listing\ListingStatus;
+use App\Enums\Message\ConversationMemberRole;
 use App\Models\Delegation\Delegation;
 use App\Models\Delegation\VisitShare;
 use App\Models\Listing\Listing;
+use App\Models\Message\Conversation;
+use App\Models\Message\ConversationMember;
 use App\Models\User;
 use App\Models\Visit\VisitReservation;
 use App\Notifications\Delegation\AgentAcceptedNotification;
@@ -154,9 +157,14 @@ class DelegationService
         return DB::transaction(function () use ($landlord, $listing, $agent, $capabilities, $data) {
             // Vérifier les limites de mandats simultanés
             $activeOrPendingCount = Delegation::where('bailleur_id', $landlord->id)
-                ->whereIn('status', [DelegationStatus::Active->value, DelegationStatus::Pending->value])
                 ->where(function (Builder $q) {
-                    $q->whereNull('expires_at')->orWhere('expires_at', '>', now());
+                    $q->where('status', DelegationStatus::Active->value)
+                        ->orWhere(function (Builder $sub) {
+                            $sub->where('status', DelegationStatus::Pending->value)
+                                ->where(function (Builder $exp) {
+                                    $exp->whereNull('expires_at')->orWhere('expires_at', '>', now());
+                                });
+                        });
                 })
                 ->distinct('agent_id')
                 ->count('agent_id');
@@ -272,12 +280,28 @@ class DelegationService
 
             $locked->status = DelegationStatus::Active;
             $locked->answered_at = now();
+            // Le délai expires_at ne concernait que la réponse à l'invitation : un mandat actif reste valable jusqu'à sa révocation
+            $locked->expires_at = null;
             $locked->save();
 
             // Mettre à jour l'agent gestionnaire sur l'annonce si aucun agent n'est encore affecté
             if (! $locked->listing->agent_id) {
                 $locked->listing->agent_id = $agent->id;
                 $locked->listing->save();
+            }
+
+            // Si la délégation accorde le droit 'reply', ajouter l'agent aux conversations existantes liées à l'annonce
+            if ($locked->hasCapability('reply') && $locked->listing_id) {
+                $conversations = Conversation::where('listing_id', $locked->listing_id)->get();
+                foreach ($conversations as $conv) {
+                    ConversationMember::firstOrCreate([
+                        'conversation_id' => $conv->id,
+                        'user_id' => $agent->id,
+                    ], [
+                        'role' => ConversationMemberRole::Member,
+                        'joined_at' => now(),
+                    ]);
+                }
             }
 
             try {
@@ -454,6 +478,19 @@ class DelegationService
 
         $delegation->save();
 
+        if ($delegation->status === DelegationStatus::Active && $delegation->hasCapability('reply') && $delegation->listing_id) {
+            $conversations = Conversation::where('listing_id', $delegation->listing_id)->get();
+            foreach ($conversations as $conv) {
+                ConversationMember::firstOrCreate([
+                    'conversation_id' => $conv->id,
+                    'user_id' => $delegation->agent_id,
+                ], [
+                    'role' => ConversationMemberRole::Member,
+                    'joined_at' => now(),
+                ]);
+            }
+        }
+
         return $delegation->load(['bailleur', 'agent', 'listing']);
     }
 
@@ -525,6 +562,20 @@ class DelegationService
             $delegation->listing->save();
         }
 
+        // Si la délégation rétablie accorde le droit 'reply', s'assurer de l'appartenance aux conversations
+        if ($delegation->hasCapability('reply') && $delegation->listing_id) {
+            $conversations = Conversation::where('listing_id', $delegation->listing_id)->get();
+            foreach ($conversations as $conv) {
+                ConversationMember::firstOrCreate([
+                    'conversation_id' => $conv->id,
+                    'user_id' => $delegation->agent_id,
+                ], [
+                    'role' => ConversationMemberRole::Member,
+                    'joined_at' => now(),
+                ]);
+            }
+        }
+
         return $delegation->load(['bailleur', 'agent', 'listing']);
     }
 
@@ -548,9 +599,6 @@ class DelegationService
             ->where('agent_id', $agent->id)
             ->where('status', DelegationStatus::Active->value)
             ->whereNull('revoked_at')
-            ->where(function (Builder $q) {
-                $q->whereNull('expires_at')->orWhere('expires_at', '>', now());
-            })
             ->first();
 
         if (! $delegation) {
@@ -575,10 +623,7 @@ class DelegationService
             ->whereHas('delegations', function (Builder $q) use ($agent) {
                 $q->where('agent_id', $agent->id)
                     ->where('status', DelegationStatus::Active->value)
-                    ->whereNull('revoked_at')
-                    ->where(function (Builder $sub) {
-                        $sub->whereNull('expires_at')->orWhere('expires_at', '>', now());
-                    });
+                    ->whereNull('revoked_at');
             })
             ->with([
                 'photos',
@@ -616,9 +661,6 @@ class DelegationService
         $authorizedListingIds = Delegation::where('agent_id', $agent->id)
             ->where('status', DelegationStatus::Active->value)
             ->whereNull('revoked_at')
-            ->where(function (Builder $q) {
-                $q->whereNull('expires_at')->orWhere('expires_at', '>', now());
-            })
             ->get()
             ->filter(fn (Delegation $d) => $d->hasCapability('visits') || $d->hasCapability('reply'))
             ->pluck('listing_id')
@@ -700,10 +742,7 @@ class DelegationService
             ->whereHas('delegations', function (Builder $q) use ($agent) {
                 $q->where('agent_id', $agent->id)
                     ->where('status', DelegationStatus::Active->value)
-                    ->whereNull('revoked_at')
-                    ->where(function (Builder $sub) {
-                        $sub->whereNull('expires_at')->orWhere('expires_at', '>', now());
-                    });
+                    ->whereNull('revoked_at');
             })
             ->with(['photos', 'videos', 'owner'])
             ->latest('created_at')

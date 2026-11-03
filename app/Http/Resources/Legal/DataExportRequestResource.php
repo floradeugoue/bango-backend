@@ -28,6 +28,7 @@ class DataExportRequestResource extends JsonResource
             ],
             'file_size_bytes' => $this->file_size_bytes,
             'sections' => $this->sections,
+            'format' => $this->format ?? 'json',
             'download_url' => $downloadUrl,
             'expires_at' => $this->expires_at?->toIso8601String(),
             'completed_at' => $this->completed_at?->toIso8601String(),

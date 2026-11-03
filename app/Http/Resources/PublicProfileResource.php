@@ -70,6 +70,12 @@ class PublicProfileResource extends JsonResource
             'isBlocked' => $isBlocked,
             'isBlockedBy' => $isBlockedBy,
             'canViewContent' => $canViewContent,
+            'can_comment' => $this->resource->canBeCommentedBy($currentUser),
+            'can_message' => $this->resource->canBeMessagedBy($currentUser),
+            'can_tag' => $this->resource->canBeTaggedBy($currentUser),
+            'canComment' => $this->resource->canBeCommentedBy($currentUser),
+            'canMessage' => $this->resource->canBeMessagedBy($currentUser),
+            'canTag' => $this->resource->canBeTaggedBy($currentUser),
         ];
     }
 }

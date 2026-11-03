@@ -32,6 +32,7 @@ class Reel extends Model
         'status',
         'error_message',
         'video_url',
+        'original_video_url',
         'thumbnail_url',
         'hls_url',
         'stream_media_id',

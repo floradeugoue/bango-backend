@@ -102,6 +102,8 @@ class PostResource extends JsonResource
             // Médias
             'media' => $firstMedia?->media_url,
             'mediaType' => $firstMedia ? (is_object($firstMedia->media_type) ? $firstMedia->media_type->value : $firstMedia->media_type) : null,
+            'poster_url' => $firstMedia?->poster_url,
+            'posterUrl' => $firstMedia?->poster_url,
             'photo' => ! empty($photoUrls) ? $photoUrls[0] : null,
             'photos' => $photoUrls,
             'aspect' => $aspect,

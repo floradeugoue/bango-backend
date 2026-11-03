@@ -8,6 +8,7 @@ use App\Models\Admin\AdminAuditLog;
 use App\Models\Kyc\KycSubmission;
 use App\Models\User;
 use App\Notifications\Kyc\KycDecisionNotification;
+use App\Notifications\Kyc\KycSupplementRequestedNotification;
 use App\Services\Subscription\BadgeResolutionService;
 use DomainException;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -364,6 +365,9 @@ class AdminKycService
 
             // Notification de la décision d'instruction à l'utilisateur
             try {
+                if (in_array($decision, ['request_changes', 'supplement_requested'], true)) {
+                    $user->notify(new KycSupplementRequestedNotification($submission, $reason));
+                }
                 $user->notify(new KycDecisionNotification($submission, $decision, $reason));
             } catch (\Throwable $e) {
                 Log::warning('Échec envoi notification décision KYC : '.$e->getMessage(), [

@@ -56,6 +56,11 @@ class ReelCommentService
      */
     public function createComment(Reel $reel, User $user, string $body, ?int $parentId = null): ReelComment
     {
+        $author = $reel->relationLoaded('user') ? $reel->user : User::find($reel->user_id);
+        if ($author && ! $author->canBeCommentedBy($user)) {
+            abort(403, 'Cet utilisateur n\'autorise pas les commentaires.');
+        }
+
         if ($reel->comments_closed) {
             throw ValidationException::withMessages([
                 'comment' => ['Les commentaires sont fermés pour ce Reel.'],

@@ -5,6 +5,7 @@ namespace App\Services\Square;
 use App\Enums\Square\PostAudience;
 use App\Enums\Square\PostCommentsBy;
 use App\Models\Square\Post;
+use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
@@ -28,6 +29,17 @@ class PostManagementService
         // Si le post n'a aucun média et que le texte devient vide, interdire
         if ($trimmed === '' && $post->media()->count() === 0) {
             throw new InvalidArgumentException('Une publication sans média ne peut pas avoir un texte vide.');
+        }
+
+        $author = $post->relationLoaded('user') ? $post->user : User::find($post->user_id);
+        if ($trimmed !== '' && preg_match_all('/@([a-zA-Z0-9_\.]+)/', $trimmed, $matches)) {
+            $handles = array_unique($matches[1]);
+            $mentionedUsers = User::whereIn('handle', $handles)->get();
+            foreach ($mentionedUsers as $mentioned) {
+                if ($author && ! $mentioned->canBeTaggedBy($author)) {
+                    abort(403, "L'utilisateur @{$mentioned->handle} n'autorise pas les mentions.");
+                }
+            }
         }
 
         return DB::transaction(function () use ($post, $trimmed) {

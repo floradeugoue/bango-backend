@@ -16,6 +16,7 @@ class DataExportRequest extends Model
         'user_id',
         'status',
         'sections',
+        'format',
         'file_path',
         'disk',
         'file_size_bytes',

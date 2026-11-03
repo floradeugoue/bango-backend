@@ -53,7 +53,7 @@ class SignupController extends Controller
         }
         $candidate = substr($baseHandle, 0, 16);
         $counter = 1;
-        while (User::where('handle', $candidate)->exists()) {
+        while (User::withTrashed()->where('handle', $candidate)->exists()) {
             $candidate = substr($baseHandle, 0, 14).$counter;
             $counter++;
         }

@@ -24,6 +24,7 @@ use App\Services\Subscription\BadgeResolutionService;
 use App\Services\Visit\VisitSlotService;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -89,14 +90,11 @@ class ListingService
             return true;
         }
 
-        // L'agent mandaté via une délégation active
+        // L'agent mandaté via une délégation active (valable jusqu'à sa révocation)
         $activeDelegation = Delegation::where('listing_id', $listing->id)
             ->where('agent_id', $actor->id)
             ->where('status', DelegationStatus::Active->value)
             ->whereNull('revoked_at')
-            ->where(function ($q) {
-                $q->whereNull('expires_at')->orWhere('expires_at', '>', now());
-            })
             ->first();
 
         if ($activeDelegation && $this->badgeResolution->resolveUserBadges($actor)['hasAgent']) {
@@ -128,8 +126,21 @@ class ListingService
      */
     public function canEditListing(User $actor, Listing $listing): bool
     {
-        if ($actor->isAdmin() || $actor->id === $listing->owner_id) {
+        if ($actor->isAdmin()) {
             return true;
+        }
+
+        if ($actor->id === $listing->owner_id) {
+            // Un propriétaire dont le badge a expiré ne peut plus modifier ses annonces (CGU article 7)
+            $badgeStatus = $this->badgeResolution->resolveUserBadges($actor);
+            $hasActiveLandlord = ($badgeStatus['hasLandlord'] ?? false) || in_array($actor->badge, ['landlord', 'double'], true);
+            $hasExpiredSub = $actor->subscriptions()->where('badge_type', 'landlord')->where('state', 'expired')->exists();
+
+            if ($hasExpiredSub && ! $actor->hasActiveSubscription('landlord')) {
+                return false;
+            }
+
+            return $hasActiveLandlord || $this->canPublish($actor);
         }
 
         if (! $this->canManage($actor, $listing)) {
@@ -322,7 +333,33 @@ class ListingService
             $currentDraftData = $listing->draft_data ?? [];
             $listing->draft_data = array_merge($currentDraftData, $data['values'] ?? $data);
 
+            // Coordonnées vidéo en brouillon
+            $videoSettings = [];
+            if (isset($data['video_trim']) && is_array($data['video_trim'])) {
+                $videoSettings['video_trim'] = $data['video_trim'];
+            }
+            if (isset($data['video_cover_ms'])) {
+                $videoSettings['video_cover_ms'] = (int) $data['video_cover_ms'];
+            }
+            if (isset($data['video_chapters']) && is_array($data['video_chapters'])) {
+                $videoSettings['video_chapters'] = $data['video_chapters'];
+            }
+            if (! empty($videoSettings)) {
+                $existingMetrics = $listing->video_metrics ?? [];
+                $listing->video_metrics = array_merge($existingMetrics, $videoSettings);
+            }
+
             $listing->save();
+
+            if (! empty($videoSettings)) {
+                $mainVideo = $listing->videos()->first();
+                if ($mainVideo) {
+                    $mediaMeta = $mainVideo->metadata ?? [];
+                    $mainVideo->update([
+                        'metadata' => array_merge($mediaMeta, $videoSettings),
+                    ]);
+                }
+            }
 
             return $listing->fresh(['photos', 'videos']);
         });
@@ -449,7 +486,34 @@ class ListingService
                 $listing->published_at = now();
             }
 
+            // Mise à jour des coordonnées vidéo (video_trim, video_cover_ms, video_chapters)
+            $videoSettings = [];
+            if (isset($data['video_trim']) && is_array($data['video_trim'])) {
+                $videoSettings['video_trim'] = $data['video_trim'];
+            }
+            if (isset($data['video_cover_ms'])) {
+                $videoSettings['video_cover_ms'] = (int) $data['video_cover_ms'];
+            }
+            if (isset($data['video_chapters']) && is_array($data['video_chapters'])) {
+                $videoSettings['video_chapters'] = $data['video_chapters'];
+            }
+            if (! empty($videoSettings)) {
+                $existingMetrics = $listing->video_metrics ?? [];
+                $listing->video_metrics = array_merge($existingMetrics, $videoSettings);
+            }
+
             $listing->save();
+
+            // Si une vidéo existe déjà rattachée à cette annonce, synchroniser également ses métadonnées
+            if (! empty($videoSettings)) {
+                $mainVideo = $listing->videos()->first();
+                if ($mainVideo) {
+                    $mediaMeta = $mainVideo->metadata ?? [];
+                    $mainVideo->update([
+                        'metadata' => array_merge($mediaMeta, $videoSettings),
+                    ]);
+                }
+            }
 
             $freshListing = $listing->fresh(['photos', 'videos', 'owner']);
 
@@ -472,29 +536,44 @@ class ListingService
             throw new AuthorizationException("Vous n'êtes pas autorisé à modifier cette annonce (capacité 'edit' requise).");
         }
 
-        return DB::transaction(function () use ($listing, $patch) {
+        $priceFields = ['price', 'deposit_months', 'advance_months', 'visit_fee', 'charges', 'negotiable'];
+        $isOwner = ($actor->id === $listing->owner_id) || $actor->isAdmin();
+
+        if (! $isOwner) {
+            foreach ($priceFields as $field) {
+                if (array_key_exists($field, $patch)) {
+                    throw new HttpResponseException(response()->json([
+                        'message' => 'Seul le propriétaire du bien peut modifier le prix ou les conditions financières (CGU article 12).',
+                        'kind' => 'price-owner-only',
+                        'error' => 'PRICE_OWNER_ONLY',
+                    ], 403));
+                }
+            }
+        }
+
+        return DB::transaction(function () use ($listing, $patch, $isOwner) {
             if (isset($patch['title'])) {
                 $listing->title = mb_substr(trim((string) $patch['title']), 0, 100);
             }
             if (isset($patch['description'])) {
                 $listing->description = trim((string) $patch['description']);
             }
-            if (isset($patch['price'])) {
+            if ($isOwner && isset($patch['price'])) {
                 $listing->price = (float) $patch['price'];
             }
-            if (isset($patch['deposit_months'])) {
+            if ($isOwner && isset($patch['deposit_months'])) {
                 $listing->deposit_months = (int) $patch['deposit_months'];
             }
-            if (isset($patch['advance_months'])) {
+            if ($isOwner && isset($patch['advance_months'])) {
                 $listing->advance_months = (int) $patch['advance_months'];
             }
-            if (isset($patch['visit_fee'])) {
+            if ($isOwner && isset($patch['visit_fee'])) {
                 $listing->visit_fee = (float) $patch['visit_fee'];
             }
-            if (isset($patch['charges'])) {
+            if ($isOwner && isset($patch['charges'])) {
                 $listing->charges = (float) $patch['charges'];
             }
-            if (isset($patch['negotiable'])) {
+            if ($isOwner && isset($patch['negotiable'])) {
                 $listing->negotiable = (bool) $patch['negotiable'];
             }
             if (isset($patch['utilities_included'])) {
@@ -522,8 +601,34 @@ class ListingService
                 $listing->uses_agenda = $patch['uses_agenda'] !== null ? (bool) $patch['uses_agenda'] : null;
             }
 
+            // Mise à jour des coordonnées vidéo (video_trim, video_cover_ms, video_chapters)
+            $videoSettings = [];
+            if (isset($patch['video_trim']) && is_array($patch['video_trim'])) {
+                $videoSettings['video_trim'] = $patch['video_trim'];
+            }
+            if (isset($patch['video_cover_ms'])) {
+                $videoSettings['video_cover_ms'] = (int) $patch['video_cover_ms'];
+            }
+            if (isset($patch['video_chapters']) && is_array($patch['video_chapters'])) {
+                $videoSettings['video_chapters'] = $patch['video_chapters'];
+            }
+            if (! empty($videoSettings)) {
+                $existingMetrics = $listing->video_metrics ?? [];
+                $listing->video_metrics = array_merge($existingMetrics, $videoSettings);
+            }
+
             $listing->attributes = $this->composeAttributes($listing);
             $listing->save();
+
+            if (! empty($videoSettings)) {
+                $mainVideo = $listing->videos()->first();
+                if ($mainVideo) {
+                    $mediaMeta = $mainVideo->metadata ?? [];
+                    $mainVideo->update([
+                        'metadata' => array_merge($mediaMeta, $videoSettings),
+                    ]);
+                }
+            }
 
             return $listing->fresh(['photos', 'videos', 'owner']);
         });
@@ -788,25 +893,49 @@ class ListingService
     /**
      * Ajout d'une visite vidéo guidée à une annonce.
      */
-    public function addVideo(Listing $listing, User $actor, UploadedFile $file, ?int $duration = null, ?int $width = null, ?int $height = null): ListingMedia
-    {
+    public function addVideo(
+        Listing $listing,
+        User $actor,
+        UploadedFile $file,
+        ?int $duration = null,
+        ?int $width = null,
+        ?int $height = null,
+        ?array $metadata = null
+    ): ListingMedia {
         if (! $this->canManage($actor, $listing)) {
             throw new AuthorizationException("Vous n'êtes pas autorisé à ajouter des médias sur cette annonce.");
         }
 
         $stored = $this->mediaStorage->storeListingVideo($file, $actor, null, $duration, $width, $height);
 
+        $mediaMetadata = $metadata ?? [];
+        if (! empty($stored['renditions'])) {
+            $mediaMetadata['renditions'] = $stored['renditions'];
+        }
+        if (! empty($stored['original_url'])) {
+            $mediaMetadata['original_url'] = $stored['original_url'];
+        }
+
+        $thumbnailUrl = $mediaMetadata['video_poster_url']
+            ?? $mediaMetadata['thumbnail_url']
+            ?? $stored['thumbnail_url']
+            ?? $stored['poster_url']
+            ?? null;
+
         return ListingMedia::create([
             'listing_id' => $listing->id,
             'type' => 'video',
             'path' => $stored['path'],
             'url' => $stored['url'],
+            'thumbnail_path' => $mediaMetadata['thumbnail_path'] ?? null,
+            'thumbnail_url' => $thumbnailUrl,
             'mime_type' => $stored['mime_type'],
             'file_size' => $stored['file_size'],
             'width' => $stored['width'],
             'height' => $stored['height'],
             'duration' => $stored['duration'],
             'order' => 0,
+            'metadata' => ! empty($mediaMetadata) ? $mediaMetadata : null,
         ]);
     }
 

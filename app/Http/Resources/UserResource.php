@@ -40,6 +40,10 @@ class UserResource extends JsonResource
             'uses_agenda' => (bool) ($this->uses_agenda ?? true),
             'usesAgenda' => (bool) ($this->uses_agenda ?? true),
             'restrictedUntil' => $this->restricted_until?->toIso8601String(),
+            'accepted_terms_version' => $this->accepted_terms_version,
+            'acceptedTermsVersion' => $this->accepted_terms_version,
+            'terms_accepted_at' => $this->terms_accepted_at?->toIso8601String(),
+            'termsAcceptedAt' => $this->terms_accepted_at?->toIso8601String(),
             'counts' => [
                 'followers' => $this->followers()->count(),
                 'following' => $this->following()->count(),

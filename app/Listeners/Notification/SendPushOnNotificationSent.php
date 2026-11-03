@@ -5,6 +5,7 @@ namespace App\Listeners\Notification;
 use App\Jobs\Notification\SendPushNotificationJob;
 use App\Models\User;
 use App\Notifications\Social\SocialNotification;
+use App\Services\Notification\NotificationPreferenceService;
 use Illuminate\Notifications\Events\NotificationSent;
 
 class SendPushOnNotificationSent
@@ -35,6 +36,15 @@ class SendPushOnNotificationSent
             $data = $notification->toArray($notifiable);
         } elseif (isset($event->response) && is_array($event->response)) {
             $data = $event->response;
+        }
+
+        if (empty($data['type'])) {
+            $data['type'] = isset($notification->type) ? (string) $notification->type : class_basename($notification);
+        }
+
+        // Vérification des préférences de notification de l'utilisateur avant dispatch
+        if (! app(NotificationPreferenceService::class)->isPushAllowed($notifiable, $notification)) {
+            return;
         }
 
         $title = $this->resolveTitle($notification, $data, $notifiable);

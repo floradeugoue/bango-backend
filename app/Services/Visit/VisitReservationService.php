@@ -1008,8 +1008,13 @@ class VisitReservationService
         $deadline = now()->subHours($answerHours);
 
         $overdue = VisitReservation::where('status', VisitReservationStatus::Requested->value)
-            ->whereNotNull('paid_at')
-            ->where('paid_at', '<=', $deadline)
+            ->where(function ($query) use ($deadline) {
+                $query->where(function ($q) use ($deadline) {
+                    $q->whereNotNull('paid_at')->where('paid_at', '<=', $deadline);
+                })->orWhere(function ($q) use ($deadline) {
+                    $q->whereNull('paid_at')->where('created_at', '<=', $deadline);
+                });
+            })
             ->get();
 
         $count = 0;
@@ -1018,7 +1023,10 @@ class VisitReservationService
             $reservation->decline_reason = VisitDeclineReason::NoAnswer->value;
             $reservation->save();
 
-            $isCredit = str_starts_with((string) $reservation->payment_reference, 'VISIT-CREDIT-');
+            $isCredit = str_starts_with((string) $reservation->payment_reference, 'VISIT-CREDIT-')
+                || str_contains((string) $reservation->payment_reference, 'CREDIT')
+                || (! $reservation->paymentTransaction && $reservation->fee_amount > 0);
+
             if ($reservation->fee_amount > 0 && ($reservation->paymentTransaction || $isCredit)) {
                 $this->processRefund(
                     $reservation,
@@ -1027,7 +1035,7 @@ class VisitReservationService
                 );
             }
 
-            $reservation->prospect->notify(new VisitDeclinedNotification(
+            $reservation->prospect?->notify(new VisitDeclinedNotification(
                 $reservation,
                 sprintf('Délai de réponse de %dh dépassé', $answerHours)
             ));

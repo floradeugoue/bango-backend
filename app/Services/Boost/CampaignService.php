@@ -481,9 +481,9 @@ class CampaignService
      * Suspend une campagne active en cas de modération, indisponibilité de bien ou inéligibilité.
      * Restitue également le reliquat budgétaire en Crédit BANGO au commanditaire.
      */
-    public function suspendCampaign(Campaign $campaign, string $reason = 'moderation'): Campaign
+    public function suspendCampaign(Campaign $campaign, string $reason = 'moderation', bool $refund = true): Campaign
     {
-        return DB::transaction(function () use ($campaign, $reason) {
+        return DB::transaction(function () use ($campaign, $reason, $refund) {
             /** @var Campaign $lockedCampaign */
             $lockedCampaign = Campaign::where('id', $campaign->id)->lockForUpdate()->firstOrFail();
 
@@ -498,7 +498,7 @@ class CampaignService
             $lockedCampaign->save();
 
             // Restitution automatique du reliquat non consommé en Crédit BANGO
-            if ($unspent > 0) {
+            if ($refund && $unspent > 0) {
                 $targetUser = $lockedCampaign->user ?? User::findOrFail($lockedCampaign->user_id);
                 $campaignShortId = substr((string) $lockedCampaign->id, 0, 8);
                 $refundIdempotencyKey = "campaign_suspend_refund_{$lockedCampaign->id}";

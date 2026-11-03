@@ -8,6 +8,7 @@ use App\Models\Admin\AdminAccessRequest;
 use App\Models\Admin\AdminAuditLog;
 use App\Models\Admin\AdminInvitation;
 use App\Models\Auth\Role;
+use App\Services\Admin\Auth\AdminInvitationEmailService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
@@ -15,6 +16,10 @@ use Illuminate\Support\Str;
 
 class AdminAccessRequestController extends Controller
 {
+    public function __construct(
+        protected AdminInvitationEmailService $emailService
+    ) {}
+
     /**
      * POST /auth/access-requests
      * Soumettre une demande d'accès interne avec une adresse professionnelle @bango.app.
@@ -140,6 +145,9 @@ class AdminAccessRequestController extends Controller
             'role' => $role->slug,
         ]);
 
+        // Envoi du mail d'invitation avec lien d'activation sécurisé bilingue FR / EN
+        $this->emailService->sendInvitation($invitation, $rawToken);
+
         return response()->json([
             'message' => 'Demande d\'accès approuvée et invitation générée.',
             'access_request' => $accessRequest,
@@ -168,6 +176,8 @@ class AdminAccessRequestController extends Controller
             ], 400);
         }
 
+        $reason = $request->input('reason');
+
         $accessRequest->update([
             'status' => 'rejected',
             'reviewed_by' => $request->user()?->id,
@@ -177,8 +187,11 @@ class AdminAccessRequestController extends Controller
         AdminAuditLog::logEvent('auth.access_request.rejected', $request->user(), $request->ip(), $request->userAgent(), [
             'access_request_id' => $accessRequest->id,
             'email' => $accessRequest->email,
-            'reason' => $request->input('reason'),
+            'reason' => $reason,
         ]);
+
+        // Envoi du mail notifiant le refus de la demande d'accès bilingue FR / EN
+        $this->emailService->sendRejection($accessRequest, $reason);
 
         return response()->json([
             'message' => 'Demande d\'accès rejetée.',

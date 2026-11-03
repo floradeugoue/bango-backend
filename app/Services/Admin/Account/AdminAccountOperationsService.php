@@ -573,6 +573,54 @@ class AdminAccountOperationsService
     }
 
     /**
+     * 5.7 bis. Levée d'un avertissement formel.
+     */
+    public function liftWarning(User $user, User $operator, int|string|null $sanctionId, string $reason): UserAccountSanction
+    {
+        return DB::transaction(function () use ($user, $operator, $sanctionId, $reason) {
+            $lockedUser = User::where('id', $user->id)->lockForUpdate()->firstOrFail();
+
+            $query = UserAccountSanction::where('user_id', $lockedUser->id)
+                ->where('type', 'warning')
+                ->where('is_active', true);
+
+            if (! empty($sanctionId) && is_numeric($sanctionId)) {
+                $query->where('id', (int) $sanctionId);
+            }
+
+            $sanction = $query->latest('id')->firstOrFail();
+
+            $sanction->update([
+                'is_active' => false,
+                'lifted_at' => Carbon::now(),
+                'lifted_by_id' => $operator->id,
+                'lift_reason' => $reason,
+            ]);
+
+            // Vérifier s'il reste d'autres sanctions actives imposant une restriction sur le compte
+            $hasOtherActiveRestrictions = UserAccountSanction::where('user_id', $lockedUser->id)
+                ->where('is_active', true)
+                ->where(function ($q) {
+                    $q->where('type', 'restriction')
+                        ->orWhere(function ($sub) {
+                            $sub->where('type', 'warning')->where('level', 3);
+                        })
+                        ->orWhere(function ($sub) {
+                            $sub->whereNotNull('ends_at')->where('ends_at', '>', now());
+                        });
+                })
+                ->exists();
+
+            if (! $hasOtherActiveRestrictions && $lockedUser->restricted_until) {
+                $lockedUser->restricted_until = null;
+                $lockedUser->save();
+            }
+
+            return $sanction->fresh();
+        });
+    }
+
+    /**
      * 5.8. Prolongation commerciale d'un badge.
      */
     public function extendBadge(User $user, User $operator, string $badge, int $durationDays, string $reason): User

@@ -19,7 +19,8 @@ use InvalidArgumentException;
 class PostCreationService
 {
     public function __construct(
-        protected HashtagExtractionService $hashtagService
+        protected HashtagExtractionService $hashtagService,
+        protected VideoProcessingService $videoProcessingService
     ) {}
 
     /**
@@ -65,6 +66,27 @@ class PostCreationService
         // Maximum 10 médias par publication (conforme à CR-02 et Square carrousel)
         if (count($mediaList) > 10) {
             throw new InvalidArgumentException('Une publication ne peut pas comporter plus de 10 médias.');
+        }
+
+        // Règle de confidentialité tagMe : vérification des personnes identifiées
+        $tags = $data['tags'] ?? [];
+        foreach ($tags as $tag) {
+            $targetUserId = (int) ($tag['account_id'] ?? 0);
+            $targetUser = User::find($targetUserId);
+            if ($targetUser && ! $targetUser->canBeTaggedBy($user)) {
+                abort(403, "L'utilisateur @{$targetUser->handle} n'autorise pas les identifications.");
+            }
+        }
+
+        // Règle de confidentialité tagMe : vérification des mentions dans le texte
+        if ($body && preg_match_all('/@([a-zA-Z0-9_\.]+)/', $body, $matches)) {
+            $handles = array_unique($matches[1]);
+            $mentionedUsers = User::whereIn('handle', $handles)->get();
+            foreach ($mentionedUsers as $mentioned) {
+                if (! $mentioned->canBeTaggedBy($user)) {
+                    abort(403, "L'utilisateur @{$mentioned->handle} n'autorise pas les mentions.");
+                }
+            }
         }
 
         return DB::transaction(function () use ($user, $data, $body, $mediaList, $idempotencyKey) {
@@ -121,18 +143,41 @@ class PostCreationService
             foreach ($mediaList as $index => $mediaItem) {
                 $order = $mediaItem['display_order'] ?? $index;
                 $mediaType = $mediaItem['type'] ?? PostMediaKind::Photo->value;
+                $mediaUrl = $mediaItem['url'];
+                $posterUrl = $mediaItem['poster_url'] ?? $mediaItem['posterUrl'] ?? null;
+                $duration = $mediaItem['duration'] ?? null;
+                $editMetadata = $mediaItem['edit_metadata'] ?? null;
+
+                $isKindVideo = ($mediaType instanceof PostMediaKind && $mediaType === PostMediaKind::Video)
+                    || $mediaType === PostMediaKind::Video->value
+                    || $mediaType === 'video';
+
+                if ($isKindVideo && is_array($editMetadata)) {
+                    $processed = $this->videoProcessingService->processSquareVideo(
+                        $mediaUrl,
+                        $editMetadata,
+                        $user->id,
+                        $duration
+                    );
+
+                    $mediaUrl = $processed['media_url'] ?? $mediaUrl;
+                    $posterUrl = $processed['poster_url'] ?? $posterUrl;
+                    $duration = $processed['duration'] ?? $duration;
+                    $editMetadata = $processed['edit_metadata'] ?? $editMetadata;
+                }
 
                 $postMedia = PostMedia::create([
                     'post_id' => $post->id,
-                    'media_url' => $mediaItem['url'],
+                    'media_url' => $mediaUrl,
+                    'poster_url' => $posterUrl,
                     'media_type' => $mediaType,
                     'mime_type' => $mediaItem['mime_type'] ?? null,
                     'file_size' => $mediaItem['file_size'] ?? null,
                     'width' => $mediaItem['width'] ?? null,
                     'height' => $mediaItem['height'] ?? null,
-                    'duration' => $mediaItem['duration'] ?? null,
+                    'duration' => $duration,
                     'display_order' => $order,
-                    'edit_metadata' => $mediaItem['edit_metadata'] ?? null,
+                    'edit_metadata' => $editMetadata,
                 ]);
 
                 $createdMediaMap[$index] = $postMedia;

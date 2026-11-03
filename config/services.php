@@ -80,4 +80,8 @@ return [
         'deepl_api_key' => env('DEEPL_API_KEY'),
     ],
 
+    'backoffice' => [
+        'url' => env('BACKOFFICE_URL', 'https://admin.bango.app'),
+    ],
+
 ];

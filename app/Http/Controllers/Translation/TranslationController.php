@@ -23,16 +23,22 @@ class TranslationController extends Controller
      */
     public function translate(TranslateRequest $request): JsonResponse
     {
-        $type = (string) $request->validated('type');
-        $id = $request->validated('id');
         $target = (string) $request->validated('target');
 
-        $text = match ($type) {
-            'post' => (string) (Post::findOrFail($id)->body ?? ''),
-            'reel' => (string) (Reel::findOrFail($id)->caption ?? ''),
-            'comment' => (string) (PostComment::findOrFail($id)->body ?? ''),
-            'reel_comment' => (string) (ReelComment::findOrFail($id)->body ?? ''),
-        };
+        if ($request->filled('text')) {
+            $text = (string) $request->input('text');
+        } else {
+            $type = (string) $request->validated('type');
+            $id = $request->validated('id');
+
+            $text = match ($type) {
+                'post' => (string) (Post::findOrFail($id)->body ?? ''),
+                'reel' => (string) (Reel::findOrFail($id)->caption ?? ''),
+                'comment' => (string) (PostComment::findOrFail($id)->body ?? ''),
+                'reel_comment' => (string) (ReelComment::findOrFail($id)->body ?? ''),
+                default => '',
+            };
+        }
 
         $result = $this->translationService->translate($text, $target);
 
@@ -40,6 +46,12 @@ class TranslationController extends Controller
             'success' => true,
             'text' => $result['text'],
             'source_language' => $result['source_language'],
+            'data' => [
+                'translated' => $result['text'],
+                'source' => $result['source_language'],
+                'text' => $result['text'],
+                'source_language' => $result['source_language'],
+            ],
         ]);
     }
 }

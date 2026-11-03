@@ -8,4 +8,5 @@ enum KycStatus: string
     case SupplementRequested = 'supplement_requested';
     case Approved = 'approved';
     case Rejected = 'rejected';
+    case Replaced = 'replaced';
 }

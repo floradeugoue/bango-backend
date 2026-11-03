@@ -10,6 +10,7 @@ use App\Models\Landlord\LandlordUnavailability;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Carbon;
 
 class LandlordSlotRuleController extends Controller
 {
@@ -147,8 +148,8 @@ class LandlordSlotRuleController extends Controller
         if (! empty($validated['id'])) {
             $query->where('id', $validated['id']);
         } else {
-            $fromDate = \Illuminate\Support\Carbon::parse($validated['from']);
-            $toDate = \Illuminate\Support\Carbon::parse($validated['to']);
+            $fromDate = Carbon::parse($validated['from']);
+            $toDate = Carbon::parse($validated['to']);
             $query->where(function ($q) use ($fromDate, $toDate) {
                 $q->where('from', $fromDate)->where('to', $toDate);
             });

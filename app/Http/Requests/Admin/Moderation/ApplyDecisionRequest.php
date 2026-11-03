@@ -17,7 +17,7 @@ class ApplyDecisionRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'action' => ['required', 'string', 'in:keep_online,hide,remove,warn_author,suspend_author'],
+            'action' => ['required', 'string', 'in:keep_online,hide,remove,warn_author,suspend_author,restrict_author,restriction'],
             'justification' => ['required', 'string', 'min:3', 'max:1000'],
             'refund_credits' => ['nullable', 'boolean'],
             'metadata' => ['nullable', 'array'],

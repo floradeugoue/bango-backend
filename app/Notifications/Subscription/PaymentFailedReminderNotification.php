@@ -4,6 +4,7 @@ namespace App\Notifications\Subscription;
 
 use App\Models\Payment\PaymentTransaction;
 use App\Models\Subscription\Subscription;
+use App\Notifications\Concerns\RespectsNotificationPreferences;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
@@ -11,23 +12,13 @@ use Illuminate\Notifications\Notification;
 
 class PaymentFailedReminderNotification extends Notification implements ShouldQueue
 {
-    use Queueable;
+    use Queueable, RespectsNotificationPreferences;
 
     public function __construct(
         public Subscription $subscription,
         public PaymentTransaction $failedTransaction,
         public string $reminderType
     ) {}
-
-    /**
-     * Get the notification's delivery channels.
-     *
-     * @return array<int, string>
-     */
-    public function via(object $notifiable): array
-    {
-        return ['database'];
-    }
 
     /**
      * Get the mail representation of the notification.

@@ -863,6 +863,14 @@ Route::middleware(['admin.session'])->group(function () {
             ->middleware('admin.permission:accounts:sanctions')
             ->name('warnings');
 
+        // Lever un avertissement formel
+        Route::post('/{id}/warnings/lift', [AdminAccountSanctionController::class, 'liftWarning'])
+            ->middleware('admin.permission:accounts:sanctions')
+            ->name('warnings.lift');
+        Route::post('/{id}/warnings/{sanctionId}/lift', [AdminAccountSanctionController::class, 'liftWarning'])
+            ->middleware('admin.permission:accounts:sanctions')
+            ->name('warnings.lift.specific');
+
         // Badges et Certifications (5.8 - 5.9)
         // Prolonger la durée de validité du badge professionnel de l'utilisateur
         Route::post('/{id}/badge/extend', [AdminAccountSanctionController::class, 'extendBadge'])

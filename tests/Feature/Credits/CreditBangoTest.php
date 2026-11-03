@@ -450,6 +450,7 @@ test('IM : règlement d\'une réservation de visite immobilière via Crédit BAN
         'owner_id' => $landlord->id,
         'visit_fee' => 3000,
         'currency' => 'XAF',
+        'auto_confirm' => true,
     ]);
 
     $slot = VisitSlot::create([

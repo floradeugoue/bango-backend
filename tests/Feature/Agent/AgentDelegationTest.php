@@ -585,7 +585,7 @@ test('public endpoint GET /agents/{id}/listings returns only published listings 
         'bailleur_id' => $landlord->id,
         'agent_id' => $agent->id,
         'listing_id' => $expiredListing->id,
-        'status' => DelegationStatus::Active,
+        'status' => DelegationStatus::Expired,
         'capabilities' => [DelegationCapability::Visits->value],
         'invited_at' => now()->subMonths(2),
         'answered_at' => now()->subMonths(2),
