@@ -6,10 +6,12 @@ use App\Enums\Support\AppealStatus;
 use App\Models\Admin\AdminSession;
 use App\Models\Auth\Role;
 use App\Models\Support\ModerationAppeal;
+use App\Models\Support\UserAccountSanction;
 use App\Models\User;
 use Database\Seeders\ModerationRuleSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Laravel\Passport\Passport;
 
 uses(RefreshDatabase::class);
 
@@ -156,4 +158,90 @@ it('prevents resolving an already processed appeal', function () {
         ]);
 
     $response->assertStatus(422);
+});
+
+it('revokes a warning sanction upon approved appeal and clears account restriction', function () {
+    [$operatorA] = createAppealsSession('moderation');
+    [$operatorB, $sessionB, $csrfB] = createAppealsSession('moderation');
+
+    $user = User::factory()->create([
+        'status' => 'active',
+        'restricted_until' => now()->addDays(7),
+    ]);
+
+    $sanction = UserAccountSanction::create([
+        'user_id' => $user->id,
+        'operator_id' => $operatorA->id,
+        'type' => 'warning',
+        'level' => 3,
+        'reason' => 'Comportement non conforme',
+        'is_active' => true,
+        'starts_at' => now(),
+        'ends_at' => now()->addDays(7),
+    ]);
+
+    $appeal = ModerationAppeal::create([
+        'user_id' => $user->id,
+        'sanction_type' => 'warning',
+        'sanction_reference' => (string) $sanction->id,
+        'sanction_operator_id' => $operatorA->id,
+        'reason' => 'Erreur manifeste',
+        'explanation' => 'Je n\'ai commis aucun manquement aux règles.',
+        'status' => AppealStatus::Pending,
+    ]);
+
+    // L'opérateur B approuve le recours (revoked)
+    $response = $this->withUnencryptedCookie('bango_admin_session', $sessionB)
+        ->withHeader('X-CSRF-TOKEN', $csrfB)
+        ->postJson("/api/admin/moderation/appeals/{$appeal->reference}/resolution", [
+            'resolution' => 'revoked',
+            'decision_notes' => 'Avertissement annulé suite aux explications fournies.',
+        ]);
+
+    $response->assertStatus(200)
+        ->assertJsonPath('data.resolution', 'revoked')
+        ->assertJsonPath('data.status', AppealStatus::Approved->value);
+
+    $sanction->refresh();
+    expect($sanction->is_active)->toBeFalse()
+        ->and($sanction->lifted_at)->not->toBeNull()
+        ->and($sanction->lifted_by_id)->toBe($operatorB->id)
+        ->and($sanction->lift_reason)->toBe('Avertissement annulé suite aux explications fournies.');
+
+    $user->refresh();
+    expect($user->restricted_until)->toBeNull();
+
+    // Vérifier l'API mobile GET /api/support/sanctions/mine
+    Passport::actingAs($user);
+    $mySanctions = $this->getJson('/api/support/sanctions/mine')->assertOk();
+    $mySanctions->assertJsonPath('data.0.is_active', false)
+        ->assertJsonPath('data.0.lifted_at', $sanction->lifted_at->toIso8601String());
+});
+
+it('allows admin to lift a warning directly via admin warnings lift route', function () {
+    [$operator, $sessionId, $csrfToken] = createAppealsSession('support');
+    $user = User::factory()->create(['status' => 'active', 'restricted_until' => now()->addDays(7)]);
+
+    $sanction = UserAccountSanction::create([
+        'user_id' => $user->id,
+        'operator_id' => $operator->id,
+        'type' => 'warning',
+        'level' => 1,
+        'reason' => 'Avertissement mineur',
+        'is_active' => true,
+    ]);
+
+    $response = $this->withUnencryptedCookie('bango_admin_session', $sessionId)
+        ->withHeader('X-CSRF-TOKEN', $csrfToken)
+        ->postJson("/api/admin/accounts/{$user->id}/warnings/{$sanction->id}/lift", [
+            'reason' => 'Levée manuelle par l\'administrateur après vérification',
+        ]);
+
+    $response->assertStatus(200)
+        ->assertJsonPath('success', true);
+
+    $sanction->refresh();
+    expect($sanction->is_active)->toBeFalse()
+        ->and($sanction->lifted_at)->not->toBeNull()
+        ->and($sanction->lifted_by_id)->toBe($operator->id);
 });

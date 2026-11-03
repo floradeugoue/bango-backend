@@ -229,7 +229,7 @@ class ModerationQueueService
         User $operator,
         array $metadata = []
     ): ModerationDecision {
-        $allowedActions = ['keep_online', 'hide', 'remove', 'warn_author', 'suspend_author'];
+        $allowedActions = ['keep_online', 'hide', 'remove', 'warn_author', 'suspend_author', 'restrict_author', 'restriction'];
         if (! in_array($action, $allowedActions, true)) {
             throw new InvalidArgumentException("Action de modération '{$action}' invalide.");
         }
@@ -266,23 +266,120 @@ class ModerationQueueService
             if ($content) {
                 switch ($action) {
                     case 'remove':
-                        // Soft delete si supporté (mais ne jamais supprimer un compte utilisateur via 'remove')
-                        if (! ($content instanceof User) && method_exists($content, 'delete')) {
-                            $content->delete();
+                    case 'hide':
+                        // 1. Extraire le texte (quote), l'emplacement (where) et la règle
+                        $quote = $metadata['quote'] ?? ($content->body ?? $content->description ?? $content->title ?? $content->content ?? null);
+                        $where = $metadata['where'] ?? Report::resolveShortType(get_class($content));
+                        $rule = $metadata['rule'] ?? ($lockedReport->reason?->value ?? (string) $lockedReport->reason);
+                        $ruleBody = $metadata['rule_body'] ?? ($lockedReport->reason instanceof ReportReason ? $lockedReport->reason->label() : $justification);
+
+                        // 2. Action sur le contenu
+                        if ($action === 'remove') {
+                            if (! ($content instanceof User) && method_exists($content, 'delete')) {
+                                $content->delete();
+                            }
+                        } else {
+                            if ($content instanceof Listing) {
+                                $content->status = ListingStatus::Draft;
+                                $content->rejection_reason = $justification;
+                                $content->save();
+                            } elseif (isset($content->is_archived)) {
+                                $content->is_archived = true;
+                                $content->save();
+                            } elseif (isset($content->status)) {
+                                $content->status = 'rejected';
+                                $content->save();
+                            }
+                        }
+
+                        // 3. Notifier l'auteur et enregistrer la sanction content_removal pour l'écran SUP-20
+                        $authorId = $content->user_id ?? ($content instanceof User ? $content->id : null);
+                        if ($authorId) {
+                            $author = User::find($authorId);
+                            if ($author) {
+                                UserAccountSanction::create([
+                                    'user_id' => $author->id,
+                                    'operator_id' => $operator->id,
+                                    'type' => 'content_removal',
+                                    'level' => 1,
+                                    'starts_at' => now(),
+                                    'reason' => $justification,
+                                    'is_active' => true,
+                                    'metadata' => [
+                                        'report_reference' => $lockedReport->reference,
+                                        'target_type' => $lockedReport->reportable_type,
+                                        'target_id' => $lockedReport->reportable_id,
+                                        'quote' => $quote,
+                                        'where' => $where,
+                                        'rule' => $rule,
+                                        'rule_body' => $ruleBody,
+                                    ],
+                                ]);
+
+                                try {
+                                    $author->notify(new ModerationDecisionNotification($lockedReport, $action, $justification));
+                                } catch (\Throwable $e) {
+                                    Log::warning("Échec notification {$action} contenu auteur : ".$e->getMessage());
+                                }
+                            }
                         }
                         break;
 
-                    case 'hide':
-                        if ($content instanceof Listing) {
-                            $content->status = ListingStatus::Draft;
-                            $content->rejection_reason = $justification;
-                            $content->save();
-                        } elseif (isset($content->is_archived)) {
-                            $content->is_archived = true;
-                            $content->save();
-                        } elseif (isset($content->status)) {
-                            $content->status = 'rejected';
-                            $content->save();
+                    case 'restrict_author':
+                    case 'restriction':
+                        $durationDays = (int) ($metadata['duration_days'] ?? 7);
+                        $restrictedUntil = now()->addDays($durationDays);
+                        $authorId = $content->user_id ?? ($content instanceof User ? $content->id : null);
+
+                        if ($authorId) {
+                            $author = User::find($authorId);
+                            if ($author) {
+                                // SUP-21 : Restreindre sans toucher au statut (status reste actif/inchangé)
+                                $author->restricted_until = $restrictedUntil;
+                                $author->save();
+
+                                UserAccountSanction::create([
+                                    'user_id' => $author->id,
+                                    'operator_id' => $operator->id,
+                                    'type' => 'restriction',
+                                    'level' => 2,
+                                    'duration_days' => $durationDays,
+                                    'starts_at' => now(),
+                                    'ends_at' => $restrictedUntil,
+                                    'reason' => $justification,
+                                    'is_active' => true,
+                                    'metadata' => [
+                                        'report_reference' => $lockedReport->reference,
+                                        'target_type' => $lockedReport->reportable_type,
+                                        'target_id' => $lockedReport->reportable_id,
+                                        'restricted_until' => $restrictedUntil->toIso8601String(),
+                                        'quote' => $metadata['quote'] ?? ($content->body ?? $content->description ?? $content->title ?? null),
+                                        'where' => $metadata['where'] ?? Report::resolveShortType(get_class($content)),
+                                        'rule' => $metadata['rule'] ?? ($lockedReport->reason?->value ?? (string) $lockedReport->reason),
+                                        'rule_body' => $metadata['rule_body'] ?? ($lockedReport->reason instanceof ReportReason ? $lockedReport->reason->label() : $justification),
+                                    ],
+                                ]);
+
+                                try {
+                                    $author->notify(new ModerationDecisionNotification($lockedReport, 'restriction', $justification, $restrictedUntil));
+                                } catch (\Throwable $e) {
+                                    Log::warning('Échec notification restriction auteur : '.$e->getMessage());
+                                }
+                            }
+                        }
+
+                        // Masquer ou retirer le contenu incriminé
+                        if (! ($content instanceof User)) {
+                            if ($content instanceof Listing) {
+                                $content->status = ListingStatus::Draft;
+                                $content->rejection_reason = $justification;
+                                $content->save();
+                            } elseif (isset($content->is_archived)) {
+                                $content->is_archived = true;
+                                $content->save();
+                            } elseif (method_exists($content, 'delete')) {
+                                $content->delete();
+                            }
                         }
                         break;
 
@@ -382,8 +479,8 @@ class ModerationQueueService
                     ->get();
 
                 foreach ($campaigns as $campaign) {
-                    // Arrêt ou suspension de la campagne
-                    $this->campaignService->suspendCampaign($campaign, 'moderation');
+                    // Arrêt ou suspension de la campagne (sans restitution automatique pour respecter metadata['refund_credits'])
+                    $this->campaignService->suspendCampaign($campaign, 'moderation', false);
 
                     // Restitution de crédits si expressément autorisée dans les métadonnées de décision
                     if (! empty($metadata['refund_credits']) && $metadata['refund_credits'] === true) {

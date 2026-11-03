@@ -331,6 +331,26 @@ it('cancels auto-renewal while keeping benefits until period end', function () {
     expect($sub->auto_renew)->toBeFalse()
         ->and($sub->cancel_reason)->toBe('Logement loué')
         ->and($sub->isActive())->toBeTrue(); // Still active until period end!
+
+    // 2. Resume auto-renewal before period end without paying again
+    $resumeRes = postJson("/api/subscriptions/{$sub->id}/resume");
+
+    $resumeRes->assertStatus(200)
+        ->assertJsonPath('auto_renew', true)
+        ->assertJsonStructure(['auto_renew', 'expires_at', 'message']);
+
+    $sub->refresh();
+    expect($sub->auto_renew)->toBeTrue()
+        ->and($sub->cancel_reason)->toBeNull()
+        ->and($sub->canceled_at)->toBeNull()
+        ->and($sub->next_renewal)->not->toBeNull()
+        ->and($sub->next_renewal->toIso8601String())->toBe($sub->current_period_end->toIso8601String());
+
+    // 3. Resuming an already expired subscription returns 422
+    $sub->update(['current_period_end' => now()->subDay(), 'state' => 'expired']);
+    postJson("/api/subscriptions/{$sub->id}/resume")
+        ->assertStatus(422)
+        ->assertJsonPath('message', 'Impossible de réactiver la reconduction automatique : cet abonnement est expiré.');
 });
 
 it('admin can suspend, reactivate, extend, and revoke subscriptions with audit events', function () {
@@ -475,11 +495,11 @@ it('DatabaseSeeder seeds subscription catalog idempotently without duplicates', 
     $this->seed(DatabaseSeeder::class);
 
     expect(SubscriptionProduct::count())->toBe(4)
-        ->and(SubscriptionPrice::count())->toBe(6);
+        ->and(SubscriptionPrice::count())->toBe(7);
 
     // Re-run again to ensure no duplicate products or prices are created
     $this->seed(DatabaseSeeder::class);
 
     expect(SubscriptionProduct::count())->toBe(4)
-        ->and(SubscriptionPrice::count())->toBe(6);
+        ->and(SubscriptionPrice::count())->toBe(7);
 });

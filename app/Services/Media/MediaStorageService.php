@@ -491,10 +491,29 @@ class MediaStorageService
 
         $url = $this->getUrl($path, $disk);
 
+        $renditions = null;
+        $posterUrl = null;
+        $originalUrl = $url;
+        $playbackUrl = $url;
+
+        if ($isVideo) {
+            /** @var VideoTranscodingService $transcoder */
+            $transcoder = app(VideoTranscodingService::class);
+            $transcoded = $transcoder->transcode($path, 'square/renditions', $user->id, $disk);
+
+            $renditions = $transcoded['renditions'];
+            $posterUrl = $transcoded['poster_url'];
+            $playbackUrl = $transcoded['default_url'];
+        }
+
         return [
             'id' => $uniqueId,
             'path' => $path,
-            'url' => $url,
+            'url' => $playbackUrl,
+            'original_url' => $originalUrl,
+            'poster_url' => $posterUrl,
+            'posterUrl' => $posterUrl,
+            'renditions' => $renditions,
             'type' => $kind->value,
             'mime_type' => $mime,
             'file_size' => $size,
@@ -1091,12 +1110,21 @@ class MediaStorageService
         $directory = $this->pathFor('listings_videos', ['user_id' => $user->id]);
 
         $path = $file->storeAs($directory, $fileName, $disk);
-        $url = $this->getUrl($path, $disk);
+        $originalUrl = $this->getUrl($path, $disk);
+
+        /** @var VideoTranscodingService $transcoder */
+        $transcoder = app(VideoTranscodingService::class);
+        $transcoded = $transcoder->transcode($path, 'listings/renditions', $user->id, $disk);
 
         return [
             'id' => $uniqueId,
             'path' => $path,
-            'url' => $url,
+            'url' => $transcoded['default_url'],
+            'original_url' => $originalUrl,
+            'poster_url' => $transcoded['poster_url'],
+            'posterUrl' => $transcoded['poster_url'],
+            'thumbnail_url' => $transcoded['poster_url'],
+            'renditions' => $transcoded['renditions'],
             'type' => 'video',
             'mime_type' => $mime,
             'file_size' => $size,

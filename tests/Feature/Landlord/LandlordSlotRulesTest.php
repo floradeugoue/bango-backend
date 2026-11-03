@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\Visit\VisitSlotStatus;
 use App\Models\Landlord\LandlordSlotRule;
 use App\Models\Landlord\LandlordUnavailability;
 use App\Models\Listing\Listing;
@@ -7,7 +8,6 @@ use App\Models\User;
 use App\Models\Visit\VisitReservation;
 use App\Models\Visit\VisitSlot;
 use App\Services\Visit\VisitSlotService;
-use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Passport\Passport;
 
@@ -128,7 +128,7 @@ test('reservation is auto_confirmed when auto_confirm is enabled', function () {
         'end_at' => now()->addDay()->setHour(14)->setMinute(30),
         'capacity' => 1,
         'booked_count' => 0,
-        'status' => \App\Enums\Visit\VisitSlotStatus::Open,
+        'status' => VisitSlotStatus::Open,
     ]);
 
     Passport::actingAs($this->prospect);

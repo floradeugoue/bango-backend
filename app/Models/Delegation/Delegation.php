@@ -106,10 +106,6 @@ class Delegation extends Model
             return false;
         }
 
-        if ($this->expires_at !== null && $this->expires_at->isPast()) {
-            return false;
-        }
-
         return true;
     }
 
@@ -129,10 +125,7 @@ class Delegation extends Model
     public function scopeActive(Builder $query): Builder
     {
         return $query->where('status', DelegationStatus::Active->value)
-            ->whereNull('revoked_at')
-            ->where(function (Builder $q) {
-                $q->whereNull('expires_at')->orWhere('expires_at', '>', now());
-            });
+            ->whereNull('revoked_at');
     }
 
     public function scopePending(Builder $query): Builder

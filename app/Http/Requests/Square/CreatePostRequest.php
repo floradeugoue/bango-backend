@@ -48,6 +48,8 @@ class CreatePostRequest extends FormRequest
             // Carrousel de médias (1..10)
             'media' => ['nullable', 'array', 'max:10'],
             'media.*.url' => ['required_with:media', 'string', 'max:2048'],
+            'media.*.poster_url' => ['nullable', 'string', 'max:2048'],
+            'media.*.posterUrl' => ['nullable', 'string', 'max:2048'],
             'media.*.type' => ['nullable', 'string', Rule::in(PostMediaKind::values())],
             'media.*.mime_type' => ['nullable', 'string', 'max:100'],
             'media.*.file_size' => ['nullable', 'integer', 'min:0'],
@@ -55,7 +57,21 @@ class CreatePostRequest extends FormRequest
             'media.*.height' => ['nullable', 'integer', 'min:0'],
             'media.*.duration' => ['nullable', 'integer', 'min:0'],
             'media.*.display_order' => ['nullable', 'integer', 'min:0', 'max:9'],
+            'media.*.displayOrder' => ['nullable', 'integer', 'min:0', 'max:9'],
             'media.*.edit_metadata' => ['nullable', 'array'],
+            'media.*.edit_metadata.trim' => ['nullable', 'array'],
+            'media.*.edit_metadata.trim.start_ms' => ['nullable', 'integer', 'min:0'],
+            'media.*.edit_metadata.trim.startMs' => ['nullable', 'integer', 'min:0'],
+            'media.*.edit_metadata.trim.end_ms' => ['nullable', 'integer', 'min:0'],
+            'media.*.edit_metadata.trim.endMs' => ['nullable', 'integer', 'min:0'],
+            'media.*.edit_metadata.cover_ms' => ['nullable', 'integer', 'min:0'],
+            'media.*.edit_metadata.coverMs' => ['nullable', 'integer', 'min:0'],
+            'media.*.edit_metadata.sound' => ['nullable', 'array'],
+            'media.*.edit_metadata.sound.id' => ['nullable', 'string', 'max:100'],
+            'media.*.edit_metadata.sound.sound_id' => ['nullable', 'string', 'max:100'],
+            'media.*.edit_metadata.sound.soundId' => ['nullable', 'string', 'max:100'],
+            'media.*.edit_metadata.sound.start_ms' => ['nullable', 'integer', 'min:0'],
+            'media.*.edit_metadata.sound.startMs' => ['nullable', 'integer', 'min:0'],
 
             // Tags de personnes identifiées
             'tags' => ['nullable', 'array'],
@@ -85,6 +101,17 @@ class CreatePostRequest extends FormRequest
                 $url = trim((string) ($item['url'] ?? ''));
                 if (! empty($url) && ! $this->isAllowedMediaUrl($url)) {
                     $validator->errors()->add("media.{$index}.url", 'L\'URL du média doit provenir du service de téléversement BANGO (media/upload).');
+                }
+
+                // Validation de la plage de découpage vidéo (trim)
+                $trim = $item['edit_metadata']['trim'] ?? null;
+                if (is_array($trim)) {
+                    $startMs = $trim['start_ms'] ?? $trim['startMs'] ?? null;
+                    $endMs = $trim['end_ms'] ?? $trim['endMs'] ?? null;
+
+                    if ($startMs !== null && $endMs !== null && (int) $endMs <= (int) $startMs) {
+                        $validator->errors()->add("media.{$index}.edit_metadata.trim", 'La fin du découpage (end_ms) doit être strictement supérieure au début (start_ms).');
+                    }
                 }
             }
         });
@@ -153,6 +180,24 @@ class CreatePostRequest extends FormRequest
             ];
         }
 
+        // Normalisation des médias
+        $rawMedia = $data['media'] ?? [];
+        $normalizedMedia = [];
+        foreach ($rawMedia as $index => $item) {
+            $normalizedMedia[] = [
+                'url' => $item['url'],
+                'poster_url' => $item['poster_url'] ?? $item['posterUrl'] ?? null,
+                'type' => $item['type'] ?? PostMediaKind::Photo->value,
+                'mime_type' => $item['mime_type'] ?? null,
+                'file_size' => $item['file_size'] ?? null,
+                'width' => $item['width'] ?? null,
+                'height' => $item['height'] ?? null,
+                'duration' => $item['duration'] ?? null,
+                'display_order' => $item['display_order'] ?? $item['displayOrder'] ?? $index,
+                'edit_metadata' => $item['edit_metadata'] ?? null,
+            ];
+        }
+
         return [
             'body' => $body,
             'audience' => $data['audience'] ?? PostAudience::Public->value,
@@ -162,7 +207,7 @@ class CreatePostRequest extends FormRequest
             'hide_likes' => (bool) $hideLikes,
             'as_page_id' => $asPageId ? (int) $asPageId : null,
             'place' => $data['place'] ?? null,
-            'media' => $data['media'] ?? [],
+            'media' => $normalizedMedia,
             'tags' => $normalizedTags,
             'idempotency_key' => $idempotencyKey,
         ];

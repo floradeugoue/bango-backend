@@ -63,14 +63,21 @@ class SubscriptionController extends Controller
 
         $status = $service->resolveUserBadges($user);
 
-        // Fetch active subscriptions details
-        $activeSubs = $user->activeSubscriptions()
-            ->with('price')
-            ->get();
+        // Récupérer les abonnements actifs, en période de grâce, ou expirés/résiliés
+        // Pour chaque type de badge, prioriser l'abonnement actif s'il existe, sinon le plus récent
+        $subscriptions = $user->subscriptions()
+            ->with(['price', 'product', 'page'])
+            ->whereIn('state', ['active', 'grace', 'expired', 'canceled'])
+            ->orderByRaw("CASE WHEN state = 'active' THEN 1 WHEN state = 'grace' THEN 2 WHEN state = 'expired' THEN 3 ELSE 4 END")
+            ->orderByDesc('current_period_end')
+            ->orderByDesc('created_at')
+            ->get()
+            ->unique('badge_type')
+            ->values();
 
         return response()->json([
             'status' => $status,
-            'subscriptions' => SubscriptionResource::collection($activeSubs),
+            'subscriptions' => SubscriptionResource::collection($subscriptions),
         ]);
     }
 
@@ -265,6 +272,37 @@ class SubscriptionController extends Controller
             'message' => 'Abonnement résilié avec succès. Vos avantages restent valables jusqu\'au '.$canceled->current_period_end->format('d/m/Y').'.',
             'auto_renew' => false,
             'expires_at' => $canceled->current_period_end->toIso8601String(),
+        ], 200);
+    }
+
+    /**
+     * Resume an active subscription auto-renewal before expiration.
+     */
+    public function resume(Request $request, int $id, SubscriptionService $service): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $subscription = $user->subscriptions()->find($id);
+
+        if (! $subscription) {
+            return response()->json(['message' => 'Abonnement introuvable.'], 404);
+        }
+
+        if (! $subscription->current_period_end || $subscription->current_period_end->isPast()) {
+            return response()->json([
+                'message' => 'Impossible de réactiver la reconduction automatique : cet abonnement est expiré.',
+            ], 422);
+        }
+
+        $resumed = $service->resumeSubscription($subscription, $user);
+
+        return response()->json([
+            'message' => 'Reconduction automatique réactivée avec succès. Prochain renouvellement le '.$resumed->current_period_end->format('d/m/Y').'.',
+            'auto_renew' => true,
+            'expires_at' => $resumed->current_period_end->toIso8601String(),
+            'subscription' => new SubscriptionResource($resumed->load(['product', 'price', 'page'])),
+            'data' => new SubscriptionResource($resumed->load(['product', 'price', 'page'])),
         ], 200);
     }
 

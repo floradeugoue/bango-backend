@@ -2,7 +2,6 @@
 
 namespace App\Services\Notification;
 
-use App\Http\Controllers\Settings\NotificationSettingsController;
 use App\Models\Notification\DeviceToken;
 use App\Models\User;
 use Illuminate\Support\Collection;
@@ -169,34 +168,11 @@ class PushNotificationService
 
     /**
      * Vérifie si le push est autorisé selon les préférences utilisateur (ST-17).
+     * Délègue à NotificationPreferenceService pour une application unifiée de toutes les règles et exemptions.
      */
     public function isPushAllowedForUser(User $user, ?string $type = null): bool
     {
-        $saved = $user->privacy_settings['notifications'] ?? [];
-        $settings = array_merge(NotificationSettingsController::DEFAULT_SETTINGS, $saved);
-
-        // Si le push global est désactivé
-        if (isset($settings['push_enabled']) && ! $settings['push_enabled']) {
-            return false;
-        }
-
-        if (empty($type)) {
-            return true;
-        }
-
-        // Vérification par sous-catégorie
-        return match ($type) {
-            'like' => (bool) ($settings['likes'] ?? true),
-            'comment', 'reply' => (bool) ($settings['comments'] ?? true),
-            'follow', 'follow_request' => (bool) ($settings['new_followers'] ?? true),
-            'new_message', 'new_story_reply', 'added_to_group' => (bool) ($settings['direct_messages'] ?? true),
-            'mention' => (bool) ($settings['mentions'] ?? true),
-            'story_question_answer', 'countdown_remind' => (bool) ($settings['stories'] ?? true),
-            'new_matching_listing', 'listing_decision' => (bool) ($settings['listings'] ?? true),
-            'visit_requested', 'visit_confirmed', 'visit_cancelled', 'visit_declined', 'visit_proposed' => (bool) ($settings['visits'] ?? true),
-            // Notifications transactionnelles / compte (KYC, Paiements, Boost, etc.) : autorisées dès lors que push_enabled est true
-            default => true,
-        };
+        return app(NotificationPreferenceService::class)->isPushAllowed($user, $type ?? 'general');
     }
 
     /**

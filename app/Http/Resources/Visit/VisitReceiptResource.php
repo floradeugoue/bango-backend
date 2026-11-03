@@ -21,12 +21,12 @@ class VisitReceiptResource extends JsonResource
             'reservation_id' => $this->id,
             'payment_reference' => $this->payment_reference,
             'short_reference' => $this->short_reference,
-            'prospect' => [
-                'name' => $this->prospect->display_name ?: $this->prospect->name,
-                'handle' => $this->prospect->handle,
-                'email' => $this->prospect->email,
-                'phone' => $this->prospect_phone ?? $this->prospect->phone,
-            ],
+            'prospect' => $this->prospect ? [
+                'name' => $this->prospect?->display_name ?: $this->prospect?->name,
+                'handle' => $this->prospect?->handle,
+                'email' => $this->prospect?->email,
+                'phone' => $this->prospect_phone ?? $this->prospect?->phone,
+            ] : null,
             'listing' => [
                 'id' => $this->listing->id,
                 'title' => $this->listing->title,

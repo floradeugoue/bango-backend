@@ -4,6 +4,7 @@ namespace App\Http\Resources\Message;
 
 use App\Enums\Message\ConversationMemberRole;
 use App\Models\Message\ConversationMember;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -17,14 +18,23 @@ class ConversationMemberResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        $viewer = $request->user();
+        $isSelf = $viewer && (int) $this->user_id === (int) $viewer->id;
+        $viewerAllowsReceipts = $viewer ? $viewer->hasReadReceiptsEnabled() : true;
+
+        $memberUser = $this->relationLoaded('user') ? $this->user : User::find($this->user_id);
+        $memberAllowsReceipts = $memberUser ? $memberUser->hasReadReceiptsEnabled() : true;
+
+        $canExposeReadReceipts = $isSelf || ($viewerAllowsReceipts && $memberAllowsReceipts);
+
         return [
             'id' => $this->id,
             'user_id' => $this->user_id,
             'role' => $this->role->value,
             'is_admin' => $this->role === ConversationMemberRole::Admin,
             'is_muted' => (bool) $this->is_muted,
-            'last_read_message_id' => $this->last_read_message_id,
-            'last_read_at' => $this->last_read_at?->toIso8601String(),
+            'last_read_message_id' => $canExposeReadReceipts ? $this->last_read_message_id : null,
+            'last_read_at' => $canExposeReadReceipts ? $this->last_read_at?->toIso8601String() : null,
             'last_delivered_at' => $this->last_delivered_at?->toIso8601String(),
             'joined_at' => $this->joined_at?->toIso8601String(),
             'user' => $this->whenLoaded('user', function () {

@@ -19,6 +19,7 @@ class PrivacyController extends Controller
         'onlineStatus' => true,
         'readReceipts' => true,
         'ads_personalization' => true,
+        'ads_decided_at' => null,
         'showNeighbourhood' => true,
         'showFollowing' => true,
     ];
@@ -63,6 +64,10 @@ class PrivacyController extends Controller
 
         $currentSettings = $user->privacy_settings ?? self::DEFAULT_PRIVACY;
         $updatedSettings = array_merge($currentSettings, $validated);
+
+        if ($request->has('ads_personalization')) {
+            $updatedSettings['ads_decided_at'] = now()->toIso8601String();
+        }
 
         if ($request->has('privateAccount')) {
             $user->is_private = $request->boolean('privateAccount');

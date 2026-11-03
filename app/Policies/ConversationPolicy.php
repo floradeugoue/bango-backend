@@ -51,6 +51,19 @@ class ConversationPolicy
             return false;
         }
 
+        if ($conversation->type === ConversationType::Direct) {
+            $peerMember = $conversation->members()->where('user_id', '!=', $user->id)->first();
+            if ($peerMember) {
+                $peer = $peerMember->relationLoaded('user') ? $peerMember->user : User::find($peerMember->user_id);
+                if ($peer && ! $peer->canBeMessagedBy($user)) {
+                    $hasPeerMessaged = $conversation->messages()->where('sender_id', $peer->id)->exists();
+                    if (! $hasPeerMessaged) {
+                        return false;
+                    }
+                }
+            }
+        }
+
         return $conversation->isMember($user->id);
     }
 

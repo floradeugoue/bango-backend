@@ -30,6 +30,11 @@ class PostPolicy
             return true;
         }
 
+        // Vérification de la confidentialité seePosts de l'auteur et statut de compte privé
+        if ($author && ! $author->canPostsBeSeenBy($user)) {
+            return false;
+        }
+
         // Si l'un des deux utilisateurs a bloqué l'autre, l'accès est refusé
         if ($user && ($user->hasBlocked($post->user_id) || $user->isBlockedBy($post->user_id))) {
             return false;

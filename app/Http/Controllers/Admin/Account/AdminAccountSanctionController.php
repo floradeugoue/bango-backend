@@ -101,6 +101,31 @@ class AdminAccountSanctionController extends Controller
     }
 
     /**
+     * 5.7 bis. Levée d'un avertissement formel.
+     *
+     * POST /api/admin/accounts/{id}/warnings/lift
+     * POST /api/admin/accounts/{id}/warnings/{sanctionId}/lift
+     */
+    public function liftWarning(AdminAccountLiftSuspensionRequest $request, int|string $id, int|string|null $sanctionId = null): JsonResponse
+    {
+        $user = User::findOrFail($id);
+        $operator = $request->user();
+
+        $sanction = $this->accountService->liftWarning(
+            user: $user,
+            operator: $operator,
+            sanctionId: $sanctionId ?? $request->input('sanction_id'),
+            reason: $request->input('reason')
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Avertissement levé avec succès.',
+            'data' => $sanction,
+        ]);
+    }
+
+    /**
      * 5.8. Prolongation commerciale de badge.
      *
      * POST /api/admin/accounts/{id}/badge/extend

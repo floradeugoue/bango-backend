@@ -11,6 +11,8 @@ use App\Http\Controllers\Auth\ForgotPasswordController;
 use App\Http\Controllers\Auth\LogoutController;
 use App\Http\Controllers\Auth\ResetPasswordController;
 use App\Http\Controllers\Auth\SecondFactorController;
+use App\Http\Controllers\Auth\SignedOutAppealController;
+use App\Http\Controllers\Auth\SignedOutSupportTicketController;
 use App\Http\Controllers\Auth\SigninController;
 use App\Http\Controllers\Auth\SignupController;
 use App\Http\Controllers\Auth\SocialAuthController;
@@ -190,6 +192,10 @@ Route::prefix('auth')->group(function () {
 
     // État d'un compte suspendu ou supprimé (écrans AU-26 / AU-27)
     Route::post('/account-state', AccountStateController::class);
+    // Recours contre une suspension, sans session (identifiant + mot de passe)
+    Route::post('/appeal', SignedOutAppealController::class);
+    // Ticket de support d'un compte suspendu ou supprimé, sans session
+    Route::post('/support-ticket', SignedOutSupportTicketController::class);
 
     // Restaurer un compte supprimé (soft delete)
     Route::post('/restore-account', [AccountController::class, 'restore']);
@@ -369,7 +375,9 @@ Route::get('/system/version', AppVersionController::class)->name('api.system.ver
 // TRADUCTION DE CONTENUS (Publications, Reels, Commentaires)
 // --------------------------------------------------------------------------
 // Traduire à la demande un texte de publication, légende de reel ou commentaire
-Route::post('/translate', [TranslationController::class, 'translate'])->name('api.translate');
+Route::post('/translate', [TranslationController::class, 'translate'])
+    ->middleware('throttle:60,1')
+    ->name('api.translate');
 
 // --------------------------------------------------------------------------
 // SESSION (Requiert un Token Passport valide)
@@ -526,7 +534,7 @@ Route::middleware('auth:api')->group(function () {
 
         // Enregistrer ou mettre à jour un brouillon d'annonce (CR-40 à CR-48)
         // Ressource : Listing (draft) | Accès : Authentifié (propriétaire uniquement)
-        Route::post('/form/draft', [ListingDraftController::class, 'store'])->name('api.listings.draft.store');
+        Route::post('/form/draft', [ListingDraftController::class, 'store'])->middleware('terms.accepted')->name('api.listings.draft.store');
 
         // Consulter ou reprendre le brouillon actif de l'utilisateur connecté
         // Ressource : Listing (draft) | Accès : Authentifié | Retourne null si aucun brouillon
@@ -555,7 +563,7 @@ Route::middleware('auth:api')->group(function () {
 
         // Créer et soumettre une annonce en modération (CR-39 à CR-48)
         // Ressource : Listing | Accès : Authentifié + Badge vérifié (bailleur, agent, double) ou Admin
-        Route::post('/', [ListingController::class, 'store'])->name('api.listings.store');
+        Route::post('/', [ListingController::class, 'store'])->middleware('terms.accepted')->name('api.listings.store');
 
         // Sauvegarder ou basculer l'état favori d'une annonce (idempotent, IM-16)
         // Ressource : ListingSave | Accès : Authentifié | Empêche les doublons concurrents
@@ -573,7 +581,7 @@ Route::middleware('auth:api')->group(function () {
 
         // Mettre à jour les informations (titre, prix, charges) sans relancer l'examen vidéo (CR-48)
         // Ressource : Listing | Accès : Authentifié (propriétaire, agent délégué ou admin)
-        Route::patch('/{id}', [ListingController::class, 'update'])->whereUuid('id')->name('api.listings.update');
+        Route::match(['put', 'patch'], '/{id}', [ListingController::class, 'update'])->whereUuid('id')->name('api.listings.update');
 
         // Retirer / supprimer une annonce de la plateforme (EDGE-03)
         // Ressource : Listing | Accès : Authentifié (propriétaire ou admin)
@@ -607,7 +615,7 @@ Route::middleware('auth:api')->group(function () {
         // Lister les commentaires publiés sur une annonce immobilière
         Route::get('/{id}/comments', [ListingCommentController::class, 'index'])->whereUuid('id')->name('api.listings.comments.index');
         // Publier un nouveau commentaire ou une question sur une annonce immobilière
-        Route::post('/{id}/comments', [ListingCommentController::class, 'store'])->whereUuid('id')->name('api.listings.comments.store');
+        Route::post('/{id}/comments', [ListingCommentController::class, 'store'])->middleware('terms.accepted')->whereUuid('id')->name('api.listings.comments.store');
         // Supprimer un commentaire sur une annonce immobilière (réservé à l'auteur ou au bailleur)
         Route::delete('/{id}/comments/{commentId}', [ListingCommentController::class, 'destroy'])->whereUuid('id')->name('api.listings.comments.destroy');
     });
@@ -654,6 +662,8 @@ Route::middleware('auth:api')->group(function () {
         // KYC Bailleur (accessible à tout utilisateur authentifié pour soumission de dossier)
         // Soumettre un dossier de vérification d'identité (KYC) pour le badge bailleur
         Route::post('/kyc/submit', [LandlordKycController::class, 'submit'])->name('api.landlord.kyc.submit');
+        // Remplacer une pièce ou apporter un complément sur le même dossier KYC
+        Route::post('/kyc/supplement', [LandlordKycController::class, 'submitSupplement'])->name('api.landlord.kyc.supplement');
         // Consulter l'état d'avancement et le statut du dossier KYC bailleur
         Route::get('/kyc', [LandlordKycController::class, 'show'])->name('api.landlord.kyc.show');
         // Télécharger ou visualiser une pièce justificative du dossier KYC bailleur
@@ -663,11 +673,11 @@ Route::middleware('auth:api')->group(function () {
         // Lister les justificatifs de propriété du bailleur avec leur état
         Route::get('/kyc/property-deeds', [LandlordKycController::class, 'listPropertyDeeds'])->name('api.landlord.kyc.property-deeds.index');
 
+        // Tableau de bord des biens possédés par le bailleur (BL-01) - Accessible en lecture même si le badge a expiré
+        Route::get('/properties', [LandlordPropertyController::class, 'index'])->name('api.landlord.properties.index');
+
         // Actions réservées au bailleur certifié avec badge actif
         Route::middleware('subscribed:landlord')->group(function () {
-            // Tableau de bord des biens possédés par le bailleur (BL-01)
-            Route::get('/properties', [LandlordPropertyController::class, 'index'])->name('api.landlord.properties.index');
-
             // Inviter un agent pour un bien déterminé (AG-02)
             Route::post('/delegations', [LandlordDelegationController::class, 'store'])->name('api.landlord.delegations.store');
         });
@@ -853,6 +863,8 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/{id}/change-plan', [SubscriptionController::class, 'changePlan']);
         // Résilier le renouvellement automatique d'un abonnement
         Route::post('/{id}/cancel', [SubscriptionController::class, 'cancel']);
+        // Rétablir la reconduction automatique d'un abonnement (annuler la résiliation)
+        Route::post('/{id}/resume', [SubscriptionController::class, 'resume']);
 
         // --------------------------------------------------------------------------
         // PHASE 6 : RENOUVELLEMENT MANUEL ASSISTÉ (Info, Devis Certifié & Confirmation)
@@ -933,7 +945,7 @@ Route::middleware('auth:api')->group(function () {
     // Alias racine pour lister les commentaires d'une publication
     Route::get('/posts/{post}/comments', [PostCommentController::class, 'index'])->name('api.posts.comments.index.alias');
     // Alias racine pour ajouter un commentaire sur une publication
-    Route::post('/posts/{post}/comments', [PostCommentController::class, 'store'])->name('api.posts.comments.store.alias');
+    Route::post('/posts/{post}/comments', [PostCommentController::class, 'store'])->middleware('terms.accepted')->name('api.posts.comments.store.alias');
     // Alias racine pour épingler un commentaire en tête d'une publication
     Route::post('/posts/{post}/pin-comment', [PostCommentController::class, 'pin'])->name('api.posts.pin_comment.alias');
     // Alias racine pour lister les réponses d'un commentaire
@@ -948,7 +960,7 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/feed', [PostFeedController::class, 'index']);
 
         // Créer une nouvelle publication avec texte, médias, tags, lieu et options (CR-01 à CR-12)
-        Route::post('/posts', [PostController::class, 'store'])->name('api.posts.store');
+        Route::post('/posts', [PostController::class, 'store'])->middleware('terms.accepted')->name('api.posts.store');
 
         // Publications aimées par l'utilisateur connecté (les plus récentes d'abord)
         Route::get('/posts/liked', [PostLikeController::class, 'likedPosts'])->name('api.posts.liked.list');
@@ -1001,7 +1013,7 @@ Route::middleware('auth:api')->group(function () {
         // Lister les commentaires paginés d'une publication
         Route::get('/posts/{post}/comments', [PostCommentController::class, 'index'])->name('api.posts.comments.index');
         // Ajouter un commentaire sur une publication
-        Route::post('/posts/{post}/comments', [PostCommentController::class, 'store'])->name('api.posts.comments.store');
+        Route::post('/posts/{post}/comments', [PostCommentController::class, 'store'])->middleware('terms.accepted')->name('api.posts.comments.store');
         // Épingler un commentaire sur une publication
         Route::post('/posts/{post}/pin-comment', [PostCommentController::class, 'pin'])->name('api.posts.pin_comment');
 
@@ -1093,7 +1105,7 @@ Route::middleware('auth:api')->group(function () {
 
         // Studio Reel : Lancement de la publication asynchrone (Queue Job)
         // Lancer la publication asynchrone d'un Reel (job de transcodage et publication)
-        Route::post('/publish', [StudioReelController::class, 'publish'])->name('api.reels.publish');
+        Route::post('/publish', [StudioReelController::class, 'publish'])->middleware('terms.accepted')->name('api.reels.publish');
 
         // Sons musicaux : Catalogue, favoris et détails
         // Lister les sons musicaux disponibles au catalogue
@@ -1155,7 +1167,7 @@ Route::middleware('auth:api')->group(function () {
         // Lister les réponses associées à un commentaire spécifique
         Route::get('/comments/{comment}/replies', [ReelCommentController::class, 'replies'])->name('api.reels.comments.replies');
         // Ajouter un commentaire ou une réponse sur un Reel
-        Route::post('/{reel}/comments', [ReelCommentController::class, 'store'])->name('api.reels.comments.store');
+        Route::post('/{reel}/comments', [ReelCommentController::class, 'store'])->middleware('terms.accepted')->name('api.reels.comments.store');
         // Modifier le texte d'un commentaire de Reel (réservé à son auteur)
         Route::patch('/comments/{comment}', [ReelCommentController::class, 'update'])->name('api.reels.comments.update');
         // Supprimer un commentaire de Reel et ses réponses en cascade
@@ -1273,7 +1285,7 @@ Route::middleware('auth:api')->group(function () {
         // Lister les conversations et fils de discussion actifs de l'utilisateur
         Route::get('/threads', [MessageThreadController::class, 'index'])->name('api.messages.threads.index');
         // Démarrer une nouvelle conversation privée ou directe
-        Route::post('/threads', [MessageThreadController::class, 'store'])->name('api.messages.threads.store');
+        Route::post('/threads', [MessageThreadController::class, 'store'])->middleware('terms.accepted')->name('api.messages.threads.store');
         // Consulter les informations et métadonnées d'une conversation
         Route::get('/threads/{id}', [MessageThreadController::class, 'show'])->name('api.messages.threads.show');
         // Marquer tous les messages d'un fil de discussion comme lus
@@ -1293,7 +1305,7 @@ Route::middleware('auth:api')->group(function () {
         // Récupérer l'historique paginé des messages d'une conversation
         Route::get('/threads/{id}/messages', [MessageController::class, 'index'])->name('api.messages.messages.index');
         // Envoyer un nouveau message texte, média ou lien dans une conversation
-        Route::post('/threads/{id}/messages', [MessageController::class, 'store'])->name('api.messages.messages.store');
+        Route::post('/threads/{id}/messages', [MessageController::class, 'store'])->middleware('terms.accepted')->name('api.messages.messages.store');
         // Supprimer / rétracter un message envoyé (délai imparti)
         Route::post('/threads/{id}/messages/{messageId}/retract', [MessageController::class, 'retract'])->name('api.messages.messages.retract');
         // Supprimer définitivement un message d'une conversation (verbe DELETE)

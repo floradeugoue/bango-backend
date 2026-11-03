@@ -6,6 +6,7 @@ use App\Enums\OtpChannel;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\Auth\BackupCodeService;
+use App\Services\Auth\SessionService;
 use App\Services\Auth\TotpService;
 use App\Services\Otp\OtpService;
 use Illuminate\Http\JsonResponse;
@@ -22,7 +23,7 @@ class SecondFactorController extends Controller
 
     public const LOCKOUT_MINUTES = 15;
 
-    public function __invoke(Request $request, OtpService $otpService): JsonResponse
+    public function __invoke(Request $request, OtpService $otpService, SessionService $sessionService): JsonResponse
     {
         $request->validate([
             'code' => ['required', 'string'],
@@ -198,17 +199,15 @@ class SecondFactorController extends Controller
         $deviceId = $data['device_id'] ?? null;
         $tokenName = $deviceId ? "{$deviceName}::{$deviceId}" : $deviceName;
 
-        // Révoquer les anciens jetons du même appareil (par device_id ou device_name)
-        if ($deviceId) {
-            $user->tokens()->where(function ($query) use ($deviceId, $deviceName) {
-                $query->where('name', 'like', "%::{$deviceId}")
-                    ->orWhere('name', $deviceName);
-            })->delete();
-        } else {
-            $user->tokens()->where('name', $deviceName)->delete();
-        }
+        $sessionResult = $sessionService->issueSessionToken(
+            user: $user,
+            tokenName: $tokenName,
+            request: $request,
+            deviceId: $deviceId,
+            deviceName: $deviceName,
+        );
 
-        $token = $user->createToken($tokenName)->accessToken;
+        $token = $sessionResult['token'];
 
         $responsePayload = [
             'token' => $token,

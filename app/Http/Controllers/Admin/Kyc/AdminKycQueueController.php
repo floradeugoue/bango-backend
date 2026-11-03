@@ -55,7 +55,13 @@ class AdminKycQueueController extends Controller
 
             $accountKind = ($sub->profile_category === 'page' || ($user?->account_type ?? null) === 'page') ? 'page' : 'person';
             $kind = $sub->metadata['kind'] ?? 'new';
-            $status = $sub->status->value === 'supplement_requested' ? 'more_info' : ($sub->status->value === 'approved' ? 'approved' : ($sub->status->value === 'rejected' ? 'rejected' : 'pending'));
+            $status = match ($sub->status->value) {
+                'supplement_requested' => 'more_info',
+                'approved' => 'approved',
+                'rejected' => 'rejected',
+                'replaced' => 'replaced',
+                default => 'pending',
+            };
 
             return [
                 'id' => (string) $sub->id,

@@ -60,6 +60,12 @@ class KycService
         return DB::transaction(function () use ($user, $data, $files) {
             $requestedBadge = $data['requested_badge'] ?? 'landlord';
 
+            // Clôture des anciens dossiers restés en attente de compléments
+            $previousSupplement = KycSubmission::where('user_id', $user->id)
+                ->where('status', KycStatus::SupplementRequested)
+                ->latest('created_at')
+                ->first();
+
             $submission = KycSubmission::create([
                 'user_id' => $user->id,
                 'status' => KycStatus::Pending,
@@ -72,8 +78,18 @@ class KycService
                 'deed_type' => $data['deed_type'] ?? null,
                 'metadata' => [
                     'requested_badge' => $requestedBadge,
+                    'replaces_submission_id' => $previousSupplement?->id,
                 ],
             ]);
+
+            if ($previousSupplement) {
+                KycSubmission::where('user_id', $user->id)
+                    ->where('status', KycStatus::SupplementRequested)
+                    ->update([
+                        'status' => KycStatus::Replaced,
+                        'rejection_reason' => "Remplacé par le nouveau dossier {$submission->reference}",
+                    ]);
+            }
 
             $idFrontFile = null;
             $selfieFile = null;
@@ -302,5 +318,162 @@ class KycService
             ->where('kind', KycDocKind::Deed)
             ->latest('created_at')
             ->get();
+    }
+
+    /**
+     * Remplace ou complète une ou plusieurs pièces sur un dossier en supplement_requested existant
+     * et repasse le dossier en attente d'instruction (Pending).
+     *
+     * @param  array<string, UploadedFile|array<UploadedFile>>  $files
+     * @param  array<string, mixed>  $data
+     */
+    public function submitSupplement(User $user, array $files, array $data = [], ?string $submissionId = null): KycSubmission
+    {
+        if (empty($files)) {
+            throw ValidationException::withMessages([
+                'files' => ['Veuillez fournir au moins un document justificatif à remplacer ou compléter.'],
+            ]);
+        }
+
+        return DB::transaction(function () use ($user, $files, $data, $submissionId) {
+            $query = KycSubmission::where('user_id', $user->id);
+
+            if ($submissionId) {
+                $query->where('id', $submissionId);
+            } else {
+                $query->where('status', KycStatus::SupplementRequested)->latest('created_at');
+            }
+
+            /** @var KycSubmission|null $submission */
+            $submission = $query->first();
+
+            if (! $submission) {
+                throw ValidationException::withMessages([
+                    'submission' => ['Aucun dossier nécessitant des pièces complémentaires n\'a été trouvé.'],
+                ]);
+            }
+
+            if ($submission->status !== KycStatus::SupplementRequested && $submission->status !== KycStatus::Pending) {
+                throw ValidationException::withMessages([
+                    'submission' => ['Ce dossier ne peut plus être modifié car il a déjà été traité.'],
+                ]);
+            }
+
+            $idFrontFile = null;
+            $selfieFile = null;
+            $livenessFiles = [];
+
+            foreach ($files as $key => $fileOrArray) {
+                $fileList = is_array($fileOrArray) ? $fileOrArray : [$fileOrArray];
+
+                foreach ($fileList as $file) {
+                    if (! ($file instanceof UploadedFile)) {
+                        continue;
+                    }
+
+                    $this->validateFile($file);
+
+                    $kind = KycDocKind::tryFrom($key) ?? match ($key) {
+                        'identity_front', 'id_card_front', 'front' => KycDocKind::Front,
+                        'identity_back', 'id_card_back', 'back' => KycDocKind::Back,
+                        'selfie' => KycDocKind::Selfie,
+                        'liveness_frames', 'liveness_frame' => KycDocKind::LivenessFrame,
+                        'deed', 'property_deed', 'property_deeds' => KycDocKind::Deed,
+                        default => KycDocKind::Other,
+                    };
+
+                    if ($kind === KycDocKind::Front) {
+                        $idFrontFile = $file;
+                    } elseif ($kind === KycDocKind::Selfie) {
+                        $selfieFile = $file;
+                    } elseif ($kind === KycDocKind::LivenessFrame) {
+                        $livenessFiles[] = $file;
+                    }
+
+                    // Supprimer ou remplacer les anciens fichiers du même type (kind) pour ce dossier si applicable
+                    if (in_array($kind, [KycDocKind::Front, KycDocKind::Back, KycDocKind::Selfie], true)) {
+                        $oldDocs = KycDocument::where('kyc_submission_id', $submission->id)
+                            ->where('kind', $kind)
+                            ->get();
+
+                        foreach ($oldDocs as $oldDoc) {
+                            if (Storage::disk('local')->exists($oldDoc->file_path)) {
+                                Storage::disk('local')->delete($oldDoc->file_path);
+                            }
+                            $oldDoc->delete();
+                        }
+                    }
+
+                    $extension = $file->getClientOriginalExtension() ?: 'bin';
+                    $fileName = (string) Str::uuid().'.'.$extension;
+                    $privatePath = "kyc/{$user->id}/{$fileName}";
+
+                    // Chiffrement au repos du fichier KYC
+                    $fileContent = file_get_contents($file->getRealPath());
+                    $encryptedContent = Crypt::encrypt($fileContent);
+                    Storage::disk('local')->put($privatePath, $encryptedContent);
+
+                    KycDocument::create([
+                        'kyc_submission_id' => $submission->id,
+                        'user_id' => $user->id,
+                        'kind' => $kind,
+                        'deed_type' => $kind === KycDocKind::Deed ? ($data['deed_type'] ?? null) : null,
+                        'file_path' => $privatePath,
+                        'original_name' => $file->getClientOriginalName(),
+                        'mime_type' => $file->getMimeType() ?: 'application/octet-stream',
+                        'file_size' => $file->getSize(),
+                        'status' => 'pending',
+                    ]);
+                }
+            }
+
+            // Mettre à jour les éventuelles informations textuelles envoyées
+            $updates = [
+                'status' => KycStatus::Pending,
+                'rejection_reason' => null, // Remis à zéro car complété
+            ];
+            if (! empty($data['full_name'])) {
+                $updates['full_name'] = $data['full_name'];
+            }
+            if (! empty($data['id_type'])) {
+                $updates['id_type'] = $data['id_type'];
+            }
+            if (! empty($data['id_number'])) {
+                $updates['id_number'] = $data['id_number'];
+            }
+            if (! empty($data['expires_on'])) {
+                $updates['expires_on'] = $data['expires_on'];
+            }
+
+            // Si de nouveaux selfies ou recto de pièce ont été fournis, relancer la vérification faciale
+            if ($idFrontFile !== null || $selfieFile !== null || ! empty($livenessFiles)) {
+                $verificationResult = $this->faceVerificationService->verify(
+                    idCardFront: $idFrontFile,
+                    selfieFront: $selfieFile,
+                    livenessFrames: $livenessFiles
+                );
+
+                $meta = $submission->metadata ?? [];
+                $updates['metadata'] = array_merge($meta, [
+                    'face_match' => $verificationResult['face_match'],
+                    'liveness' => $verificationResult['liveness'],
+                    'supplement_submitted_at' => now()->toIso8601String(),
+                ]);
+            } else {
+                $meta = $submission->metadata ?? [];
+                $meta['supplement_submitted_at'] = now()->toIso8601String();
+                $updates['metadata'] = $meta;
+            }
+
+            $submission->update($updates);
+
+            try {
+                $user->notify(new KycSubmittedNotification($submission));
+            } catch (\Throwable $e) {
+                Log::warning("Échec notification KYC soumission complément: {$e->getMessage()}");
+            }
+
+            return $submission->fresh(['documents', 'user']);
+        });
     }
 }

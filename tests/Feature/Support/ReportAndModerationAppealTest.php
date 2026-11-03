@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\Square\PostMediaKind;
 use App\Enums\Support\AppealStatus;
 use App\Enums\Support\ReportReason;
 use App\Enums\Support\ReportStatus;
@@ -9,9 +10,12 @@ use App\Models\Message\Message;
 use App\Models\Page\Page;
 use App\Models\Reel\Reel;
 use App\Models\Square\Post;
+use App\Models\Square\PostMedia;
 use App\Models\Support\ModerationAppeal;
+use App\Models\Support\ModerationDecision;
 use App\Models\Support\Report;
 use App\Models\User;
+use Database\Seeders\ModerationRuleSeeder;
 use Database\Seeders\SubscriptionCatalogSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
@@ -255,7 +259,7 @@ test('GET /api/reports/mine liste uniquement les signalements de l\'utilisateur 
 });
 
 test('SUP-14 : GET /api/reports/mine retourne target et decision (action, decided_at, rule, consequences) sans identité du modérateur', function () {
-    $this->seed(\Database\Seeders\ModerationRuleSeeder::class);
+    $this->seed(ModerationRuleSeeder::class);
     Passport::actingAs($this->reporter);
 
     $operator = User::factory()->create([
@@ -268,10 +272,10 @@ test('SUP-14 : GET /api/reports/mine retourne target et decision (action, decide
         'body' => 'Contenu suspect avec un lien frauduleux',
     ]);
 
-    \App\Models\Square\PostMedia::create([
+    PostMedia::create([
         'post_id' => $post->id,
         'media_url' => 'https://res.cloudinary.com/bango/image/upload/v1234/reported_post.jpg',
-        'media_type' => \App\Enums\Square\PostMediaKind::Photo,
+        'media_type' => PostMediaKind::Photo,
         'display_order' => 0,
     ]);
 
@@ -286,7 +290,7 @@ test('SUP-14 : GET /api/reports/mine retourne target et decision (action, decide
         'resolved_at' => now(),
     ]);
 
-    \App\Models\Support\ModerationDecision::create([
+    ModerationDecision::create([
         'report_id' => $report->id,
         'operator_id' => $operator->id,
         'action' => 'suspend_author',

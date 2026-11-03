@@ -9,6 +9,7 @@ use App\Models\Admin\AdminInvitation;
 use App\Models\Auth\Role;
 use App\Models\User;
 use App\Services\Admin\AdminPasswordPolicy;
+use App\Services\Admin\Auth\AdminInvitationEmailService;
 use App\Services\Auth\BackupCodeService;
 use App\Services\Auth\TotpService;
 use Illuminate\Http\JsonResponse;
@@ -25,6 +26,7 @@ class AdminInvitationController extends Controller
     public function __construct(
         protected TotpService $totpService,
         protected BackupCodeService $backupCodeService,
+        protected AdminInvitationEmailService $emailService,
     ) {}
 
     /**
@@ -407,6 +409,9 @@ class AdminInvitationController extends Controller
             'email' => $invitation->email,
             'role' => $invitation->role,
         ]);
+
+        // Envoi du mail d'invitation avec lien d'activation sécurisé bilingue FR / EN
+        $this->emailService->sendInvitation($invitation, $rawToken);
 
         return response()->json([
             'message' => 'Invitation créée avec succès.',

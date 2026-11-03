@@ -39,6 +39,27 @@ class LandlordKycController extends Controller
     }
 
     /**
+     * Remplacement ou complément d'une pièce sur le dossier KYC en attente de complément.
+     * POST /api/landlord/kyc/supplement
+     */
+    public function submitSupplement(SubmitKycRequest $request): JsonResponse
+    {
+        $user = $request->user();
+        $files = $request->allFiles();
+
+        $submission = $this->kycService->submitSupplement(
+            $user,
+            $files,
+            $request->validated(),
+            $request->input('submission_id')
+        );
+
+        return (new KycSubmissionResource($submission))
+            ->response()
+            ->setStatusCode(200);
+    }
+
+    /**
      * Consulter le statut KYC actuel de l'utilisateur.
      * GET /api/landlord/kyc
      */

@@ -10,7 +10,10 @@ use Laravel\Passport\Passport;
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
-    $this->user = User::factory()->create();
+    $this->user = User::factory()->create([
+        'accepted_terms_version' => null,
+        'terms_accepted_at' => null,
+    ]);
 
     // Définition de la version mandatory des CGU
     LegalDocument::create([

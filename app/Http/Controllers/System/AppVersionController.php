@@ -40,6 +40,7 @@ class AppVersionController extends Controller
 
         return response()->json([
             'data' => $result,
+            'incident_banner' => $result['incident_banner'] ?? null,
         ], 200);
     }
 }

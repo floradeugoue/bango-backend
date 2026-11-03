@@ -256,6 +256,43 @@ class SubscriptionService
     }
 
     /**
+     * Resume auto-renewal for a canceled subscription before expiration.
+     */
+    public function resumeSubscription(Subscription $subscription, ?User $actor = null): Subscription
+    {
+        if (! $subscription->current_period_end || $subscription->current_period_end->isPast()) {
+            throw new \DomainException('Impossible de réactiver la reconduction automatique : cet abonnement est expiré.');
+        }
+
+        return DB::transaction(function () use ($subscription, $actor) {
+            $subscription->update([
+                'auto_renew' => true,
+                'next_renewal' => $subscription->current_period_end,
+                'canceled_at' => null,
+                'cancel_reason' => null,
+                'cancel_feedback' => null,
+            ]);
+
+            SubscriptionEvent::create([
+                'subscription_id' => $subscription->id,
+                'user_id' => $subscription->user_id,
+                'event_type' => 'resumed',
+                'old_state' => $subscription->state,
+                'new_state' => $subscription->state,
+                'actor_id' => $actor?->id ?? $subscription->user_id,
+                'actor_role' => $actor && $actor->isAdmin() ? 'admin' : 'user',
+                'reason' => 'Reprise de la reconduction automatique',
+                'payload' => [
+                    'next_renewal' => $subscription->current_period_end->toIso8601String(),
+                    'expires_at' => $subscription->current_period_end->toIso8601String(),
+                ],
+            ]);
+
+            return $subscription;
+        });
+    }
+
+    /**
      * Transition a subscription to grace period (7 days) after a renewal failure.
      */
     public function enterGracePeriod(Subscription $subscription, ?string $failureReason = null): Subscription

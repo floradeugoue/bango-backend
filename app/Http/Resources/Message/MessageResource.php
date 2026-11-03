@@ -2,8 +2,11 @@
 
 namespace App\Http\Resources\Message;
 
+use App\Enums\Delegation\DelegationStatus;
+use App\Models\Delegation\Delegation;
 use App\Models\Message\Message;
 use App\Models\Page\Page;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -54,6 +57,28 @@ class MessageResource extends JsonResource
                     'is_certified' => (bool) ($this->sender->is_certified ?? false),
                 ];
             }),
+            'on_behalf_of' => (function () {
+                $conversation = $this->conversation;
+                if (! $conversation || ! $conversation->listing_id || ! $this->sender_id) {
+                    return null;
+                }
+                $listing = $conversation->listing;
+                if (! $listing || $this->sender_id === $listing->owner_id) {
+                    return null;
+                }
+                $isAgent = ($listing->agent_id === $this->sender_id) ||
+                    Delegation::where('listing_id', $listing->id)
+                        ->where('agent_id', $this->sender_id)
+                        ->where('status', DelegationStatus::Active->value)
+                        ->whereNull('revoked_at')
+                        ->exists();
+
+                return $isAgent ? [
+                    'agent_id' => $this->sender_id,
+                    'landlord_id' => $listing->owner_id,
+                    'label' => 'Au nom du bailleur',
+                ] : null;
+            })(),
             'type' => $this->type->value,
             'kind' => $this->type->value,
             'body' => $this->is_retracted ? null : $this->body,
@@ -113,10 +138,24 @@ class MessageResource extends JsonResource
         }
 
         $createdAt = $this->created_at;
+        $viewer = $request->user();
+        $viewerAllowsReceipts = $viewer ? $viewer->hasReadReceiptsEnabled() : true;
 
-        // Lu si au moins un destinataire a un last_read_at >= created_at
-        // (pour conversation directe, c'est l'autre membre ; pour groupe, au moins un membre l'a lu)
-        $readMembers = $recipientMembers->filter(fn ($m) => $m->last_read_at && $m->last_read_at->greaterThanOrEqualTo($createdAt));
+        // Lu si au moins un destinataire a un last_read_at >= created_at ET que les deux parties autorisent les accusés de lecture
+        $readMembers = $recipientMembers->filter(function ($m) use ($createdAt, $viewerAllowsReceipts) {
+            if (! $viewerAllowsReceipts) {
+                return false;
+            }
+
+            if (! $m->last_read_at || ! $m->last_read_at->greaterThanOrEqualTo($createdAt)) {
+                return false;
+            }
+
+            $recipientUser = $m->relationLoaded('user') ? $m->user : User::find($m->user_id);
+
+            return $recipientUser ? $recipientUser->hasReadReceiptsEnabled() : true;
+        });
+
         $isRead = $readMembers->isNotEmpty();
         $firstReadAt = $readMembers->min('last_read_at');
 
@@ -126,7 +165,7 @@ class MessageResource extends JsonResource
             ($m->last_read_at && $m->last_read_at->greaterThanOrEqualTo($createdAt))
         ));
         $isDelivered = $deliveredMembers->isNotEmpty();
-        $firstDeliveredAt = $deliveredMembers->min('last_delivered_at') ?? $firstReadAt;
+        $firstDeliveredAt = $deliveredMembers->min('last_delivered_at') ?? ($isRead ? $firstReadAt : $deliveredMembers->min('last_read_at'));
 
         $status = 'sent';
         if ($isRead) {
@@ -140,7 +179,7 @@ class MessageResource extends JsonResource
             'is_delivered' => $isDelivered,
             'is_read' => $isRead,
             'delivered_at' => $firstDeliveredAt?->toIso8601String(),
-            'read_at' => $firstReadAt?->toIso8601String(),
+            'read_at' => $isRead ? $firstReadAt?->toIso8601String() : null,
         ];
     }
 }

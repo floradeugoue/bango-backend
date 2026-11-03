@@ -3,37 +3,22 @@
 namespace App\Http\Controllers\Profile;
 
 use App\Http\Controllers\Controller;
+use App\Services\Auth\SessionService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 
 class SecurityController extends Controller
 {
+    public function __construct(
+        protected SessionService $sessionService
+    ) {}
+
     public function getSessions(Request $request)
     {
         $user = $request->user();
-        $currentTokenId = $request->user()->currentAccessToken()?->id;
+        $currentTokenId = $user->currentAccessToken()?->id;
 
-        $place = $user->city ?? $user->country?->name ?? 'Douala, Cameroun';
-
-        $sessions = $user->tokens
-            ->filter(fn ($token) => ! $token->revoked && ($token->expires_at === null || ! $token->expires_at->isPast()))
-            ->values()
-            ->map(function ($token) use ($currentTokenId, $place) {
-                $isAcknowledged = Cache::get('session.ack.'.$token->id, false);
-
-                $rawName = (! empty($token->name) && $token->name !== 'auth_token') ? $token->name : 'Application mobile';
-                $deviceName = str_contains($rawName, '::') ? explode('::', $rawName)[0] : $rawName;
-
-                return [
-                    'id' => $token->id,
-                    'device' => $deviceName,
-                    'current' => $currentTokenId !== null && $token->id === $currentTokenId,
-                    'unusual' => ! $isAcknowledged && ($token->id !== $currentTokenId),
-                    'acknowledged' => (bool) $isAcknowledged,
-                    'place' => $place,
-                    'last_used_at' => $token->updated_at?->toIso8601String(),
-                ];
-            });
+        $sessions = $this->sessionService->getFormattedSessions($user, $currentTokenId, $request);
 
         return response()->json([
             'sessions' => $sessions,
@@ -75,6 +60,8 @@ class SecurityController extends Controller
         }
 
         $token->delete();
+        Cache::forget('session.ack.'.$id);
+        Cache::forget('session.meta.'.$id);
 
         return response()->json(['success' => true]);
     }

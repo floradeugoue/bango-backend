@@ -476,19 +476,131 @@ class User extends Authenticatable
      */
     public function canViewContentOf(User $target): bool
     {
-        if ($this->id === $target->id) {
+        return $target->canPostsBeSeenBy($this);
+    }
+
+    /**
+     * Vérifie si le viewer est autorisé à voir les publications de cet utilisateur.
+     */
+    public function canPostsBeSeenBy(?User $viewer): bool
+    {
+        if ($viewer && (int) $viewer->id === (int) $this->id) {
             return true;
         }
 
-        if ($this->hasBlocked($target) || $this->isBlockedBy($target)) {
+        if ($viewer && ($this->hasBlocked($viewer) || $this->isBlockedBy($viewer))) {
             return false;
         }
 
-        if (! $target->is_private) {
+        if ($this->is_private && (! $viewer || ! $viewer->isFollowing($this))) {
+            return false;
+        }
+
+        $setting = $this->privacy_settings['seePosts'] ?? 'everyone';
+
+        if ($setting === 'nobody') {
+            return false;
+        }
+
+        if ($setting === 'followers') {
+            return $viewer ? $viewer->isFollowing($this) : false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Vérifie si le viewer est autorisé à commenter les publications ou Reels de cet utilisateur.
+     */
+    public function canBeCommentedBy(?User $viewer): bool
+    {
+        if (! $viewer) {
+            return false;
+        }
+
+        if ((int) $viewer->id === (int) $this->id) {
             return true;
         }
 
-        return $this->isFollowing($target);
+        if ($this->hasBlocked($viewer) || $this->isBlockedBy($viewer)) {
+            return false;
+        }
+
+        $setting = $this->privacy_settings['commentPosts'] ?? 'everyone';
+
+        if ($setting === 'nobody') {
+            return false;
+        }
+
+        if ($setting === 'followers') {
+            return $viewer->isFollowing($this);
+        }
+
+        return true;
+    }
+
+    /**
+     * Vérifie si le viewer est autorisé à ouvrir une conversation ou envoyer un message à cet utilisateur.
+     */
+    public function canBeMessagedBy(?User $viewer): bool
+    {
+        if (! $viewer) {
+            return false;
+        }
+
+        if ((int) $viewer->id === (int) $this->id) {
+            return true;
+        }
+
+        $setting = $this->privacy_settings['messageMe'] ?? 'everyone';
+
+        if ($setting === 'nobody') {
+            return false;
+        }
+
+        if ($setting === 'followers') {
+            return $viewer->isFollowing($this);
+        }
+
+        return true;
+    }
+
+    /**
+     * Vérifie si le viewer est autorisé à identifier ou mentionner cet utilisateur.
+     */
+    public function canBeTaggedBy(?User $viewer): bool
+    {
+        if (! $viewer) {
+            return false;
+        }
+
+        if ((int) $viewer->id === (int) $this->id) {
+            return true;
+        }
+
+        if ($this->hasBlocked($viewer) || $this->isBlockedBy($viewer)) {
+            return false;
+        }
+
+        $setting = $this->privacy_settings['tagMe'] ?? 'everyone';
+
+        if ($setting === 'nobody') {
+            return false;
+        }
+
+        if ($setting === 'followers') {
+            return $viewer->isFollowing($this);
+        }
+
+        return true;
+    }
+
+    /**
+     * Détermine si l'utilisateur a activé les accusés de lecture.
+     */
+    public function hasReadReceiptsEnabled(): bool
+    {
+        return (bool) ($this->privacy_settings['readReceipts'] ?? true);
     }
 
     /**

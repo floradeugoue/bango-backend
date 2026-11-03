@@ -23,8 +23,9 @@ class TranslateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'type' => ['required', 'string', 'in:post,reel,comment,reel_comment'],
-            'id' => ['required'],
+            'text' => ['required_without_all:type,id', 'nullable', 'string', 'max:5000'],
+            'type' => ['required_without:text', 'nullable', 'string', 'in:post,reel,comment,reel_comment'],
+            'id' => ['required_without:text', 'nullable'],
             'target' => ['required', 'string', 'in:fr,en'],
         ];
     }
@@ -37,9 +38,10 @@ class TranslateRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'type.required' => 'Le type d\'élément à traduire est requis.',
+            'text.required_without_all' => 'Le texte à traduire ou un élément (type et id) est requis.',
+            'type.required_without' => 'Le type d\'élément à traduire est requis.',
             'type.in' => 'Le type doit être post, reel, comment ou reel_comment.',
-            'id.required' => 'L\'identifiant de l\'élément est requis.',
+            'id.required_without' => 'L\'identifiant de l\'élément est requis.',
             'target.required' => 'La langue cible est requise.',
             'target.in' => 'La langue cible doit être fr ou en.',
         ];

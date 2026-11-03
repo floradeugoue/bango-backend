@@ -37,13 +37,15 @@ class DataExportController extends Controller
 
         $validated = $request->validate([
             'sections' => ['nullable', 'array'],
-            'sections.*' => ['string'],
+            'sections.*' => ['string', 'in:profile,content,messages,listings,payments'],
+            'format' => ['nullable', 'string', 'in:json,html'],
         ]);
 
         $exportRequest = DataExportRequest::create([
             'user_id' => $user->id,
             'status' => DataExportStatus::Pending,
             'sections' => $validated['sections'] ?? null,
+            'format' => $validated['format'] ?? 'json',
             'disk' => 'local',
         ]);
 

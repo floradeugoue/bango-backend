@@ -1,6 +1,10 @@
 <?php
 
+use App\Models\Admin\SystemConfiguration;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Config;
+
+uses(RefreshDatabase::class);
 
 beforeEach(function () {
     Config::set('system.versions.android', [
@@ -110,4 +114,57 @@ test('it provides safe defaults when configuration is missing', function () {
         ->assertJsonPath('data.platform', 'android')
         ->assertJsonPath('data.min_version', '1.0.0')
         ->assertJsonPath('data.force_update', true);
+});
+
+test('it returns incident_banner when set in system configuration and null when absent or expired', function () {
+    // 1. Par défaut, pas de bandeau incident
+    $resInitial = $this->getJson('/api/system/version?platform=android');
+    $resInitial->assertOk()
+        ->assertJsonPath('data.incident_banner', null)
+        ->assertJsonPath('incident_banner', null);
+
+    // 2. Poser un bandeau d'incident actif avec texte FR/EN, gravité et date de fin
+    $endsAt = now()->addHours(3)->toIso8601String();
+    SystemConfiguration::setValue(
+        'service.incident_banner',
+        [
+            'active' => true,
+            'message' => 'Paiements Orange Money temporairement perturbés.',
+            'message_fr' => 'Paiements Orange Money temporairement perturbés.',
+            'message_en' => 'Orange Money payments temporarily disrupted.',
+            'severity' => 'warning',
+            'ends_at' => $endsAt,
+        ],
+        'service',
+        'json',
+        'Incident actif'
+    );
+
+    $resActive = $this->getJson('/api/system/version?platform=android');
+    $resActive->assertOk()
+        ->assertJsonPath('data.incident_banner.active', true)
+        ->assertJsonPath('data.incident_banner.message_fr', 'Paiements Orange Money temporairement perturbés.')
+        ->assertJsonPath('data.incident_banner.message_en', 'Orange Money payments temporarily disrupted.')
+        ->assertJsonPath('data.incident_banner.severity', 'warning')
+        ->assertJsonPath('incident_banner.severity', 'warning');
+
+    // 3. Si la date de fin est dépassée, le bandeau n'est plus renvoyé
+    SystemConfiguration::setValue(
+        'service.incident_banner',
+        [
+            'active' => true,
+            'message_fr' => 'Incident terminé.',
+            'message_en' => 'Incident finished.',
+            'severity' => 'info',
+            'ends_at' => now()->subHour()->toIso8601String(), // Expiré
+        ],
+        'service',
+        'json',
+        'Incident expiré'
+    );
+
+    $resExpired = $this->getJson('/api/system/version?platform=android');
+    $resExpired->assertOk()
+        ->assertJsonPath('data.incident_banner', null)
+        ->assertJsonPath('incident_banner', null);
 });

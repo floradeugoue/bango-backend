@@ -187,7 +187,9 @@ class MessageService
 
         $member->markAsRead($messageId);
 
-        event(new MessageRead($conversation, $user->id, $messageId));
+        if ($user->hasReadReceiptsEnabled()) {
+            event(new MessageRead($conversation, $user->id, $messageId));
+        }
     }
 
     /**

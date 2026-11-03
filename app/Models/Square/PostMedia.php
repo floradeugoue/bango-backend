@@ -18,6 +18,7 @@ class PostMedia extends Model
     protected $fillable = [
         'post_id',
         'media_url',
+        'poster_url',
         'media_type',
         'mime_type',
         'file_size',
@@ -48,6 +49,30 @@ class PostMedia extends Model
      * Retourne l'URL absolue du média.
      */
     public function getMediaUrlAttribute(?string $value): ?string
+    {
+        if (empty($value)) {
+            return null;
+        }
+
+        if (str_starts_with($value, 'http://') || str_starts_with($value, 'https://')) {
+            return $value;
+        }
+
+        if (str_starts_with($value, '/storage/')) {
+            return url($value);
+        }
+
+        if (str_starts_with($value, 'storage/')) {
+            return url('/'.$value);
+        }
+
+        return Storage::disk('public')->url($value);
+    }
+
+    /**
+     * Retourne l'URL absolue de l'image de couverture / poster.
+     */
+    public function getPosterUrlAttribute(?string $value): ?string
     {
         if (empty($value)) {
             return null;

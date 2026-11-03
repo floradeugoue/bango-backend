@@ -170,9 +170,9 @@ Schedule::command('visits:expire-pending')
     ->withoutOverlapping()
     ->onOneServer();
 
-// 7. Règlement des demandes sans réponse après 18h toutes les heures
+// 7. Règlement des demandes sans réponse après délai (BL-07)
 Schedule::command('visits:settle-overdue')
-    ->hourly()
+    ->everyTenMinutes()
     ->withoutOverlapping()
     ->onOneServer();
 

@@ -28,7 +28,7 @@ class HandleCheckController extends Controller
             return response()->json(['state' => HandleVerdict::Reserved->value]);
         }
 
-        $existing = User::where('handle', $handle)->first();
+        $existing = User::withTrashed()->where('handle', $handle)->first();
         if ($existing) {
             $suggestions = [
                 $handle.rand(10, 99),

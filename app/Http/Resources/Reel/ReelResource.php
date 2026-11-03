@@ -180,6 +180,8 @@ class ReelResource extends JsonResource
             'thumbnail_url' => $thumbnailUrl,
             'videoUrl' => $videoUrl,
             'video_url' => $videoUrl,
+            'originalVideoUrl' => $this->original_video_url ? $storage->getUrl($this->original_video_url) : null,
+            'original_video_url' => $this->original_video_url ? $storage->getUrl($this->original_video_url) : null,
             'hlsUrl' => $hlsUrl,
             'hls_url' => $hlsUrl,
             'stream_media_id' => $this->stream_media_id,

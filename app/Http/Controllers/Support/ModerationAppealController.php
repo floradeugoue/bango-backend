@@ -10,6 +10,7 @@ use App\Models\Page\Page;
 use App\Models\Support\ModerationAppeal;
 use App\Models\Support\ModerationDecision;
 use App\Models\Support\Report;
+use App\Models\Support\UserAccountSanction;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -111,6 +112,17 @@ class ModerationAppealController extends Controller
                     'message' => 'Votre compte ne fait l\'objet d\'aucune suspension active.',
                 ], 422);
             }
+        } elseif ($validated['sanction_type'] === 'warning') {
+            $hasActiveWarning = UserAccountSanction::where('user_id', $user->id)
+                ->where('type', 'warning')
+                ->where('is_active', true)
+                ->exists();
+
+            if (! $hasActiveWarning) {
+                return response()->json([
+                    'message' => 'Votre compte ne fait l\'objet d\'aucun avertissement actif.',
+                ], 422);
+            }
         } elseif ($validated['sanction_type'] === 'page_suspension') {
             if (empty($validated['sanction_reference'])) {
                 return response()->json([
@@ -132,6 +144,13 @@ class ModerationAppealController extends Controller
             }
         }
 
+        if (! $sanctionOperatorId && ! empty($validated['sanction_reference']) && is_numeric($validated['sanction_reference'])) {
+            $targetSanction = UserAccountSanction::find((int) $validated['sanction_reference']);
+            if ($targetSanction) {
+                $sanctionOperatorId = $targetSanction->operator_id;
+            }
+        }
+
         // 3. Prévention des recours en doublon
         $duplicateQuery = ModerationAppeal::where('user_id', $user->id)
             ->where('status', AppealStatus::Pending->value);
@@ -140,6 +159,9 @@ class ModerationAppealController extends Controller
             $duplicateQuery->where('moderation_decision_id', $decision->id);
         } else {
             $duplicateQuery->where('sanction_type', $validated['sanction_type']);
+            if (! empty($validated['sanction_reference'])) {
+                $duplicateQuery->where('sanction_reference', $validated['sanction_reference']);
+            }
         }
 
         $existing = $duplicateQuery->first();

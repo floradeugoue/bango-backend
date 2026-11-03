@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Events\Listing\ListingPublished;
 use App\Events\Story\StoryReplyCreated;
 use App\Listeners\Listing\NotifyMatchingHousingSearches;
+use App\Listeners\Notification\CheckNotificationPreferences;
 use App\Listeners\Notification\SendPushOnNotificationSent;
 use App\Listeners\Story\CreateConversationFromStoryReply;
 use App\Models\Boost\Campaign;
@@ -31,6 +32,7 @@ use App\Services\Boost\CampaignEligibilityService;
 use App\Services\Payment\Contracts\PaymentGatewayInterface;
 use App\Services\Payment\PaymentGatewayManager;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Notifications\Events\NotificationSending;
 use Illuminate\Notifications\Events\NotificationSent;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
@@ -129,6 +131,11 @@ class AppServiceProvider extends ServiceProvider
         Event::listen(
             ListingPublished::class,
             NotifyMatchingHousingSearches::class
+        );
+
+        Event::listen(
+            NotificationSending::class,
+            CheckNotificationPreferences::class
         );
 
         Event::listen(

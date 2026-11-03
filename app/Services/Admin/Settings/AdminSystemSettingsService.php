@@ -637,10 +637,16 @@ class AdminSystemSettingsService
                     break;
 
                 case 'set_incident_banner':
+                    $messageFr = $params['message_fr'] ?? $params['message'] ?? 'Incident technique en cours de résolution.';
+                    $messageEn = $params['message_en'] ?? $params['message'] ?? 'Technical incident being resolved.';
                     $banner = [
-                        'active' => true,
-                        'message' => $params['message'] ?? 'Incident technique en cours de résolution.',
+                        'active' => filter_var($params['active'] ?? true, FILTER_VALIDATE_BOOLEAN),
+                        'message' => $messageFr,
+                        'message_fr' => $messageFr,
+                        'message_en' => $messageEn,
                         'severity' => $params['severity'] ?? 'warning', // info, warning, critical
+                        'starts_at' => $params['starts_at'] ?? now()->toIso8601String(),
+                        'ends_at' => $params['ends_at'] ?? $params['expires_at'] ?? null,
                         'created_at' => now()->toIso8601String(),
                     ];
                     SystemConfiguration::setValue('service.incident_banner', $banner, 'service', 'json', 'Bandeau incident actif', $operator);

@@ -3,6 +3,7 @@
 namespace App\Services\System;
 
 use App\Models\Admin\SystemConfiguration;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Config;
 
 class AppVersionService
@@ -35,6 +36,7 @@ class AppVersionService
         $dynamicMin = null;
         $maintenanceMode = false;
         $maintenanceMessage = null;
+        $incidentBanner = null;
 
         if (app()->isDownForMaintenance()) {
             $maintenanceMode = true;
@@ -52,6 +54,34 @@ class AppVersionService
                 $dbMinVersion = SystemConfiguration::getValue("service.min_version_{$platform}");
                 if (! empty($dbMinVersion)) {
                     $dynamicMin = (string) $dbMinVersion;
+                }
+
+                $rawBanner = SystemConfiguration::getValue('service.incident_banner', null);
+                if (! empty($rawBanner) && is_array($rawBanner)) {
+                    $isActive = (bool) ($rawBanner['active'] ?? true);
+                    $endsAt = $rawBanner['ends_at'] ?? $rawBanner['expires_at'] ?? null;
+                    $isExpired = false;
+                    if (! empty($endsAt)) {
+                        try {
+                            $isExpired = Carbon::parse($endsAt)->isPast();
+                        } catch (\Throwable) {
+                            $isExpired = false;
+                        }
+                    }
+
+                    if ($isActive && ! $isExpired) {
+                        $messageFr = $rawBanner['message_fr'] ?? $rawBanner['message'] ?? '';
+                        $messageEn = $rawBanner['message_en'] ?? $rawBanner['message'] ?? $messageFr;
+                        $incidentBanner = [
+                            'active' => true,
+                            'message' => $messageFr,
+                            'message_fr' => $messageFr,
+                            'message_en' => $messageEn,
+                            'severity' => $rawBanner['severity'] ?? 'warning',
+                            'ends_at' => $endsAt ? Carbon::parse($endsAt)->toIso8601String() : null,
+                            'created_at' => isset($rawBanner['created_at']) ? Carbon::parse($rawBanner['created_at'])->toIso8601String() : null,
+                        ];
+                    }
                 }
             } catch (\Throwable) {
                 // Ignore DB error if table not yet migrated
@@ -87,6 +117,7 @@ class AppVersionService
             'maintenance_mode' => $maintenanceMode,
             'is_maintenance' => $maintenanceMode,
             'maintenance_message' => $maintenanceMessage,
+            'incident_banner' => $incidentBanner,
         ];
     }
 

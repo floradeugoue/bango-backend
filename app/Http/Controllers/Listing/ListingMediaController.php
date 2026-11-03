@@ -35,13 +35,25 @@ class ListingMediaController extends Controller
             $room = $request->filled('room') ? ListingPhotoRoom::tryFrom($request->input('room')) : null;
             $media = $this->listingService->addPhoto($listing, $user, $file, $room);
         } else {
+            $metadata = [];
+            if ($request->filled('video_trim')) {
+                $metadata['video_trim'] = $request->input('video_trim');
+            }
+            if ($request->filled('video_cover_ms')) {
+                $metadata['video_cover_ms'] = $request->integer('video_cover_ms');
+            }
+            if ($request->filled('video_chapters')) {
+                $metadata['video_chapters'] = $request->input('video_chapters');
+            }
+
             $media = $this->listingService->addVideo(
                 $listing,
                 $user,
                 $file,
                 $request->integer('duration'),
                 $request->integer('width'),
-                $request->integer('height')
+                $request->integer('height'),
+                ! empty($metadata) ? $metadata : null
             );
         }
 
