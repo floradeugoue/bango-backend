@@ -138,11 +138,19 @@ class TestMonetbilRealPaymentCommand extends Command
         $this->info("\n=== RÉSULTAT DE L'INITIATION MONETBIL ===");
         $this->line('Statut : <info>processing</info>');
         $this->line("ID Paiement Monetbil (paymentId) : <comment>{$initiateResult->gatewayReference}</comment>");
-        $this->line("Message : <info>{$initiateResult->ussdPrompt}</info>");
+        $this->line("Message retourné : <info>{$initiateResult->ussdPrompt}</info>");
 
-        // 4. Suivi en direct du paiement (Polling checkPayment)
-        $this->info("\n4. Suivi en direct : Regardez votre téléphone ({$phone}) et validez le débit USSD.");
-        $this->line('Vérification auprès de Monetbil toutes les 5 secondes (max 120s)...');
+        // 4. Instructions et Suivi en direct du paiement (Polling checkPayment)
+        $this->info("\n4. Suivi en direct :");
+        if ($initiateResult->ussdPrompt && str_contains($initiateResult->ussdPrompt, '#')) {
+            $this->warn("👉 ATTENTION ORANGE MONEY : Composez immédiatement le code USSD ci-dessous sur votre téléphone ({$phone}) :");
+            $this->alert("         {$initiateResult->ussdPrompt}         ");
+            $this->warn('Entrez ensuite votre code secret pour valider le débit de 200 XAF.');
+        } else {
+            $this->line("Regardez votre téléphone ({$phone}) et validez le débit USSD.");
+        }
+
+        $this->line("\nVérification auprès de Monetbil toutes les 5 secondes (max 120s)...");
 
         $startTime = time();
         $timeout = 120;
