@@ -289,13 +289,15 @@ class MonetbilGateway implements PaymentGatewayInterface
 
             $txData = $data['transaction'] ?? $data;
             $status = $txData['status'] ?? ($data['status'] ?? null);
+            $msg = strtolower((string) ($txData['message'] ?? ($data['message'] ?? '')));
+            $msg1 = strtolower((string) ($txData['message1'] ?? ($data['message1'] ?? '')));
 
             // Statut 1 ou 'success' = paiement validé avec succès
-            if ($status === 1 || $status === '1' || strtolower((string) $status) === 'success') {
+            if ($status === 1 || $status === '1' || strtolower((string) $status) === 'success' || str_contains($msg, 'success') || str_contains($msg, 'successful')) {
                 return GatewayStatusResult::confirmed(
                     gatewayReference: $paymentId,
                     operatorReference: $txData['operator_transaction_id'] ?? ($txData['operator_reference'] ?? null),
-                    operatorCode: $txData['operator'] ?? null,
+                    operatorCode: $txData['operator'] ?? ($data['mobile_operator_code'] ?? null),
                     raw: $data
                 );
             }
@@ -304,19 +306,29 @@ class MonetbilGateway implements PaymentGatewayInterface
             $isCancelledOrFailed = $status === 0
                 || $status === '0'
                 || in_array(strtolower((string) $status), ['failed', 'cancelled', 'canceled'], true)
-                || in_array(strtolower((string) ($txData['message'] ?? '')), ['failed', 'cancelled', 'canceled'], true);
+                || in_array($msg, ['failed', 'cancelled', 'canceled', 'expired'], true)
+                || str_contains($msg, 'cancel')
+                || str_contains($msg, 'failed')
+                || str_contains($msg, 'expired');
 
             if ($isCancelledOrFailed) {
                 return GatewayStatusResult::failed(
                     errorCode: (string) ($txData['error'] ?? 'PAYMENT_CANCELLED'),
-                    errorMessage: $txData['message'] ?? 'Le paiement a échoué ou a été annulé.',
+                    errorMessage: $txData['message'] ?? ($data['message'] ?? 'Le paiement a échoué ou a été annulé.'),
                     gatewayReference: $paymentId,
                     raw: $data
                 );
             }
 
             // Statut -1 ou 'pending' = toujours en cours de validation par le client
-            if ($status === -1 || $status === '-1' || strtolower((string) $status) === 'pending') {
+            if (
+                $status === -1
+                || $status === '-1'
+                || strtolower((string) $status) === 'pending'
+                || str_contains($msg, 'pending')
+                || str_contains($msg, 'initiated')
+                || str_contains($msg1, 'initiated')
+            ) {
                 return GatewayStatusResult::pending(
                     gatewayReference: $paymentId,
                     raw: $data
