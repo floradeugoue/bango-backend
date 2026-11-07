@@ -150,7 +150,9 @@ class MonetbilGateway implements PaymentGatewayInterface
 
         if (! empty($params['operator'])) {
             $operatorCode = $this->mapOperatorCode((string) $params['operator'], $countryCode);
-            $payload['operator'] = $operatorCode;
+            if (! empty($operatorCode)) {
+                $payload['operator'] = $operatorCode;
+            }
         }
 
         $timeout = (int) config('payment.gateways.monetbil.http_timeout', 15);
@@ -405,52 +407,81 @@ class MonetbilGateway implements PaymentGatewayInterface
     /**
      * Fait correspondre le code opérateur au format attendu par Monetbil pour chaque pays.
      */
-    public function mapOperatorCode(string $operator, string $countryCode): string
+    public function mapOperatorCode(string $operator, string $countryCode): ?string
     {
+        $normalized = strtoupper(trim($operator));
         $op = strtolower(trim($operator));
         $prefix = strtoupper($countryCode);
 
-        // Si l'opérateur a déjà le préfixe pays (ex: 'CM_ORANGEMONEY', 'SN_ORANGEMONEY')
-        if (str_starts_with(strtoupper($operator), $prefix.'_')) {
-            return strtoupper($operator);
+        // Alias et codes legacy vers les codes complets officiels Monetbil
+        $legacyAliases = [
+            'CM_MTN' => 'CM_MTNMOBILEMONEY',
+            'CI_MTN' => 'CI_MTNMOBILEMONEY',
+            'BJ_MTN' => 'BJ_MTNMOBILEMONEY',
+            'CI_MOOV' => 'CI_MOOVMONEY',
+            'BJ_MOOV' => 'BJ_MOOVMONEY',
+            'TG_MOOV' => 'TG_MOOVMONEY',
+            'GA_MOOV' => 'GA_MOOVMONEY',
+            'GA_AIRTEL' => 'GA_AIRTELMONEY',
+        ];
+
+        if (isset($legacyAliases[$normalized])) {
+            return $legacyAliases[$normalized];
         }
 
-        return match ($prefix) {
+        // Si l'opérateur a déjà le préfixe pays officiel
+        if (str_starts_with($normalized, $prefix.'_')) {
+            return $normalized;
+        }
+
+        $code = match ($prefix) {
             'CM' => match ($op) {
                 'orange', 'orange_money', 'orange_cm' => 'CM_ORANGEMONEY',
-                'mtn', 'mtn_momo', 'mobile_money', 'mtn_cm' => 'CM_MTN',
-                default => $operator,
+                'mtn', 'mtn_momo', 'mobile_money', 'mtn_cm', 'mtnmobilemoney' => 'CM_MTNMOBILEMONEY',
+                default => null,
             },
             'SN' => match ($op) {
                 'orange', 'orange_money', 'orange_sn' => 'SN_ORANGEMONEY',
                 'wave', 'wave_sn' => 'SN_WAVE',
-                'free', 'free_money', 'free_sn' => 'SN_FREE',
-                default => $operator,
+                'free', 'free_money', 'free_sn', 'freemoney' => 'SN_FREE',
+                default => null,
             },
             'CI' => match ($op) {
                 'orange', 'orange_money', 'orange_ci' => 'CI_ORANGEMONEY',
-                'mtn', 'mtn_momo', 'mtn_ci' => 'CI_MTN',
-                'moov', 'moov_money', 'moov_ci' => 'CI_MOOV',
+                'mtn', 'mtn_momo', 'mtn_ci', 'mtnmobilemoney' => 'CI_MTNMOBILEMONEY',
+                'moov', 'moov_money', 'moov_ci', 'moovmoney' => 'CI_MOOVMONEY',
                 'wave', 'wave_ci' => 'CI_WAVE',
-                default => $operator,
+                default => null,
             },
             'GA' => match ($op) {
-                'airtel', 'airtel_money', 'airtel_ga' => 'GA_AIRTEL',
-                'moov', 'moov_money', 'moov_ga' => 'GA_MOOV',
-                default => $operator,
+                'airtel', 'airtel_money', 'airtel_ga', 'airtelmoney' => 'GA_AIRTELMONEY',
+                'moov', 'moov_money', 'moov_ga', 'moovmoney' => 'GA_MOOVMONEY',
+                default => null,
             },
             'BJ' => match ($op) {
-                'mtn', 'mtn_momo', 'mtn_bj' => 'BJ_MTN',
-                'moov', 'moov_money', 'moov_bj' => 'BJ_MOOV',
-                default => $operator,
+                'mtn', 'mtn_momo', 'mtn_bj', 'mtnmobilemoney' => 'BJ_MTNMOBILEMONEY',
+                'moov', 'moov_money', 'moov_bj', 'moovmoney' => 'BJ_MOOVMONEY',
+                default => null,
             },
             'TG' => match ($op) {
                 'tmoney', 'tmoney_tg' => 'TG_TMONEY',
-                'moov', 'moov_money', 'moov_tg' => 'TG_MOOV',
-                default => $operator,
+                'moov', 'moov_money', 'moov_tg', 'moovmoney' => 'TG_MOOVMONEY',
+                default => null,
             },
-            default => $operator,
+            default => null,
         };
+
+        if ($code !== null) {
+            return $code;
+        }
+
+        // Si c'est déjà un code structuré complet (ex: XX_NOM), le transmettre tel quel
+        if (preg_match('/^[A-Z]{2}_[A-Z0-9]+$/', $normalized)) {
+            return $normalized;
+        }
+
+        // Sinon, ne pas transmettre pour permettre à Monetbil d'auto-détecter via le numéro
+        return null;
     }
 
     /**

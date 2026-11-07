@@ -7,6 +7,7 @@ use App\Enums\Payment\PaymentEventSource;
 use App\Enums\Payment\PaymentProvider;
 use App\Enums\Payment\PaymentStatus;
 use App\Models\Boost\CreditTransaction;
+use App\Models\Boost\CreditWallet;
 use App\Models\Payment\PaymentAttempt;
 use App\Models\Payment\PaymentDispute;
 use App\Models\Payment\PaymentEvent;
@@ -40,25 +41,61 @@ class AdminFinanceService
     public function getTransactions(array $filters, int $perPage = 20): array
     {
         $query = PaymentTransaction::with([
-            'user:id,name,email,phone',
+            'user:id,name,display_name,handle,avatar_url,city,badge,email,phone',
             'product:id,code,name',
             'price:id,cadence',
         ]);
-
-        if (! empty($filters['status'])) {
-            $query->where('status', $filters['status']);
-        }
 
         if (! empty($filters['provider'])) {
             $query->where('provider', $filters['provider']);
         }
 
+        if (! empty($filters['operator'])) {
+            $op = strtolower(trim((string) $filters['operator']));
+            $query->where(function (Builder $sub) use ($op) {
+                $sub->where('provider', $op)
+                    ->orWhere('channel', 'like', "%{$op}%")
+                    ->orWhereHas('attempts', function (Builder $aq) use ($op) {
+                        $aq->where('error_message', 'like', "%{$op}%")
+                            ->orWhere('metadata', 'like', "%{$op}%");
+                    });
+            });
+        }
+
         if (! empty($filters['service_type'])) {
-            $query->where('service_type', $filters['service_type']);
+            $serviceTypes = is_array($filters['service_type'])
+                ? $filters['service_type']
+                : explode(',', (string) $filters['service_type']);
+            $serviceTypes = array_map('trim', $serviceTypes);
+            $query->whereIn('service_type', $serviceTypes);
         }
 
         if (! empty($filters['currency'])) {
-            $query->where('currency', strtoupper((string) $filters['currency']));
+            $currencies = is_array($filters['currency'])
+                ? $filters['currency']
+                : explode(',', (string) $filters['currency']);
+            $currencies = array_map(fn ($c) => strtoupper(trim((string) $c)), $currencies);
+            $query->whereIn('currency', $currencies);
+        }
+
+        if (! empty($filters['country'])) {
+            $country = strtoupper(trim((string) $filters['country']));
+            $query->whereHas('user', function (Builder $uq) use ($country) {
+                $uq->where('country_code', $country)
+                    ->orWhereHas('country', fn ($cq) => $cq->where('code', $country)->orWhere('iso2', $country)->orWhere('iso3', $country));
+            });
+        }
+
+        if (! empty($filters['failure_reason'])) {
+            $reason = trim((string) $filters['failure_reason']);
+            $like = DB::connection()->getDriverName() === 'pgsql' ? 'ilike' : 'like';
+            $query->where('status', PaymentStatus::Failed->value)
+                ->where(function (Builder $sub) use ($reason, $like) {
+                    $sub->whereHas('attempts', function (Builder $aq) use ($reason, $like) {
+                        $aq->where('error_message', $like, "%{$reason}%")
+                            ->orWhere('error_code', $like, "%{$reason}%");
+                    });
+                });
         }
 
         if (! empty($filters['user_id'])) {
@@ -69,12 +106,18 @@ class AdminFinanceService
             $query->where('reference', trim((string) $filters['reference']));
         }
 
-        if (! empty($filters['from'])) {
-            $query->whereDate('created_at', '>=', Carbon::parse($filters['from']));
+        $from = $filters['from'] ?? $filters['date_from'] ?? $filters['created_after'] ?? null;
+        if (! empty($from)) {
+            $query->where('created_at', '>=', Carbon::parse($from));
         }
 
-        if (! empty($filters['to'])) {
-            $query->whereDate('created_at', '<=', Carbon::parse($filters['to']));
+        $to = $filters['to'] ?? $filters['date_to'] ?? $filters['created_before'] ?? null;
+        if (! empty($to)) {
+            $toCarbon = Carbon::parse($to);
+            if ($toCarbon->format('H:i:s') === '00:00:00' && ! str_contains((string) $to, 'T')) {
+                $toCarbon = $toCarbon->endOfDay();
+            }
+            $query->where('created_at', '<=', $toCarbon);
         }
 
         if (! empty($filters['q'])) {
@@ -87,18 +130,39 @@ class AdminFinanceService
                     ->orWhere('idempotency_key', $like, "%{$term}%")
                     ->orWhereHas('user', function (Builder $uq) use ($term, $like) {
                         $uq->where('name', $like, "%{$term}%")
+                            ->orWhere('display_name', $like, "%{$term}%")
+                            ->orWhere('handle', $like, "%{$term}%")
                             ->orWhere('email', $like, "%{$term}%")
                             ->orWhere('phone', 'like', "%{$term}%");
                     });
+
+                if (is_numeric($term) && strlen($term) >= 3) {
+                    $sub->orWhereHas('user', function (Builder $uq) use ($term) {
+                        $uq->where('phone', 'like', "%{$term}");
+                    });
+                }
             });
         }
 
-        // Compteurs de statuts sur la base filtrée
-        $statusCounts = (clone $query)
+        // Compteurs d'onglets calculés sur la base filtrée hors statut
+        $baseQuery = clone $query;
+        $statusCounts = $baseQuery
             ->selectRaw('status, count(*) as count')
             ->groupBy('status')
             ->pluck('count', 'status')
             ->toArray();
+
+        $totalCount = array_sum($statusCounts);
+        $counts = array_merge(['all' => $totalCount], $statusCounts);
+
+        // Application du filtre de statut
+        if (! empty($filters['status'])) {
+            $statuses = is_array($filters['status'])
+                ? $filters['status']
+                : explode(',', (string) $filters['status']);
+            $statuses = array_map('trim', $statuses);
+            $query->whereIn('status', $statuses);
+        }
 
         $allowedSorts = ['created_at', 'total_amount', 'status'];
         $sortBy = in_array($filters['sort_by'] ?? null, $allowedSorts, true) ? $filters['sort_by'] : 'created_at';
@@ -112,6 +176,7 @@ class AdminFinanceService
         return [
             'paginator' => $paginator,
             'status_counts' => $statusCounts,
+            'counts' => $counts,
         ];
     }
 
@@ -122,7 +187,7 @@ class AdminFinanceService
     {
         /** @var PaymentTransaction|null $transaction */
         $transaction = PaymentTransaction::with([
-            'user:id,name,email,phone,is_verified,account_type',
+            'user:id,name,display_name,handle,avatar_url,city,badge,email,phone,is_verified,account_type',
             'product',
             'price',
             'subscription',
@@ -192,16 +257,24 @@ class AdminFinanceService
     /**
      * 4.3. Grand livre des Crédits BANGO et soldes actifs.
      *
+    /**
+     * 4.3. Grand livre des Crédits BANGO et soldes actifs.
+     *
      * @param  array<string, mixed>  $filters
+     * @return array{paginator: LengthAwarePaginator, meta_counts: array<string, mixed>}
      */
-    public function getCreditsLedger(array $filters, int $perPage = 20): LengthAwarePaginator
+    public function getCreditsLedger(array $filters, int $perPage = 20): array
     {
-        $query = CreditTransaction::with(['user:id,name,email,phone', 'wallet:id,balance,currency'])
+        $query = CreditTransaction::with(['user:id,name,display_name,handle,avatar_url,city,badge,email,phone', 'wallet:id,balance,currency'])
             ->orderByDesc('created_at')
             ->orderByDesc('id');
 
         if (! empty($filters['type'])) {
-            $query->where('type', $filters['type']);
+            $types = is_array($filters['type'])
+                ? $filters['type']
+                : explode(',', (string) $filters['type']);
+            $types = array_map('trim', $types);
+            $query->whereIn('type', $types);
         }
 
         if (! empty($filters['source'])) {
@@ -212,12 +285,18 @@ class AdminFinanceService
             $query->where('user_id', (int) $filters['user_id']);
         }
 
-        if (! empty($filters['from'])) {
-            $query->whereDate('created_at', '>=', Carbon::parse($filters['from']));
+        $from = $filters['from'] ?? $filters['date_from'] ?? null;
+        if (! empty($from)) {
+            $query->where('created_at', '>=', Carbon::parse($from));
         }
 
-        if (! empty($filters['to'])) {
-            $query->whereDate('created_at', '<=', Carbon::parse($filters['to']));
+        $to = $filters['to'] ?? $filters['date_to'] ?? null;
+        if (! empty($to)) {
+            $toCarbon = Carbon::parse($to);
+            if ($toCarbon->format('H:i:s') === '00:00:00' && ! str_contains((string) $to, 'T')) {
+                $toCarbon = $toCarbon->endOfDay();
+            }
+            $query->where('created_at', '<=', $toCarbon);
         }
 
         if (! empty($filters['q'])) {
@@ -230,15 +309,30 @@ class AdminFinanceService
                     ->orWhere('description', $like, "%{$term}%")
                     ->orWhereHas('user', function (Builder $uq) use ($term, $like) {
                         $uq->where('name', $like, "%{$term}%")
+                            ->orWhere('display_name', $like, "%{$term}%")
+                            ->orWhere('handle', $like, "%{$term}%")
                             ->orWhere('email', $like, "%{$term}%")
                             ->orWhere('phone', 'like', "%{$term}%");
                     });
             });
         }
 
-        $boundedPerPage = min(100, max(1, $perPage));
+        // Métriques globales du grand livre
+        $totalInCirculation = (int) CreditWallet::sum('balance');
+        $totalIssuedPeriod = (int) (clone $query)->where('type', 'deposit')->sum('amount');
+        $totalConsumedPeriod = (int) (clone $query)->whereIn('type', ['purchase', 'usage', 'debit'])->sum('amount');
 
-        return $query->paginate($boundedPerPage);
+        $boundedPerPage = min(100, max(1, $perPage));
+        $paginator = $query->paginate($boundedPerPage);
+
+        return [
+            'paginator' => $paginator,
+            'meta_counts' => [
+                'total_in_circulation' => $totalInCirculation,
+                'total_issued_period' => $totalIssuedPeriod,
+                'total_consumed_period' => $totalConsumedPeriod,
+            ],
+        ];
     }
 
     /**
@@ -246,11 +340,12 @@ class AdminFinanceService
      *
      * @return array<string, mixed>
      */
-    public function getOperatorsMonitoring(): array
+    public function getOperatorsMonitoring(int $windowDays = 30): array
     {
-        $since = Carbon::now()->subDays(7);
+        $since = Carbon::now()->subDays(max(1, $windowDays));
+        $recentThreshold = Carbon::now()->subHours(2);
 
-        // Statistiques globales sur les 7 derniers jours
+        // Statistiques globales sur la fenêtre configurée
         $statsByProvider = PaymentTransaction::where('created_at', '>=', $since)
             ->selectRaw('provider, status, count(*) as count')
             ->groupBy('provider', 'status')
@@ -267,62 +362,93 @@ class AdminFinanceService
             ->latest('created_at')
             ->first();
 
-        // Analyse des tentatives par canal (Mobile Money, Card, etc.)
-        $attemptsByChannel = PaymentAttempt::where('created_at', '>=', $since)
+        $hasRecentMonetbilError = $lastMonetbilError && $lastMonetbilError->created_at >= $recentThreshold;
+
+        // Analyse des tentatives par canal et opérateur
+        $attemptsByOperator = PaymentAttempt::where('created_at', '>=', $since)
             ->selectRaw('channel, status, count(*) as count')
             ->groupBy('channel', 'status')
             ->get();
 
-        $calcMetrics = function ($items) {
+        $calcMetrics = function ($items, bool $isEnabled, ?PaymentAttempt $lastError = null, bool $hasRecentError = false) {
             $total = 0;
             $success = 0;
             $failed = 0;
             foreach ($items as $item) {
                 $total += $item->count;
-                if ($item->status === PaymentStatus::Confirmed->value || $item->status === 'successful' || $item->status === 'confirmed') {
+                $statusVal = $item->status instanceof \BackedEnum ? $item->status->value : (string) $item->status;
+                if ($statusVal === PaymentStatus::Confirmed->value || $statusVal === 'successful' || $statusVal === 'confirmed') {
                     $success += $item->count;
-                } elseif ($item->status === PaymentStatus::Failed->value || $item->status === 'failed') {
+                } elseif ($statusVal === PaymentStatus::Failed->value || $statusVal === 'failed') {
                     $failed += $item->count;
                 }
             }
 
+            $successRate = $total > 0 ? round(($success / $total) * 100, 2) : 100.0;
+            $failureRate = $total > 0 ? round(($failed / $total) * 100, 2) : 0.0;
+
+            $status = 'disabled';
+            if ($isEnabled) {
+                if ($hasRecentError || ($total >= 3 && $failureRate >= 15.0)) {
+                    $status = 'degraded';
+                } else {
+                    $status = 'operational';
+                }
+            }
+
             return [
+                'status' => $status,
                 'total_transactions' => $total,
                 'successful_transactions' => $success,
                 'failed_transactions' => $failed,
-                'success_rate' => $total > 0 ? round(($success / $total) * 100, 2) : 100.0,
+                'success_rate' => $successRate,
+                'failure_rate' => $failureRate,
+                'last_error' => $lastError ? [
+                    'date' => $lastError->created_at?->toIso8601String(),
+                    'error_code' => $lastError->error_code,
+                    'error_message' => $lastError->error_message,
+                ] : null,
             ];
         };
 
         $monetbilTx = $statsByProvider->where('provider', PaymentProvider::Monetbil);
-        $monetbilMetrics = $calcMetrics($monetbilTx);
+        $monetbilMetrics = $calcMetrics($monetbilTx, $monetbilEnabled, $lastMonetbilError, $hasRecentMonetbilError);
 
-        $momoAttempts = $attemptsByChannel->filter(fn ($a) => stripos($a->channel?->value ?? (string) $a->channel, 'mobile') !== false);
+        // Mtn et Orange
+        $mtnAttempts = $attemptsByOperator->filter(function ($a) {
+            $ch = $a->channel instanceof \BackedEnum ? $a->channel->value : (string) $a->channel;
+
+            return stripos($ch, 'mtn') !== false;
+        });
+        $orangeAttempts = $attemptsByOperator->filter(function ($a) {
+            $ch = $a->channel instanceof \BackedEnum ? $a->channel->value : (string) $a->channel;
+
+            return stripos($ch, 'orange') !== false;
+        });
+
+        $mtnMetrics = $calcMetrics($mtnAttempts->isNotEmpty() ? $mtnAttempts : $monetbilTx, $monetbilEnabled, $lastMonetbilError, $hasRecentMonetbilError);
+        $orangeMetrics = $calcMetrics($orangeAttempts->isNotEmpty() ? $orangeAttempts : $monetbilTx, $monetbilEnabled, $lastMonetbilError, $hasRecentMonetbilError);
 
         return [
-            'window' => 'Derniers 7 jours',
+            'window' => "Derniers {$windowDays} jours",
+            'window_days' => $windowDays,
             'scanned_since' => $since->toIso8601String(),
             'providers' => [
                 'monetbil' => array_merge([
                     'name' => 'Monetbil (Agrégateur Mobile Money)',
                     'is_enabled' => $monetbilEnabled,
-                    'status' => $monetbilEnabled ? 'operational' : 'disabled',
                     'supported_channels' => ['MTN Mobile Money (Cameroun)', 'Orange Money (Cameroun)'],
-                    'last_error' => $lastMonetbilError ? [
-                        'date' => $lastMonetbilError->created_at?->toIso8601String(),
-                        'error_message' => $lastMonetbilError->error_message,
-                    ] : null,
                 ], $monetbilMetrics),
                 'mtn_momo' => array_merge([
                     'name' => 'MTN Mobile Money',
                     'via_aggregator' => 'monetbil',
-                    'status' => $monetbilEnabled ? 'operational' : 'disabled',
-                ], $monetbilMetrics),
+                    'is_enabled' => $monetbilEnabled,
+                ], $mtnMetrics),
                 'orange_money' => array_merge([
                     'name' => 'Orange Money',
                     'via_aggregator' => 'monetbil',
-                    'status' => $monetbilEnabled ? 'operational' : 'disabled',
-                ], $monetbilMetrics),
+                    'is_enabled' => $monetbilEnabled,
+                ], $orangeMetrics),
                 'flutterwave' => [
                     'name' => 'Flutterwave',
                     'is_enabled' => $flutterwaveEnabled,
@@ -349,19 +475,28 @@ class AdminFinanceService
      * 4.8. Supervision des abonnements de badges et périodes de grâce.
      *
      * @param  array<string, mixed>  $filters
+     * @return array{paginator: LengthAwarePaginator, counts: array<string, int>, mrr: float}
      */
-    public function getSubscriptions(array $filters, int $perPage = 20): LengthAwarePaginator
+    public function getSubscriptions(array $filters, int $perPage = 20): array
     {
+        // Fermeture automatique des abonnements associés à un compte supprimé
+        Subscription::where('state', 'active')
+            ->where(function ($subQ) {
+                $subQ->whereDoesntHave('user')
+                    ->orWhereHas('user', fn ($uq) => $uq->whereNotNull('deleted_at')->orWhere('status', 'deleted'));
+            })
+            ->update([
+                'state' => 'cancelled',
+                'canceled_at' => now(),
+                'cancel_reason' => 'Compte utilisateur supprimé',
+            ]);
+
         $query = Subscription::with([
-            'user:id,name,email,phone,handle,badge',
+            'user:id,name,display_name,email,phone,handle,avatar_url,city,badge',
             'product:id,code,name',
             'price:id,cadence,price_amount,currency',
         ])
             ->orderByDesc('created_at');
-
-        if (! empty($filters['state'])) {
-            $query->where('state', $filters['state']);
-        }
 
         if (! empty($filters['badge_type'])) {
             $query->where('badge_type', $filters['badge_type']);
@@ -369,6 +504,11 @@ class AdminFinanceService
 
         if (! empty($filters['user_id'])) {
             $query->where('user_id', (int) $filters['user_id']);
+        }
+
+        if (! empty($filters['cadence'])) {
+            $cadence = trim((string) $filters['cadence']);
+            $query->whereHas('price', fn ($pq) => $pq->where('cadence', $cadence));
         }
 
         if (! empty($filters['in_grace'])) {
@@ -382,15 +522,51 @@ class AdminFinanceService
 
             $query->whereHas('user', function (Builder $uq) use ($search, $like) {
                 $uq->where('name', $like, "%{$search}%")
+                    ->orWhere('display_name', $like, "%{$search}%")
                     ->orWhere('email', $like, "%{$search}%")
                     ->orWhere('phone', 'like', "%{$search}%")
                     ->orWhere('handle', $like, "%{$search}%");
             });
         }
 
+        // Compteurs d'onglets et calcul du MRR avant filtre d'état
+        $baseQuery = clone $query;
+        $stateCounts = $baseQuery
+            ->selectRaw('state, count(*) as count')
+            ->groupBy('state')
+            ->pluck('count', 'state')
+            ->toArray();
+        $totalAll = array_sum($stateCounts);
+        $counts = array_merge(['all' => $totalAll], $stateCounts);
+
+        $activeSubs = Subscription::with('price')
+            ->where('state', 'active')
+            ->get();
+        $mrr = 0.0;
+        foreach ($activeSubs as $sub) {
+            $amount = (float) ($sub->price?->price_amount ?? 0);
+            if ($sub->price?->cadence === 'yearly') {
+                $mrr += $amount / 12;
+            } else {
+                $mrr += $amount;
+            }
+        }
+
+        // Filtre d'état (simple ou multiple)
+        if (! empty($filters['state'])) {
+            $states = is_array($filters['state'])
+                ? $filters['state']
+                : explode(',', (string) $filters['state']);
+            $query->whereIn('state', array_map('trim', $states));
+        }
+
         $boundedPerPage = min(100, max(1, $perPage));
 
-        return $query->paginate($boundedPerPage);
+        return [
+            'paginator' => $query->paginate($boundedPerPage),
+            'counts' => $counts,
+            'mrr' => round($mrr, 2),
+        ];
     }
 
     /**

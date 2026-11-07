@@ -27,14 +27,28 @@ class AdminBoostManagementService
      *
      * @param  array<string, mixed>  $filters
      */
-    public function getCampaigns(array $filters, int $perPage = 20): LengthAwarePaginator
+    /**
+     * 5.1. Liste paginée des campagnes de Boost avec métriques et filtres.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return array{paginator: LengthAwarePaginator, counts: array<string, int>, totals: array<string, float>}
+     */
+    public function getCampaigns(array $filters, int $perPage = 20): array
     {
+        // Clôture automatique des campagnes terminées (date de fin atteinte ou budget épuisé)
+        Campaign::where('status', CampaignStatus::Active->value)
+            ->where(function (Builder $q) {
+                $q->where(function ($sub) {
+                    $sub->whereNotNull('end_at')->where('end_at', '<=', now());
+                })->orWhere(function ($sub) {
+                    $sub->whereColumn('spent_amount', '>=', 'budget_amount')
+                        ->where('budget_amount', '>', 0);
+                });
+            })
+            ->update(['status' => CampaignStatus::Completed->value]);
+
         $query = Campaign::with(['user:id,name,email,phone,handle', 'page:id,name,slug'])
             ->orderByDesc('created_at');
-
-        if (! empty($filters['status'])) {
-            $query->where('status', $filters['status']);
-        }
 
         if (! empty($filters['user_id'])) {
             $query->where('user_id', (int) $filters['user_id']);
@@ -70,9 +84,35 @@ class AdminBoostManagementService
             });
         }
 
+        // Compteurs d'onglets et totaux calculés avant filtre de statut
+        $statusCounts = (clone $query)
+            ->selectRaw('status, count(*) as count')
+            ->groupBy('status')
+            ->pluck('count', 'status')
+            ->toArray();
+        $totalAll = array_sum($statusCounts);
+        $counts = array_merge(['all' => $totalAll], $statusCounts);
+
+        $totals = [
+            'total_budget' => (float) (clone $query)->sum('budget_amount'),
+            'total_spent' => (float) (clone $query)->sum('spent_amount'),
+        ];
+
+        // Filtre par statut (simple ou multiple)
+        if (! empty($filters['status'])) {
+            $statuses = is_array($filters['status'])
+                ? $filters['status']
+                : explode(',', (string) $filters['status']);
+            $query->whereIn('status', array_map('trim', $statuses));
+        }
+
         $boundedPerPage = min(100, max(1, $perPage));
 
-        return $query->paginate($boundedPerPage);
+        return [
+            'paginator' => $query->paginate($boundedPerPage),
+            'counts' => $counts,
+            'totals' => $totals,
+        ];
     }
 
     /**

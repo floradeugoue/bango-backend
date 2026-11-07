@@ -24,15 +24,48 @@ class AdminAccountOperationsController extends Controller
     {
         $filters = $request->only([
             'search',
+            'q',
             'status',
             'is_verified',
             'is_certified',
             'badge',
+            'city',
+            'city_id',
+            'country',
+            'created_from',
+            'created_to',
+            'deletion_pending',
+            'trashed',
+            'tab',
             'sort',
             'order',
+            'dir',
         ]);
 
-        $perPage = (int) $request->query('per_page', 20);
+        if ($request->has('status')) {
+            $filters['status'] = $request->input('status');
+        }
+        if ($request->has('badge')) {
+            $filters['badge'] = $request->input('badge');
+        }
+
+        $perPage = (int) $request->query('per_page', $request->query('perPage', 20));
+        $accounts = $this->accountService->getAccounts($filters, $perPage);
+
+        return response()->json($accounts);
+    }
+
+    /**
+     * 5.1 ter. Liste des comptes avec demande de suppression en cours ou supprimés.
+     *
+     * GET /api/admin/accounts/deletions
+     */
+    public function deletions(Request $request): JsonResponse
+    {
+        $filters = $request->all();
+        $filters['deletion_pending'] = true;
+
+        $perPage = (int) $request->query('per_page', $request->query('perPage', 20));
         $accounts = $this->accountService->getAccounts($filters, $perPage);
 
         return response()->json($accounts);
@@ -90,8 +123,9 @@ class AdminAccountOperationsController extends Controller
     public function contents(int|string $id, Request $request): JsonResponse
     {
         $user = User::findOrFail($id);
-        $perPage = (int) $request->query('per_page', 10);
-        $contents = $this->accountService->getUserContents($user, $perPage);
+        $perPage = (int) $request->query('per_page', $request->query('perPage', 10));
+        $page = (int) $request->query('page', 1);
+        $contents = $this->accountService->getUserContents($user, $perPage, $page);
 
         return response()->json([
             'success' => true,
@@ -107,8 +141,9 @@ class AdminAccountOperationsController extends Controller
     public function payments(int|string $id, Request $request): JsonResponse
     {
         $user = User::findOrFail($id);
-        $perPage = (int) $request->query('per_page', 15);
-        $payments = $this->accountService->getUserPayments($user, $perPage);
+        $perPage = (int) $request->query('per_page', $request->query('perPage', 15));
+        $from = $request->query('from', $request->query('date_from'));
+        $payments = $this->accountService->getUserPayments($user, $perPage, $from);
 
         return response()->json($payments);
     }
@@ -142,18 +177,30 @@ class AdminAccountOperationsController extends Controller
     }
 
     /**
-     * 5.4. Chronologie unifiée des événements du compte.
+     * 5.4. Chronologie unifiée paginée des événements du compte.
      *
      * GET /api/admin/accounts/{id}/timeline
      */
-    public function timeline(int|string $id): JsonResponse
+    public function timeline(int|string $id, Request $request): JsonResponse
     {
         $user = User::findOrFail($id);
-        $timeline = $this->accountService->getUserTimeline($user);
+        $perPage = (int) $request->query('per_page', $request->query('perPage', 25));
+        $page = (int) $request->query('page', 1);
+        $timeline = $this->accountService->getUserTimeline($user, $page, $perPage);
 
         return response()->json([
             'success' => true,
-            'data' => $timeline,
+            'data' => $timeline->items(),
+            'pagination' => [
+                'current_page' => $timeline->currentPage(),
+                'per_page' => $timeline->perPage(),
+                'total' => $timeline->total(),
+                'last_page' => $timeline->lastPage(),
+            ],
+            'page' => $timeline->currentPage(),
+            'perPage' => $timeline->perPage(),
+            'total' => $timeline->total(),
+            'pageCount' => $timeline->lastPage(),
         ]);
     }
 

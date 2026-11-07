@@ -6,6 +6,7 @@ use App\Enums\Admin\AdminPermission;
 use App\Enums\Kyc\KycStatus;
 use App\Models\Admin\AdminAuditLog;
 use App\Models\Kyc\KycSubmission;
+use App\Models\Subscription\Subscription;
 use App\Models\User;
 use App\Notifications\Kyc\KycDecisionNotification;
 use App\Notifications\Kyc\KycSupplementRequestedNotification;
@@ -193,14 +194,28 @@ class AdminKycService
     {
         $query = User::with(['role', 'subscriptions' => fn ($q) => $q->latest()])
             ->where(function (Builder $q) {
-                $q->where('badge', '!=', 'none')
-                    ->orWhere('is_verified', true)
-                    ->orWhereHas('subscriptions', fn ($sq) => $sq->whereIn('state', ['active', 'grace']));
+                $q->whereNotNull('badge')
+                    ->where('badge', '!=', 'none');
             });
 
-        // Filtre par type de badge
+        // Filtre par type de badge (badge[])
         if (! empty($filters['badge']) && $filters['badge'] !== 'all') {
-            $query->where('badge', $filters['badge']);
+            $badges = is_array($filters['badge']) ? $filters['badge'] : [$filters['badge']];
+            $query->whereIn('badge', $badges);
+        }
+
+        // Filtre par ville (city[])
+        if (! empty($filters['city'])) {
+            $cities = is_array($filters['city']) ? $filters['city'] : [$filters['city']];
+            $query->whereIn('city', $cities);
+        }
+
+        // Filtre par périodicité / cadence (cadence[])
+        if (! empty($filters['cadence'])) {
+            $cadences = is_array($filters['cadence']) ? $filters['cadence'] : [$filters['cadence']];
+            $query->whereHas('subscriptions', function (Builder $sq) use ($cadences) {
+                $sq->whereIn('cadence', $cadences);
+            });
         }
 
         // Filtre expiration sous 7 jours
@@ -222,12 +237,28 @@ class AdminKycService
             $search = trim((string) $filters['q']);
             $query->where(function (Builder $q) use ($search) {
                 $q->where('name', 'LIKE', "%{$search}%")
+                    ->orWhere('display_name', 'LIKE', "%{$search}%")
                     ->orWhere('email', 'LIKE', "%{$search}%")
-                    ->orWhere('phone', 'LIKE', "%{$search}%");
+                    ->orWhere('phone', 'LIKE', "%{$search}%")
+                    ->orWhere('city', 'LIKE', "%{$search}%");
             });
         }
 
-        $query->orderByDesc('created_at');
+        // Tri (sort = expires | recent | name)
+        $sort = $filters['sort'] ?? 'recent';
+        if ($sort === 'expires') {
+            $query->orderBy(
+                Subscription::select('current_period_end')
+                    ->whereColumn('subscriptions.user_id', 'users.id')
+                    ->latest('current_period_end')
+                    ->limit(1),
+                'asc'
+            );
+        } elseif ($sort === 'name') {
+            $query->orderBy('name', 'asc');
+        } else {
+            $query->orderByDesc('created_at');
+        }
 
         return $query->paginate($perPage);
     }
@@ -255,6 +286,111 @@ class AdminKycService
             });
         }
 
+        // Filtre par badge (badge[])
+        if (! empty($filters['badge'])) {
+            $badges = is_array($filters['badge']) ? $filters['badge'] : [$filters['badge']];
+            $categories = [];
+            foreach ($badges as $b) {
+                if ($b === 'bailleur' || $b === 'landlord') {
+                    $categories[] = 'landlord';
+                    $categories[] = 'bailleur';
+                } elseif ($b === 'agent') {
+                    $categories[] = 'agent';
+                } elseif ($b === 'page') {
+                    $categories[] = 'page';
+                } elseif ($b === 'double') {
+                    $categories[] = 'double';
+                } else {
+                    $categories[] = $b;
+                }
+            }
+            $query->where(function (Builder $bq) use ($categories, $badges) {
+                $bq->whereIn('profile_category', $categories)
+                    ->orWhereHas('user', fn ($uq) => $uq->whereIn('badge', $badges));
+            });
+        }
+
+        // Filtre par motif de rejet (reason[])
+        if (! empty($filters['reason'])) {
+            $reasons = is_array($filters['reason']) ? $filters['reason'] : [$filters['reason']];
+            $query->whereIn('rejection_reason', $reasons);
+        }
+
+        // Filtre par état du recours (appeal_status = open | appealed | closed)
+        if (! empty($filters['appeal_status'])) {
+            $appealStatus = (string) $filters['appeal_status'];
+            $thirtyDaysAgo = now()->subDays(30);
+
+            if ($appealStatus === 'appealed') {
+                $query->where(function (Builder $q) {
+                    $q->whereExists(function ($sq) {
+                        $sq->select(DB::raw(1))
+                            ->from('moderation_appeals')
+                            ->whereColumn('moderation_appeals.user_id', 'kyc_submissions.user_id')
+                            ->where(function ($mq) {
+                                $mq->whereColumn('moderation_appeals.sanction_reference', 'kyc_submissions.id')
+                                    ->orWhereColumn('moderation_appeals.sanction_reference', 'kyc_submissions.reference')
+                                    ->orWhere('moderation_appeals.sanction_type', 'kyc_refusal');
+                            })
+                            ->whereIn('moderation_appeals.status', ['pending', 'in_review']);
+                    })->orWhereExists(function ($sq) {
+                        $sq->select(DB::raw(1))
+                            ->from('kyc_submissions as sub_appeals')
+                            ->whereColumn('sub_appeals.user_id', 'kyc_submissions.user_id')
+                            ->where('sub_appeals.id', '!=', DB::raw('kyc_submissions.id'))
+                            ->where('sub_appeals.metadata->kind', 'appeal')
+                            ->whereIn('sub_appeals.status', ['pending', 'supplement_requested']);
+                    });
+                });
+            } elseif ($appealStatus === 'open') {
+                $query->whereRaw('COALESCE(kyc_submissions.decided_at, kyc_submissions.updated_at) >= ?', [$thirtyDaysAgo])
+                    ->whereNotExists(function ($sq) {
+                        $sq->select(DB::raw(1))
+                            ->from('moderation_appeals')
+                            ->whereColumn('moderation_appeals.user_id', 'kyc_submissions.user_id')
+                            ->where(function ($mq) {
+                                $mq->whereColumn('moderation_appeals.sanction_reference', 'kyc_submissions.id')
+                                    ->orWhereColumn('moderation_appeals.sanction_reference', 'kyc_submissions.reference')
+                                    ->orWhere('moderation_appeals.sanction_type', 'kyc_refusal');
+                            });
+                    })
+                    ->whereNotExists(function ($sq) {
+                        $sq->select(DB::raw(1))
+                            ->from('kyc_submissions as sub_appeals')
+                            ->whereColumn('sub_appeals.user_id', 'kyc_submissions.user_id')
+                            ->where('sub_appeals.id', '!=', DB::raw('kyc_submissions.id'))
+                            ->where('sub_appeals.metadata->kind', 'appeal');
+                    });
+            } elseif ($appealStatus === 'closed') {
+                $query->where(function (Builder $q) use ($thirtyDaysAgo) {
+                    $q->where(function ($expiredQ) use ($thirtyDaysAgo) {
+                        $expiredQ->whereRaw('COALESCE(kyc_submissions.decided_at, kyc_submissions.updated_at) < ?', [$thirtyDaysAgo])
+                            ->whereNotExists(function ($sq) {
+                                $sq->select(DB::raw(1))
+                                    ->from('moderation_appeals')
+                                    ->whereColumn('moderation_appeals.user_id', 'kyc_submissions.user_id')
+                                    ->where(function ($mq) {
+                                        $mq->whereColumn('moderation_appeals.sanction_reference', 'kyc_submissions.id')
+                                            ->orWhereColumn('moderation_appeals.sanction_reference', 'kyc_submissions.reference')
+                                            ->orWhere('moderation_appeals.sanction_type', 'kyc_refusal');
+                                    })
+                                    ->whereIn('moderation_appeals.status', ['pending', 'in_review']);
+                            });
+                    })->orWhereExists(function ($sq) {
+                        $sq->select(DB::raw(1))
+                            ->from('moderation_appeals')
+                            ->whereColumn('moderation_appeals.user_id', 'kyc_submissions.user_id')
+                            ->where(function ($mq) {
+                                $mq->whereColumn('moderation_appeals.sanction_reference', 'kyc_submissions.id')
+                                    ->orWhereColumn('moderation_appeals.sanction_reference', 'kyc_submissions.reference')
+                                    ->orWhere('moderation_appeals.sanction_type', 'kyc_refusal');
+                            })
+                            ->whereIn('moderation_appeals.status', ['resolved', 'rejected', 'approved', 'closed']);
+                    });
+                });
+            }
+        }
+
         if (! empty($filters['q'])) {
             $search = trim((string) $filters['q']);
             $query->where(function (Builder $q) use ($search) {
@@ -263,6 +399,7 @@ class AdminKycService
                     ->orWhere('rejection_reason', 'LIKE', "%{$search}%")
                     ->orWhereHas('user', function (Builder $uq) use ($search) {
                         $uq->where('name', 'LIKE', "%{$search}%")
+                            ->orWhere('display_name', 'LIKE', "%{$search}%")
                             ->orWhere('email', 'LIKE', "%{$search}%");
                     });
             });

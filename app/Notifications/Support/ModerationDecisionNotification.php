@@ -25,6 +25,7 @@ class ModerationDecisionNotification extends Notification implements ShouldQueue
     {
         $subject = match ($this->action) {
             'warn_author' => 'Avertissement de modération — BANGO',
+            'request_correction' => 'Demande de correction de contenu — BANGO',
             'suspend_author' => 'Suspension temporaire de votre compte — BANGO',
             'restrict_author', 'restriction' => 'Restriction temporaire de votre compte — BANGO',
             'remove' => 'Retrait de contenu par la modération — BANGO',
@@ -40,6 +41,11 @@ class ModerationDecisionNotification extends Notification implements ShouldQueue
             $mail->line('Vous avez reçu un avertissement officiel de modération suite à un signalement de contenu.')
                 ->line("Motif de l'avertissement : {$this->justification}")
                 ->line('Veuillez vous conformer aux conditions d\'utilisation de la plateforme.');
+        } elseif ($this->action === 'request_correction') {
+            $untilFormatted = $this->suspendedUntil ? $this->suspendedUntil->format('d/m/Y à H:i') : 'dans le délai imparti';
+            $mail->line("Une demande de correction a été émise sur votre contenu avant le {$untilFormatted}.")
+                ->line("Motif / Précisions : {$this->justification}")
+                ->line('À défaut de mise en conformité avant cette échéance, le contenu sera automatiquement masqué.');
         } elseif ($this->action === 'suspend_author') {
             $untilFormatted = $this->suspendedUntil ? $this->suspendedUntil->format('d/m/Y à H:i') : 'ultérieurement';
             $mail->line("Votre compte a été suspendu jusqu'au {$untilFormatted} suite à un manquement aux règles communautaires.")
@@ -74,6 +80,9 @@ class ModerationDecisionNotification extends Notification implements ShouldQueue
         $locale = $notifiable->locale ?? 'fr';
         $message = match ($this->action) {
             'warn_author' => ($locale === 'en' ? 'Moderation warning: ' : 'Avertissement de modération : ').$this->justification,
+            'request_correction' => ($locale === 'en'
+                ? 'Correction requested before '.($this->suspendedUntil ? $this->suspendedUntil->format('d/m/Y H:i') : 'deadline').'. Reason: '.$this->justification
+                : 'Correction demandée avant le '.($this->suspendedUntil ? $this->suspendedUntil->format('d/m/Y à H:i') : "l'échéance").'. Motif : '.$this->justification),
             'suspend_author' => ($locale === 'en'
                 ? 'Account suspended until '.($this->suspendedUntil ? $this->suspendedUntil->format('d/m/Y') : 'further notice').'. Reason: '.$this->justification
                 : "Compte suspendu jusqu'au ".($this->suspendedUntil ? $this->suspendedUntil->format('d/m/Y') : 'nouvel ordre').'. Motif : '.$this->justification),

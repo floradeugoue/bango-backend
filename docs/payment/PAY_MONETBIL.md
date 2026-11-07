@@ -36,7 +36,7 @@ Ce document formalise l'intégration de la passerelle **Monetbil** au sein du ba
 | `payment_ref` | `string` | Référence de la transaction locale |
 | `user` | `string` | Identifiant ID de l'utilisateur BANGO |
 | `notify_url` | `string` | URL publique sécurisée : `https://.../api/webhooks/payments/monetbil` |
-| `operator` | `string` (opt) | Code opérateur (`CM_ORANGEMONEY`, `CM_MTN`) si précisé |
+| `operator` | `string` (opt) | Code opérateur (`CM_ORANGEMONEY`, `CM_MTNMOBILEMONEY`) si précisé |
 
 ### Réponse Monetbil Reçue
 

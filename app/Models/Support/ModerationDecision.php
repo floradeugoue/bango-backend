@@ -6,6 +6,7 @@ use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class ModerationDecision extends Model
 {
@@ -43,5 +44,10 @@ class ModerationDecision extends Model
     public function operator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'operator_id');
+    }
+
+    public function appeal(): HasOne
+    {
+        return $this->hasOne(ModerationAppeal::class, 'moderation_decision_id');
     }
 }

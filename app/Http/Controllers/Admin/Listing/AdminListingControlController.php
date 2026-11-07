@@ -21,16 +21,21 @@ class AdminListingControlController extends Controller
     public function index(Request $request): JsonResponse
     {
         $filters = $request->only([
-            'status', 'mode', 'kind', 'city', 'neighbourhood',
-            'agent_visited', 'verified_owner', 'min_price', 'max_price', 'q',
+            'status', 'mode', 'kind', 'city', 'city_id', 'neighbourhood',
+            'agent_visited', 'verified_owner', 'min_price', 'price_min',
+            'max_price', 'price_max', 'q', 'sort', 'sort_by', 'dir', 'sort_order',
         ]);
         $perPage = $request->integer('per_page', 20);
 
-        $listings = $this->listingService->getListings($filters, $perPage);
+        $result = $this->listingService->getListings($filters, $perPage);
+        $listings = $result['paginator'];
+        $counts = $result['counts'];
 
         $items = collect($listings->items())->map(function (Listing $l) {
             return [
                 'id' => $l->id,
+                'reference' => $l->reference,
+                'short_reference' => $l->short_reference,
                 'title' => $l->title,
                 'mode' => $l->mode?->value ?? $l->mode,
                 'kind' => $l->kind?->value ?? $l->kind,
@@ -44,12 +49,19 @@ class AdminListingControlController extends Controller
                 'showers' => $l->showers,
                 'area' => (float) $l->area,
                 'agent_visited' => (bool) $l->agent_visited,
-                'owner' => [
+                'views_count' => (int) $l->views_count,
+                'conversations_count' => (int) ($l->conversations_count ?? 0),
+                'messages_count' => (int) ($l->conversations_count ?? 0),
+                'owner' => $l->owner ? [
                     'id' => $l->owner->id,
                     'name' => $l->owner->name,
+                    'display_name' => $l->owner->display_name,
+                    'handle' => $l->owner->handle,
+                    'email' => $l->owner->email,
+                    'phone' => $l->owner->phone,
                     'badge' => $l->owner->badge,
                     'is_verified' => (bool) $l->owner->is_verified,
-                ],
+                ] : null,
                 'agent' => $l->agent ? [
                     'id' => $l->agent->id,
                     'name' => $l->agent->name,
@@ -81,6 +93,8 @@ class AdminListingControlController extends Controller
                 'per_page' => $listings->perPage(),
                 'total' => $listings->total(),
                 'last_page' => $listings->lastPage(),
+                'status_counts' => $counts,
+                'counts' => $counts,
             ],
         ]);
     }
@@ -386,7 +400,7 @@ class AdminListingControlController extends Controller
      */
     public function map(Request $request): JsonResponse
     {
-        $filters = $request->only(['city', 'status', 'kind']);
+        $filters = $request->only(['city', 'status', 'kind', 'detailed']);
         $markers = $this->listingService->getMapListings($filters);
 
         return response()->json([

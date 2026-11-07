@@ -221,3 +221,59 @@ test('le depart du dernier administrateur promeut automatiquement le membre le p
     $bobMember->refresh();
     expect($bobMember->role)->toBe(ConversationMemberRole::Admin);
 });
+
+test('la liste des fils de discussion utilise display_name et charge avatar_url pour les membres et le dernier message', function (): void {
+    $ben = User::factory()->create([
+        'name' => 'msg.b+1793885862417',
+        'display_name' => 'Ben Messages',
+        'avatar_url' => 'https://example.com/ben.jpg',
+    ]);
+
+    $thread = Conversation::factory()->create([
+        'created_by_id' => $ben->id,
+        'status' => 'active',
+    ]);
+
+    ConversationMember::create([
+        'conversation_id' => $thread->id,
+        'user_id' => $this->alice->id,
+        'role' => ConversationMemberRole::Member,
+    ]);
+
+    ConversationMember::create([
+        'conversation_id' => $thread->id,
+        'user_id' => $ben->id,
+        'role' => ConversationMemberRole::Member,
+    ]);
+
+    $message = Message::factory()->create([
+        'conversation_id' => $thread->id,
+        'sender_id' => $ben->id,
+        'body' => 'Salut Alice !',
+    ]);
+
+    $thread->update([
+        'latest_message_id' => $message->id,
+        'last_message_at' => now(),
+    ]);
+
+    Passport::actingAs($this->alice);
+
+    $response = $this->getJson('/api/messages/threads');
+
+    $response->assertStatus(200);
+
+    $threads = $response->json('data');
+    expect($threads)->not->toBeEmpty();
+
+    $targetThread = collect($threads)->firstWhere('id', (string) $thread->id);
+    expect($targetThread)->not->toBeNull()
+        ->and($targetThread['title'])->toBe('Ben Messages');
+
+    $benMember = collect($targetThread['members'])->firstWhere('user_id', $ben->id);
+    expect($benMember['user']['name'])->toBe('Ben Messages')
+        ->and($benMember['user']['avatar_url'])->toBe('https://example.com/ben.jpg');
+
+    expect($targetThread['latest_message']['sender']['name'])->toBe('Ben Messages')
+        ->and($targetThread['latest_message']['sender']['avatar_url'])->toBe('https://example.com/ben.jpg');
+});

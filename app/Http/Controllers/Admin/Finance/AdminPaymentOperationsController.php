@@ -24,8 +24,9 @@ class AdminPaymentOperationsController extends Controller
     public function index(Request $request): JsonResponse
     {
         $filters = $request->only([
-            'status', 'provider', 'service_type', 'currency', 'user_id',
-            'reference', 'from', 'to', 'q', 'sort_by', 'sort_order',
+            'status', 'provider', 'operator', 'service_type', 'currency', 'country', 'user_id',
+            'failure_reason', 'reference', 'from', 'to', 'date_from', 'date_to', 'created_after', 'created_before',
+            'q', 'sort_by', 'sort_order',
         ]);
         $perPage = $request->integer('per_page', 20);
 
@@ -49,6 +50,7 @@ class AdminPaymentOperationsController extends Controller
                 'total' => $paginator->total(),
                 'last_page' => $paginator->lastPage(),
                 'status_counts' => $result['status_counts'],
+                'counts' => $result['counts'],
             ],
         ]);
     }
@@ -84,20 +86,21 @@ class AdminPaymentOperationsController extends Controller
      */
     public function credits(Request $request): JsonResponse
     {
-        $filters = $request->only(['type', 'source', 'user_id', 'from', 'to', 'q']);
+        $filters = $request->only(['type', 'source', 'user_id', 'from', 'to', 'date_from', 'date_to', 'q']);
         $perPage = $request->integer('per_page', 20);
 
-        $paginator = $this->financeService->getCreditsLedger($filters, $perPage);
+        $result = $this->financeService->getCreditsLedger($filters, $perPage);
+        $paginator = $result['paginator'];
 
         return response()->json([
             'success' => true,
             'data' => $paginator->items(),
-            'meta' => [
+            'meta' => array_merge([
                 'current_page' => $paginator->currentPage(),
                 'per_page' => $paginator->perPage(),
                 'total' => $paginator->total(),
                 'last_page' => $paginator->lastPage(),
-            ],
+            ], $result['meta_counts']),
         ]);
     }
 
@@ -107,7 +110,8 @@ class AdminPaymentOperationsController extends Controller
      */
     public function operators(Request $request): JsonResponse
     {
-        $monitoring = $this->financeService->getOperatorsMonitoring();
+        $days = $request->integer('days', 30);
+        $monitoring = $this->financeService->getOperatorsMonitoring($days);
 
         return response()->json([
             'success' => true,
@@ -121,10 +125,10 @@ class AdminPaymentOperationsController extends Controller
      */
     public function subscriptions(Request $request): JsonResponse
     {
-        $filters = $request->only(['state', 'badge_type', 'user_id', 'in_grace', 'q']);
+        $filters = $request->only(['state', 'badge_type', 'user_id', 'in_grace', 'cadence', 'q']);
         $perPage = $request->integer('per_page', 20);
 
-        $paginator = $this->financeService->getSubscriptions($filters, $perPage);
+        ['paginator' => $paginator, 'counts' => $counts, 'mrr' => $mrr] = $this->financeService->getSubscriptions($filters, $perPage);
 
         $items = collect($paginator->items())->map(function ($sub) {
             $inGrace = $sub->state === 'grace' && $sub->grace_until && $sub->grace_until->isFuture();
@@ -172,6 +176,8 @@ class AdminPaymentOperationsController extends Controller
                 'per_page' => $paginator->perPage(),
                 'total' => $paginator->total(),
                 'last_page' => $paginator->lastPage(),
+                'counts' => $counts,
+                'mrr' => $mrr,
             ],
         ]);
     }

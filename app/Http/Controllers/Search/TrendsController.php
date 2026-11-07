@@ -23,7 +23,7 @@ class TrendsController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $trends = $this->trendsService->getTrends($request->user());
+        $trends = $this->trendsService->getTrends($request->user(), $request->query('country'));
 
         return response()->json([
             'success' => true,

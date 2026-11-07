@@ -43,10 +43,10 @@ class MessageThreadService
 
         $query->with([
             'members.user' => function ($q): void {
-                $q->select(['id', 'name', 'handle', 'avatar_url', 'is_verified', 'account_type']);
+                $q->select(['id', 'name', 'display_name', 'handle', 'avatar_url', 'is_verified', 'account_type']);
             },
             'latestMessage.sender' => function ($q): void {
-                $q->select(['id', 'name', 'handle']);
+                $q->select(['id', 'name', 'display_name', 'handle', 'avatar_url']);
             },
             'listing' => function ($q): void {
                 $q->select(['id', 'title', 'price', 'currency', 'status', 'mode', 'kind', 'owner_id', 'agent_id']);
@@ -435,10 +435,10 @@ class MessageThreadService
             })
             ->with([
                 'members.user' => function ($q): void {
-                    $q->select(['id', 'name', 'handle', 'avatar_url', 'badge', 'is_verified', 'verification_lapsed']);
+                    $q->select(['id', 'name', 'display_name', 'handle', 'avatar_url', 'badge', 'is_verified', 'verification_lapsed']);
                 },
                 'latestMessage.sender' => function ($q): void {
-                    $q->select(['id', 'name', 'handle']);
+                    $q->select(['id', 'name', 'display_name', 'handle', 'avatar_url']);
                 },
                 'listing',
             ])

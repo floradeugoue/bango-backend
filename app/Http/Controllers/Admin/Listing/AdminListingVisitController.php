@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin\Listing;
 use App\Http\Controllers\Controller;
 use App\Models\Visit\VisitReservation;
 use App\Services\Admin\AdminListingControlService;
+use App\Services\Visit\VisitReservationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -22,7 +23,7 @@ class AdminListingVisitController extends Controller
         $filters = $request->only(['status', 'listing_id', 'overdue_sla', 'disputed', 'q']);
         $perPage = $request->integer('per_page', 20);
 
-        $reservations = $this->listingService->getVisits($filters, $perPage);
+        ['paginator' => $reservations, 'counts' => $counts] = $this->listingService->getVisits($filters, $perPage);
 
         $items = collect($reservations->items())->map(function (VisitReservation $vr) {
             $statusVal = $vr->status instanceof \BackedEnum ? $vr->status->value : (string) $vr->status;
@@ -32,8 +33,11 @@ class AdminListingVisitController extends Controller
 
             return [
                 'id' => $vr->id,
+                'reference' => $vr->reference,
+                'short_reference' => $vr->short_reference,
                 'listing' => $vr->listing ? [
                     'id' => $vr->listing->id,
+                    'reference' => $vr->listing->reference,
                     'title' => $vr->listing->title,
                     'city' => $vr->listing->city,
                     'neighbourhood' => $vr->listing->neighbourhood,
@@ -60,11 +64,10 @@ class AdminListingVisitController extends Controller
                     'starts_at' => $vr->slot->starts_at?->toISOString(),
                     'ends_at' => $vr->slot->ends_at?->toISOString(),
                 ] : null,
-                'status' => $vr->status->value,
+                'status' => $vr->status instanceof \BackedEnum ? $vr->status->value : (string) $vr->status,
                 'fee' => (float) $vr->fee,
                 'currency' => $vr->currency,
                 'payment_reference' => $vr->payment_reference,
-                'short_reference' => $vr->short_reference,
                 'hours_waiting' => $hoursWaiting,
                 'is_overdue_sla_18h' => $isOverdue,
                 'answered_at' => $vr->answered_at?->toISOString(),
@@ -101,6 +104,7 @@ class AdminListingVisitController extends Controller
                 'per_page' => $reservations->perPage(),
                 'total' => $reservations->total(),
                 'last_page' => $reservations->lastPage(),
+                'counts' => $counts,
             ],
         ]);
     }
@@ -108,5 +112,19 @@ class AdminListingVisitController extends Controller
     public function index(Request $request): JsonResponse
     {
         return $this->visits($request);
+    }
+
+    /**
+     * Traite l'expiration et le remboursement en crédit des visites non répondues.
+     */
+    public function settleOverdue(VisitReservationService $visitReservationService): JsonResponse
+    {
+        $settledCount = $visitReservationService->settleOverdueUnanswered();
+
+        return response()->json([
+            'success' => true,
+            'settled_count' => $settledCount,
+            'message' => "{$settledCount} visite(s) expirée(s) clôturée(s) et recréditée(s).",
+        ]);
     }
 }

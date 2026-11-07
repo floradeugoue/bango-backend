@@ -41,6 +41,10 @@ class Report extends Model
         'metadata',
     ];
 
+    protected $appends = [
+        'target',
+    ];
+
     /**
      * @return array<string, string>
      */
@@ -117,7 +121,7 @@ class Report extends Model
             'reel_comment', 'reel_comments' => ReelComment::class,
             'listing', 'listings' => Listing::class,
             'message', 'messages' => Message::class,
-            'user', 'users', 'profile' => User::class,
+            'user', 'users', 'profile', 'account', 'accounts' => User::class,
             'page', 'pages' => Page::class,
             default => class_exists($type) ? $type : null,
         };
@@ -129,15 +133,190 @@ class Report extends Model
     public static function resolveShortType(string $className): string
     {
         return match ($className) {
-            Post::class => 'post',
-            PostComment::class => 'post_comment',
-            Reel::class => 'reel',
-            ReelComment::class => 'reel_comment',
-            Listing::class => 'listing',
-            Message::class => 'message',
-            User::class => 'user',
-            Page::class => 'page',
+            Post::class, 'post', 'posts' => 'post',
+            PostComment::class, 'post_comment', 'post_comments' => 'post_comment',
+            Reel::class, 'reel', 'reels' => 'reel',
+            ReelComment::class, 'reel_comment', 'reel_comments' => 'reel_comment',
+            Listing::class, 'listing', 'listings' => 'listing',
+            Message::class, 'message', 'messages' => 'message',
+            User::class, 'user', 'users', 'account', 'accounts', 'profile' => 'user',
+            Page::class, 'page', 'pages' => 'page',
             default => class_basename($className),
         };
+    }
+
+    /**
+     * Attribut target exposé automatiquement dans chaque élément de la file.
+     * { type, id, display_name, handle, avatar_url, city, badge, excerpt, thumbnail_url }
+     *
+     * @return array<string, mixed>
+     */
+    public function getTargetAttribute(): array
+    {
+        return $this->resolveTargetData();
+    }
+
+    /**
+     * Accesseur metadata assurant que target_label prend le display_name de la cible si disponible.
+     *
+     * @param  mixed  $value
+     * @return array<string, mixed>
+     */
+    public function getMetadataAttribute($value): array
+    {
+        $meta = is_string($value) ? json_decode($value, true) : (is_array($value) ? $value : []);
+
+        $target = $this->target;
+        if (($target['type'] ?? null) === 'account' && ! empty($target['display_name'])) {
+            $meta['target_label'] = $target['display_name'];
+        } elseif (empty($meta['target_label']) && ! empty($target['excerpt'])) {
+            $meta['target_label'] = $target['excerpt'];
+        }
+
+        if (! empty($target['thumbnail_url']) && empty($meta['target_thumbnail_url'])) {
+            $meta['target_thumbnail_url'] = $target['thumbnail_url'];
+        }
+        if (! empty($target['excerpt']) && empty($meta['target_excerpt'])) {
+            $meta['target_excerpt'] = $target['excerpt'];
+        }
+
+        return $meta;
+    }
+
+    /**
+     * Résout la structure de données complète de la cible signalée.
+     *
+     * @return array<string, mixed>
+     */
+    public function resolveTargetData(): array
+    {
+        $shortType = static::resolveShortType($this->reportable_type);
+        $targetId = (string) $this->reportable_id;
+
+        $target = $this->relationLoaded('reportable')
+            ? $this->reportable
+            : null;
+
+        if (! $target) {
+            $class = static::resolveReportableClass($this->reportable_type);
+            if ($class && class_exists($class)) {
+                $target = $class::find($this->reportable_id);
+            }
+        }
+
+        $type = match ($shortType) {
+            'user' => 'account',
+            'post_comment', 'reel_comment' => 'comment',
+            default => $shortType,
+        };
+
+        $displayName = null;
+        $handle = null;
+        $avatarUrl = null;
+        $city = null;
+        $badge = null;
+        $excerpt = null;
+        $thumbnailUrl = null;
+
+        if ($target instanceof User) {
+            $displayName = $target->display_name ?: $target->name;
+            $handle = $target->handle;
+            $avatarUrl = $target->avatar_url;
+            $city = $target->city;
+            $badge = $target->badge;
+            $excerpt = $target->bio;
+            $thumbnailUrl = $target->avatar_url;
+        } elseif ($target instanceof Post) {
+            $author = $target->relationLoaded('user') ? $target->user : $target->user()->first();
+            $displayName = $author?->display_name ?: $author?->name;
+            $handle = $author?->handle;
+            $avatarUrl = $author?->avatar_url;
+            $city = $target->place_city ?? $author?->city;
+            $badge = $author?->badge;
+            $excerpt = mb_substr(strip_tags((string) ($target->body ?? '')), 0, 150);
+
+            $media = $target->relationLoaded('media') ? $target->media : $target->media()->get();
+            $firstMedia = $media->first();
+            $thumbnailUrl = $firstMedia?->poster_url ?? $firstMedia?->thumbnail_url ?? $firstMedia?->media_url;
+        } elseif ($target instanceof Reel) {
+            $author = $target->relationLoaded('user') ? $target->user : $target->user()->first();
+            $displayName = $author?->display_name ?: $author?->name;
+            $handle = $author?->handle;
+            $avatarUrl = $author?->avatar_url;
+            $city = $author?->city;
+            $badge = $author?->badge;
+            $excerpt = mb_substr(strip_tags((string) ($target->caption ?? '')), 0, 150);
+            $thumbnailUrl = $target->thumbnail_url ?? $target->video_url;
+        } elseif ($target instanceof Listing) {
+            $owner = $target->relationLoaded('owner') ? $target->owner : ($target->owner ?? $target->createdBy);
+            if (! $owner && method_exists($target, 'owner')) {
+                $owner = $target->owner()->first();
+            }
+            $displayName = $owner?->display_name ?: $owner?->name;
+            $handle = $owner?->handle;
+            $avatarUrl = $owner?->avatar_url;
+            $city = $target->city ?? $owner?->city;
+            $badge = $owner?->badge;
+            $excerptText = trim($target->title.($target->description ? " — {$target->description}" : ''));
+            $excerpt = mb_substr(strip_tags($excerptText), 0, 150);
+
+            $photos = $target->relationLoaded('photos') ? $target->photos : ($target->relationLoaded('media') ? $target->media : (method_exists($target, 'photos') ? $target->photos()->get() : collect()));
+            $firstPhoto = $photos->first();
+            $thumbnailUrl = $firstPhoto?->thumbnail_url ?? $firstPhoto?->url;
+        } elseif ($target instanceof PostComment || $target instanceof ReelComment) {
+            $author = $target->relationLoaded('user') ? $target->user : $target->user()->first();
+            $displayName = $author?->display_name ?: $author?->name;
+            $handle = $author?->handle;
+            $avatarUrl = $author?->avatar_url;
+            $city = $author?->city;
+            $badge = $author?->badge;
+            $excerpt = mb_substr(strip_tags((string) ($target->body ?? '')), 0, 150);
+            $thumbnailUrl = $author?->avatar_url;
+        } elseif ($target instanceof Message) {
+            $sender = $target->relationLoaded('sender') ? $target->sender : $target->sender()->first();
+            $displayName = $sender?->display_name ?: $sender?->name;
+            $handle = $sender?->handle;
+            $avatarUrl = $sender?->avatar_url;
+            $city = $sender?->city;
+            $badge = $sender?->badge;
+            $excerpt = mb_substr(strip_tags((string) ($target->body ?? '')), 0, 150);
+            $thumbnailUrl = $sender?->avatar_url;
+        } elseif ($target instanceof Page) {
+            $displayName = $target->name;
+            $handle = $target->handle;
+            $avatarUrl = $target->logo_url;
+            $city = $target->city;
+            $badge = $target->certification_status?->value ?? null;
+            $excerpt = mb_substr(strip_tags((string) ($target->description ?? '')), 0, 150);
+            $thumbnailUrl = $target->cover_url ?? $target->logo_url;
+        }
+
+        // Fallbacks depuis raw metadata si target n'a pu être chargé
+        if (! $displayName && isset($this->attributes['metadata'])) {
+            $rawMeta = json_decode($this->attributes['metadata'] ?? '[]', true) ?: [];
+            $displayName = $rawMeta['target_label'] ?? null;
+            $thumbnailUrl = $thumbnailUrl ?? ($rawMeta['target_thumbnail_url'] ?? null);
+            $excerpt = $excerpt ?? ($rawMeta['target_excerpt'] ?? $this->details);
+        }
+
+        $contentLabel = match ($type) {
+            'account' => $displayName,
+            'listing' => ($target instanceof Listing ? $target->title : null) ?? $excerpt ?? $displayName,
+            'page' => ($target instanceof Page ? $target->name : null) ?? $displayName,
+            default => $excerpt ?: $displayName,
+        };
+
+        return [
+            'type' => $type,
+            'id' => $targetId,
+            'display_name' => $displayName,
+            'handle' => $handle,
+            'avatar_url' => $avatarUrl,
+            'city' => $city,
+            'badge' => $badge,
+            'excerpt' => $excerpt,
+            'thumbnail_url' => $thumbnailUrl,
+            'label' => $contentLabel, // Compatibilité
+        ];
     }
 }

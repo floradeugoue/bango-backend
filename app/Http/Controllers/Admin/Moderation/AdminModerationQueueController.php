@@ -7,6 +7,7 @@ use App\Http\Requests\Admin\Moderation\ApplyDecisionRequest;
 use App\Http\Requests\Admin\Moderation\AssignCasesRequest;
 use App\Http\Requests\Admin\Moderation\BulkDecisionRequest;
 use App\Http\Requests\Admin\Moderation\EscalateCaseRequest;
+use App\Models\Support\ModerationAppeal;
 use App\Models\Support\Report;
 use App\Services\Admin\ModerationQueueService;
 use Illuminate\Http\JsonResponse;
@@ -32,12 +33,15 @@ class AdminModerationQueueController extends Controller
             'assigned_to' => $request->query('assigned_to'),
             'date_from' => $request->query('date_from'),
             'date_to' => $request->query('date_to'),
+            'created_after' => $request->query('created_after'),
+            'created_before' => $request->query('created_before'),
             'search' => $request->query('search'),
-            'sort_by' => $request->query('sort_by', 'created_at'),
-            'sort_dir' => $request->query('sort_dir', 'desc'),
+            'q' => $request->query('q'),
+            'sort_by' => $request->query('sort_by', $request->query('sort', 'created_at')),
+            'sort_dir' => $request->query('sort_dir', $request->query('dir', 'desc')),
         ];
 
-        $perPage = (int) $request->query('per_page', 20);
+        $perPage = (int) $request->query('per_page', $request->query('perPage', 20));
         $result = $this->queueService->getQueue($filters, $perPage);
 
         return response()->json([
@@ -58,6 +62,9 @@ class AdminModerationQueueController extends Controller
                 'last_page' => $result['reports']->lastPage(),
             ],
             'counters' => $result['counters'],
+            'meta' => [
+                'counts' => $result['counters'],
+            ],
         ]);
     }
 
@@ -202,13 +209,34 @@ class AdminModerationQueueController extends Controller
     public function myDecisions(Request $request): JsonResponse
     {
         $operator = $request->attributes->get('admin_operator') ?? $request->user();
-        $perPage = (int) $request->query('per_page', 20);
+        $perPage = (int) $request->query('per_page', $request->query('perPage', 20));
 
-        $decisions = $this->queueService->getMyDecisions($operator, $perPage);
+        $filters = [
+            'date_from' => $request->query('date_from'),
+            'date_to' => $request->query('date_to'),
+            'created_after' => $request->query('created_after'),
+            'created_before' => $request->query('created_before'),
+            'status' => $request->query('status'),
+            'sort_dir' => $request->query('dir', $request->query('sort_dir', 'desc')),
+        ];
+
+        $decisions = $this->queueService->getMyDecisions($operator, $perPage, $filters);
+
+        $items = collect($decisions->items())->map(function ($decision) {
+            $data = $decision->toArray();
+            $data['appeal'] = $decision->appeal ? [
+                'id' => $decision->appeal->id,
+                'reference' => $decision->appeal->reference,
+                'status' => $decision->appeal->status instanceof \BackedEnum ? $decision->appeal->status->value : (string) $decision->appeal->status,
+                'opened_at' => $decision->appeal->created_at?->toIso8601String(),
+            ] : null;
+
+            return $data;
+        })->all();
 
         return response()->json([
             // Contract format: Page<T>
-            'items' => $decisions->items(),
+            'items' => $items,
             'page' => $decisions->currentPage(),
             'perPage' => $decisions->perPage(),
             'total' => $decisions->total(),
@@ -216,12 +244,18 @@ class AdminModerationQueueController extends Controller
 
             // Legacy keys for backward compatibility
             'success' => true,
-            'data' => $decisions->items(),
+            'data' => $items,
             'pagination' => [
                 'current_page' => $decisions->currentPage(),
                 'per_page' => $decisions->perPage(),
                 'total' => $decisions->total(),
                 'last_page' => $decisions->lastPage(),
+            ],
+            'meta' => [
+                'counts' => [
+                    'total' => $decisions->total(),
+                    'contested' => ModerationAppeal::where('sanction_operator_id', $operator->id)->count(),
+                ],
             ],
         ]);
     }

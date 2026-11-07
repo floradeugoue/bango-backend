@@ -175,3 +175,116 @@ it('filters operators by country code in GET /api/operators', function () {
         expect($op['country']['code'])->toBe('SN');
     }
 });
+
+it('maps MTN to CM_MTNMOBILEMONEY and handles legacy aliases and omission correctly', function () {
+    $gateway = new MonetbilGateway;
+
+    // Cameroun MTN mappings
+    expect($gateway->mapOperatorCode('mtn', 'CM'))->toBe('CM_MTNMOBILEMONEY')
+        ->and($gateway->mapOperatorCode('mtn_momo', 'CM'))->toBe('CM_MTNMOBILEMONEY')
+        ->and($gateway->mapOperatorCode('mobile_money', 'CM'))->toBe('CM_MTNMOBILEMONEY')
+        ->and($gateway->mapOperatorCode('CM_MTN', 'CM'))->toBe('CM_MTNMOBILEMONEY')
+        ->and($gateway->mapOperatorCode('CM_MTNMOBILEMONEY', 'CM'))->toBe('CM_MTNMOBILEMONEY');
+
+    // Cameroun Orange mapping
+    expect($gateway->mapOperatorCode('orange', 'CM'))->toBe('CM_ORANGEMONEY')
+        ->and($gateway->mapOperatorCode('CM_ORANGEMONEY', 'CM'))->toBe('CM_ORANGEMONEY');
+
+    // Autres pays
+    expect($gateway->mapOperatorCode('mtn', 'CI'))->toBe('CI_MTNMOBILEMONEY')
+        ->and($gateway->mapOperatorCode('CI_MTN', 'CI'))->toBe('CI_MTNMOBILEMONEY')
+        ->and($gateway->mapOperatorCode('moov', 'CI'))->toBe('CI_MOOVMONEY')
+        ->and($gateway->mapOperatorCode('mtn', 'BJ'))->toBe('BJ_MTNMOBILEMONEY')
+        ->and($gateway->mapOperatorCode('BJ_MTN', 'BJ'))->toBe('BJ_MTNMOBILEMONEY');
+
+    // Opérateur inconnu ou auto -> null pour auto-détection par Monetbil
+    expect($gateway->mapOperatorCode('unknown_op', 'CM'))->toBeNull()
+        ->and($gateway->mapOperatorCode('auto', 'CM'))->toBeNull();
+});
+
+it('sends CM_MTNMOBILEMONEY to Monetbil when paying with MTN in Cameroon', function () {
+    $user = User::factory()->create(['country_code' => 'CM']);
+
+    $tx = PaymentTransaction::create([
+        'user_id' => $user->id,
+        'service_type' => PaymentServiceType::Visit,
+        'provider' => PaymentProvider::Monetbil,
+        'channel' => PaymentChannel::MobileMoney,
+        'currency' => 'XAF',
+        'amount' => '5000.00',
+        'fee_amount' => '100.00',
+        'tax_amount' => '0.00',
+        'total_amount' => '5100.00',
+        'credit_used' => '0.00',
+        'amount_charged' => '5100.00',
+        'status' => PaymentStatus::Pending,
+        'idempotency_key' => 'idemp_'.Str::uuid(),
+    ]);
+
+    Http::fake([
+        'https://api.monetbil.com/payment/v1/placePayment' => Http::response([
+            'status' => 'REQUEST_ACCEPTED',
+            'paymentId' => 'mb_pay_mtn_12345',
+            'message' => 'Demande USSD envoyée',
+            'channel_ussd' => '*126#',
+            'operator' => 'CM_MTNMOBILEMONEY',
+        ], 200),
+    ]);
+
+    $gateway = new MonetbilGateway;
+    $result = $gateway->initiatePayment($tx, [
+        'phone' => '677112233',
+        'operator' => 'mtn',
+    ]);
+
+    expect($result->isSuccessful)->toBeTrue();
+
+    Http::assertSent(function (Request $request) {
+        return $request['country'] === 'CM'
+            && $request['currency'] === 'XAF'
+            && $request['phonenumber'] === '237677112233'
+            && $request['operator'] === 'CM_MTNMOBILEMONEY';
+    });
+});
+
+it('omits operator parameter from Monetbil request when operator is unrecognized or omitted', function () {
+    $user = User::factory()->create(['country_code' => 'CM']);
+
+    $tx = PaymentTransaction::create([
+        'user_id' => $user->id,
+        'service_type' => PaymentServiceType::Visit,
+        'provider' => PaymentProvider::Monetbil,
+        'channel' => PaymentChannel::MobileMoney,
+        'currency' => 'XAF',
+        'amount' => '5000.00',
+        'fee_amount' => '100.00',
+        'tax_amount' => '0.00',
+        'total_amount' => '5100.00',
+        'credit_used' => '0.00',
+        'amount_charged' => '5100.00',
+        'status' => PaymentStatus::Pending,
+        'idempotency_key' => 'idemp_'.Str::uuid(),
+    ]);
+
+    Http::fake([
+        'https://api.monetbil.com/payment/v1/placePayment' => Http::response([
+            'status' => 'REQUEST_ACCEPTED',
+            'paymentId' => 'mb_pay_auto_12345',
+            'message' => 'Demande USSD envoyée',
+            'channel_ussd' => '*126#',
+        ], 200),
+    ]);
+
+    $gateway = new MonetbilGateway;
+    $result = $gateway->initiatePayment($tx, [
+        'phone' => '677112233',
+        // Pas d'opérateur ou inconnu
+        'operator' => 'auto',
+    ]);
+
+    expect($result->isSuccessful)->toBeTrue();
+
+    Http::assertSent(function (Request $request) {
+        return ! isset($request['operator']);
+    });
+});

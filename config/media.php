@@ -14,6 +14,16 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Disque de stockage privé (Fichiers confidentiels & Messages)
+    |--------------------------------------------------------------------------
+    | Stockage sécurisé hors d'atteinte du Web Server sans lien symbolique.
+    | En développement : 'local' (storage/app/private, serve: false).
+    | En production : bucket privé R2 ou stockage chiffré.
+    */
+    'private_disk' => env('MEDIA_PRIVATE_DISK', 'local'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Fournisseur de diffusion vidéo en streaming
     |--------------------------------------------------------------------------
     | 'cloudflare_stream' pour l'encodage et la diffusion HLS adaptative.
@@ -66,6 +76,11 @@ return [
         'listings_thumbnails' => 'listings/thumbnails/{user_id}',
         'listings_temp' => 'listings/temp',
 
+        // Messages privés & Vocaux (Stockage sécurisé)
+        'messages_voices' => 'messages/voices/{conversation_id}',
+        'messages_attachments' => 'messages/attachments/{conversation_id}',
+        'messages_temp' => 'messages/temp',
+
         // Compatibilité arrière (anciens alias)
         'reels_clips' => 'reels/videos/{user_id}',
         'sounds' => 'sounds/catalogue',
@@ -81,4 +96,14 @@ return [
     'max_video_size' => 100 * 1024 * 1024, // 100 Mo
     'max_image_size' => 15 * 1024 * 1024,  // 15 Mo
     'max_audio_size' => 30 * 1024 * 1024,  // 30 Mo
+
+    /*
+    |--------------------------------------------------------------------------
+    | Configuration des files et de concurrence FFmpeg (VPS)
+    |--------------------------------------------------------------------------
+    */
+    'ffmpeg_queue' => env('FFMPEG_QUEUE', 'ffmpeg'),
+    'ffmpeg_max_concurrency' => (int) env('FFMPEG_MAX_CONCURRENCY', 2),
+    'ffmpeg_job_timeout' => (int) env('FFMPEG_JOB_TIMEOUT', 300),
+    'stuck_job_timeout_minutes' => (int) env('MEDIA_STUCK_TIMEOUT_MINUTES', 15),
 ];

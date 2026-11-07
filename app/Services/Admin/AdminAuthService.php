@@ -60,7 +60,7 @@ class AdminAuthService
                 'device_fingerprint' => substr($deviceHash, 0, 16),
             ],
             'policy' => [
-                'two_factor_required' => true,
+                'two_factor_required' => false,
                 'sliding_timeout_minutes' => 30,
                 'password_policy' => AdminPasswordPolicy::getPolicy(),
             ],
@@ -178,8 +178,16 @@ class AdminAuthService
         // Réinitialisation du throttle après vérification valide des identifiants
         RateLimiter::clear($throttleKey);
 
-        // Tous les opérateurs internes requièrent le 2FA
-        // Génération d'un challenge aléatoire, expirant, lié à l'opérateur
+        // Double authentification facultative : activée uniquement si l'opérateur a configuré son TOTP
+        $hasTotp = ! empty($user->two_factor_secret)
+            && ! in_array($user->two_factor_method, [null, '', 'off', 'none'], true);
+
+        if (! $hasTotp) {
+            // Si l'opérateur n'a pas de TOTP (two_factor_method vide ou off), ouvrir la session directement (cookie bango_admin_session), sans challenge
+            return $this->establishSession($user, $request);
+        }
+
+        // Émission d'un challenge TOTP aléatoire, expirant, lié à l'opérateur
         $challengeToken = bin2hex(random_bytes(32));
 
         AdminChallenge::create([
@@ -421,6 +429,11 @@ class AdminAuthService
 
         // 3. Enregistrement / mise à jour de l'appareil
         $deviceHash = hash('sha256', ($request->ip() ?? '').($request->userAgent() ?? ''));
+        $existingDevice = AdminDevice::where('user_id', $user->id)
+            ->where('device_hash', $deviceHash)
+            ->first();
+        $isNewDevice = ! $existingDevice;
+
         AdminDevice::updateOrCreate(
             ['user_id' => $user->id, 'device_hash' => $deviceHash],
             [
@@ -430,6 +443,12 @@ class AdminAuthService
                 'is_trusted' => true,
             ]
         );
+
+        if ($isNewDevice) {
+            AdminAuditLog::logEvent('auth.device.new_detected', $user, $request->ip(), $request->userAgent(), [
+                'device_hash' => substr($deviceHash, 0, 16),
+            ]);
+        }
 
         // 4. Configuration des cookies (Point 27 : Secure systématiquement, y compris hors production, SameSite=Strict)
         $sessionCookie = cookie(
@@ -459,6 +478,8 @@ class AdminAuthService
         // 5. Journalisation de la connexion réussie
         AdminAuditLog::logEvent('auth.login.success', $user, $request->ip(), $request->userAgent(), [
             'is_recovery' => $isRecovery,
+            'is_new_device' => $isNewDevice,
+            'device_fingerprint' => substr($deviceHash, 0, 16),
         ]);
 
         $permissions = $user->getEffectivePermissions();

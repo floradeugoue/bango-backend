@@ -24,6 +24,7 @@ class DatabaseSeeder extends Seeder
             SoundSeeder::class,
             HelpArticleSeeder::class,
             LegalDocumentSeeder::class,
+            ModerationRuleSeeder::class,
         ]);
 
         if (app()->environment('local', 'testing')) {

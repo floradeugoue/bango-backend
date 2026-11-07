@@ -25,6 +25,10 @@ class ModerationRule extends Model
         'updated_by',
     ];
 
+    protected $appends = [
+        'stats',
+    ];
+
     /**
      * @return array<string, string>
      */
@@ -32,6 +36,30 @@ class ModerationRule extends Model
     {
         return [
             'is_active' => 'boolean',
+        ];
+    }
+
+    /**
+     * Statistiques consolidées de la règle (signalements du mois, précédent, en attente, taux de recours/annulation).
+     *
+     * @return array{this_month: int, prev_month: int, pending: int, appeal_rate: float, overturn_rate: float}
+     */
+    public function getStatsAttribute($value = null): array
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if (isset($this->attributes['stats']) && is_array($this->attributes['stats'])) {
+            return $this->attributes['stats'];
+        }
+
+        return [
+            'this_month' => 0,
+            'prev_month' => 0,
+            'pending' => 0,
+            'appeal_rate' => 0.0,
+            'overturn_rate' => 0.0,
         ];
     }
 

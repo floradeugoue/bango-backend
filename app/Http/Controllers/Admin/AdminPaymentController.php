@@ -30,29 +30,40 @@ class AdminPaymentController extends Controller
     public function index(Request $request): JsonResponse
     {
         $query = PaymentTransaction::with([
-            'user:id,name,email,phone',
+            'user:id,name,display_name,handle,avatar_url,city,badge,email,phone',
             'product:id,code,name',
             'price:id,cadence',
         ]);
 
-        // 1. Filtre par statut
-        if ($request->filled('status')) {
-            $query->where('status', $request->input('status'));
+        // 1. Filtre par fournisseur / passerelle
+        if ($request->filled('provider')) {
+            $query->where('provider', $request->input('provider'));
         }
 
-        // 2. Filtre par utilisateur
+        // 2. Filtre par opérateur mobile money
+        if ($request->filled('operator')) {
+            $op = strtolower(trim((string) $request->input('operator')));
+            $query->where(function ($sub) use ($op) {
+                $sub->where('provider', $op)
+                    ->orWhere('channel', 'like', "%{$op}%")
+                    ->orWhereHas('attempts', function ($aq) use ($op) {
+                        $aq->where('error_message', 'like', "%{$op}%")
+                            ->orWhere('metadata', 'like', "%{$op}%");
+                    });
+            });
+        }
+
+        // 3. Filtre par utilisateur
         if ($request->filled('user_id')) {
             $query->where('user_id', (int) $request->input('user_id'));
         }
 
-        // 3. Filtre par type de prestation
+        // 4. Filtre par type de prestation (simple ou multiple)
         if ($request->filled('service_type')) {
-            $query->where('service_type', $request->input('service_type'));
-        }
-
-        // 4. Filtre par fournisseur
-        if ($request->filled('provider')) {
-            $query->where('provider', $request->input('provider'));
+            $serviceTypes = is_array($request->input('service_type'))
+                ? $request->input('service_type')
+                : explode(',', (string) $request->input('service_type'));
+            $query->whereIn('service_type', array_map('trim', $serviceTypes));
         }
 
         // 5. Filtre par canal
@@ -60,20 +71,54 @@ class AdminPaymentController extends Controller
             $query->where('channel', $request->input('channel'));
         }
 
-        // 6. Filtre par référence exacte
+        // 6. Filtre par devise / pays
+        if ($request->filled('currency')) {
+            $currencies = is_array($request->input('currency'))
+                ? $request->input('currency')
+                : explode(',', (string) $request->input('currency'));
+            $query->whereIn('currency', array_map(fn ($c) => strtoupper(trim((string) $c)), $currencies));
+        }
+        if ($request->filled('country')) {
+            $country = strtoupper(trim((string) $request->input('country')));
+            $query->whereHas('user', function ($uq) use ($country) {
+                $uq->where('country_code', $country)
+                    ->orWhereHas('country', fn ($cq) => $cq->where('code', $country)->orWhere('iso2', $country)->orWhere('iso3', $country));
+            });
+        }
+
+        // 7. Filtre par motif de rejet
+        if ($request->filled('failure_reason')) {
+            $reason = trim((string) $request->input('failure_reason'));
+            $like = DB::connection()->getDriverName() === 'pgsql' ? 'ilike' : 'like';
+            $query->where('status', 'failed')
+                ->where(function ($sub) use ($reason, $like) {
+                    $sub->whereHas('attempts', function ($aq) use ($reason, $like) {
+                        $aq->where('error_message', $like, "%{$reason}%")
+                            ->orWhere('error_code', $like, "%{$reason}%");
+                    });
+                });
+        }
+
+        // 8. Filtre par référence exacte
         if ($request->filled('reference')) {
             $query->where('reference', trim($request->input('reference')));
         }
 
-        // 7. Filtre par dates
-        if ($request->filled('from')) {
-            $query->whereDate('created_at', '>=', Carbon::parse($request->input('from')));
+        // 9. Filtre par dates
+        $from = $request->input('from') ?? $request->input('date_from') ?? $request->input('created_after');
+        if (! empty($from)) {
+            $query->where('created_at', '>=', Carbon::parse($from));
         }
-        if ($request->filled('to')) {
-            $query->whereDate('created_at', '<=', Carbon::parse($request->input('to')));
+        $to = $request->input('to') ?? $request->input('date_to') ?? $request->input('created_before');
+        if (! empty($to)) {
+            $toCarbon = Carbon::parse($to);
+            if ($toCarbon->format('H:i:s') === '00:00:00' && ! str_contains((string) $to, 'T')) {
+                $toCarbon = $toCarbon->endOfDay();
+            }
+            $query->where('created_at', '<=', $toCarbon);
         }
 
-        // 8. Recherche textuelle ciblée
+        // 10. Recherche textuelle ciblée multi-champs
         if ($request->filled('q')) {
             $term = trim($request->input('q'));
             $like = DB::connection()->getDriverName() === 'pgsql' ? 'ilike' : 'like';
@@ -84,20 +129,46 @@ class AdminPaymentController extends Controller
                     ->orWhere('idempotency_key', $like, "%{$term}%")
                     ->orWhereHas('user', function ($uq) use ($term, $like) {
                         $uq->where('name', $like, "%{$term}%")
+                            ->orWhere('display_name', $like, "%{$term}%")
+                            ->orWhere('handle', $like, "%{$term}%")
                             ->orWhere('email', $like, "%{$term}%")
                             ->orWhere('phone', 'like', "%{$term}%");
                     });
+
+                if (is_numeric($term) && strlen($term) >= 3) {
+                    $sub->orWhereHas('user', function ($uq) use ($term) {
+                        $uq->where('phone', 'like', "%{$term}");
+                    });
+                }
             });
         }
 
-        // 9. Tri contrôlé (protection contre injections)
+        // 11. Compteurs d'onglets calculés avant filtre de statut
+        $baseQuery = clone $query;
+        $statusCounts = $baseQuery
+            ->selectRaw('status, count(*) as count')
+            ->groupBy('status')
+            ->pluck('count', 'status')
+            ->toArray();
+        $totalAll = array_sum($statusCounts);
+        $counts = array_merge(['all' => $totalAll], $statusCounts);
+
+        // 12. Filtre par statut (simple ou multiple)
+        if ($request->filled('status')) {
+            $statuses = is_array($request->input('status'))
+                ? $request->input('status')
+                : explode(',', (string) $request->input('status'));
+            $query->whereIn('status', array_map('trim', $statuses));
+        }
+
+        // 13. Tri contrôlé (protection contre injections)
         $allowedSorts = ['created_at', 'total_amount', 'status'];
         $sortBy = in_array($request->input('sort_by'), $allowedSorts, true) ? $request->input('sort_by') : 'created_at';
-        $sortOrder = strtolower((string) $request->input('sort_order')) === 'asc' ? 'asc' : 'desc';
+        $sortOrder = strtolower((string) ($request->input('sort_order') ?? $request->input('dir') ?? 'desc')) === 'asc' ? 'asc' : 'desc';
 
         $query->orderBy($sortBy, $sortOrder);
 
-        // 10. Pagination serveur
+        // 14. Pagination serveur
         $perPage = min(100, max(1, (int) $request->input('per_page', 20)));
         $paginator = $query->paginate($perPage);
 
@@ -109,6 +180,8 @@ class AdminPaymentController extends Controller
                 'per_page' => $paginator->perPage(),
                 'total' => $paginator->total(),
                 'last_page' => $paginator->lastPage(),
+                'status_counts' => $statusCounts,
+                'counts' => $counts,
             ],
         ]);
     }
@@ -121,7 +194,7 @@ class AdminPaymentController extends Controller
     {
         /** @var PaymentTransaction|null $transaction */
         $transaction = PaymentTransaction::with([
-            'user:id,name,email,phone,is_verified,account_type',
+            'user:id,name,display_name,handle,avatar_url,city,badge,email,phone,is_verified,account_type',
             'product',
             'price',
             'subscription',
@@ -298,7 +371,7 @@ class AdminPaymentController extends Controller
     public function disputes(Request $request): JsonResponse
     {
         $query = PaymentDispute::with([
-            'user:id,name,email,phone',
+            'user:id,name,display_name,handle,avatar_url,city,badge,email,phone',
             'transaction:id,reference,total_amount,status,currency',
             'assignee:id,name',
         ])->latest('created_at');
@@ -326,9 +399,25 @@ class AdminPaymentController extends Controller
         $perPage = min(100, max(1, (int) $request->input('per_page', 20)));
         $paginator = $query->paginate($perPage);
 
+        $items = $paginator->getCollection();
+        $secondIds = $items->map(fn ($d) => $d->metadata['second_transaction_id'] ?? null)->filter()->unique()->values();
+        $secondTxs = $secondIds->isNotEmpty()
+            ? PaymentTransaction::whereIn('id', $secondIds)->select(['id', 'reference', 'total_amount', 'status', 'currency'])->get()->keyBy('id')
+            : collect();
+
+        $enrichedItems = $items->map(function ($d) use ($secondTxs) {
+            $arr = $d->toArray();
+            $secondId = $d->metadata['second_transaction_id'] ?? null;
+            $arr['second_transaction'] = $secondId && isset($secondTxs[$secondId])
+                ? $secondTxs[$secondId]
+                : null;
+
+            return $arr;
+        });
+
         return response()->json([
             'success' => true,
-            'data' => $paginator->items(),
+            'data' => $enrichedItems,
             'meta' => [
                 'current_page' => $paginator->currentPage(),
                 'per_page' => $paginator->perPage(),
@@ -361,12 +450,16 @@ class AdminPaymentController extends Controller
                 $request->merge(['user_id' => $tx->user_id]);
             }
         }
+        if ($request->filled('duplicate_transaction_id') && ! $request->filled('second_transaction_id')) {
+            $request->merge(['second_transaction_id' => $request->input('duplicate_transaction_id')]);
+        }
         if ($request->filled('amount_contested') && ! $request->filled('disputed_amount')) {
             $request->merge(['disputed_amount' => $request->input('amount_contested')]);
         }
 
         $validated = $request->validate([
             'transaction_id' => ['nullable', 'integer', 'exists:payment_transactions,id'],
+            'second_transaction_id' => ['nullable', 'integer', 'exists:payment_transactions,id'],
             'user_id' => ['required', 'integer', 'exists:users,id'],
             'type' => ['nullable', 'string', 'in:dispute,double_charge'],
             'reason' => ['required', 'string', 'min:5', 'max:1000'],
@@ -374,6 +467,11 @@ class AdminPaymentController extends Controller
             'claimant_phone' => ['nullable', 'string', 'max:32'],
             'operator_reference' => ['nullable', 'string', 'max:128'],
         ]);
+
+        $metadata = [];
+        if (! empty($validated['second_transaction_id'])) {
+            $metadata['second_transaction_id'] = (int) $validated['second_transaction_id'];
+        }
 
         $dispute = PaymentDispute::create([
             'transaction_id' => $validated['transaction_id'] ?? null,
@@ -385,6 +483,7 @@ class AdminPaymentController extends Controller
             'claimant_phone' => $validated['claimant_phone'] ?? null,
             'operator_reference' => $validated['operator_reference'] ?? null,
             'assigned_to' => $request->user()->id,
+            'metadata' => $metadata ?: null,
         ]);
 
         $dispute->addNote($request->user(), 'Dossier ouvert par l\'administrateur.');
@@ -414,7 +513,7 @@ class AdminPaymentController extends Controller
     public function showDispute(string $id): JsonResponse
     {
         $dispute = PaymentDispute::with([
-            'user:id,name,email,phone',
+            'user:id,name,display_name,handle,avatar_url,city,badge,email,phone',
             'transaction',
             'assignee:id,name,email',
         ])
@@ -430,8 +529,14 @@ class AdminPaymentController extends Controller
             );
         }
 
+        $data = $dispute->toArray();
+        $secondId = $dispute->metadata['second_transaction_id'] ?? null;
+        $data['second_transaction'] = $secondId
+            ? PaymentTransaction::find($secondId)
+            : null;
+
         return $this->paymentSuccess(
-            data: $dispute,
+            data: $data,
             message: 'Dossier de litige récupéré avec succès.'
         );
     }

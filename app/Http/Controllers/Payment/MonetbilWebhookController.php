@@ -195,13 +195,33 @@ class MonetbilWebhookController extends Controller
 
             // 8. Échec formellement confirmé par le serveur Monetbil
             if ($serverStatus->status === PaymentStatus::Failed) {
+                $rawMsg = $serverStatus->rawResponse['transaction']['message']
+                    ?? $serverStatus->rawResponse['transaction']['operator_message']
+                    ?? $serverStatus->rawResponse['message']
+                    ?? $serverStatus->errorMessage
+                    ?? ($request->input('message') ?? 'Échec notifié par Monetbil');
+
+                $rawStatus = $serverStatus->rawResponse['transaction']['status']
+                    ?? $serverStatus->rawResponse['status']
+                    ?? null;
+
+                $failureReason = $serverStatus->rawResponse['transaction']['operator_message']
+                    ?? $serverStatus->rawResponse['operator_message']
+                    ?? $serverStatus->rawResponse['transaction']['message']
+                    ?? $serverStatus->rawResponse['message']
+                    ?? $rawMsg;
+
                 $this->paymentEngineService->failTransaction(
                     transaction: $transaction,
-                    reason: $serverStatus->errorMessage ?? ($request->input('message') ?? 'Échec notifié par Monetbil'),
+                    reason: $rawMsg,
                     source: PaymentEventSource::Gateway,
                     details: [
                         'error_code' => $serverStatus->errorCode,
                         'operator' => $operator ?: $serverStatus->operatorCode,
+                        'message' => $rawMsg,
+                        'status' => $rawStatus,
+                        'failure_reason' => $failureReason,
+                        'raw_response' => $serverStatus->rawResponse,
                     ]
                 );
 

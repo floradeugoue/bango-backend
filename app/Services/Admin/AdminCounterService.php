@@ -27,11 +27,21 @@ class AdminCounterService
         // 1. Modération en attente (ReportStatus::Pending)
         if ($operator->hasPermission(AdminPermission::ModerationView->value)) {
             $counters['moderation_pending'] = Report::where('status', ReportStatus::Pending->value)->count();
+            $counters['moderation_overdue'] = Report::whereIn('status', [
+                ReportStatus::Pending->value,
+                ReportStatus::Investigating->value,
+            ])->where('created_at', '<', now()->subHours(24))->count();
         }
 
         // 2. Dossiers KYC en attente (KycStatus::Pending)
         if ($operator->hasPermission(AdminPermission::VerificationView->value)) {
-            $counters['kyc_pending'] = KycSubmission::where('status', KycStatus::Pending->value)->count();
+            $counters['kyc_pending'] = KycSubmission::where('status', KycStatus::Pending->value)
+                ->whereHas('user')
+                ->count();
+            $counters['kyc_overdue'] = KycSubmission::where('status', KycStatus::Pending->value)
+                ->whereHas('user')
+                ->where('created_at', '<', now()->subHours(48))
+                ->count();
         }
 
         // 3. Paiements nécessitant une intervention (litiges ouverts + transactions en attente de revue manuelle)
@@ -49,7 +59,15 @@ class AdminCounterService
                 TicketStatus::Open->value,
                 TicketStatus::InProgress->value,
             ])->count();
+            $counters['support_overdue'] = SupportTicket::whereIn('status', [
+                TicketStatus::Open->value,
+                TicketStatus::InProgress->value,
+            ])->where('created_at', '<', now()->subHours(24))->count();
         }
+
+        $counters['overdue_total'] = ($counters['moderation_overdue'] ?? 0)
+            + ($counters['kyc_overdue'] ?? 0)
+            + ($counters['support_overdue'] ?? 0);
 
         return [
             'operator_id' => $operator->id,

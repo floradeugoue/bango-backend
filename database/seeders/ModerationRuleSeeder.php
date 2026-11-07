@@ -77,6 +77,14 @@ class ModerationRuleSeeder extends Seeder
                 'severity' => 'critical',
                 'default_action' => 'suspend_author',
             ],
+            [
+                'code' => 'other',
+                'name' => 'Autre motif',
+                'description' => 'Signalement pour motif divers nécessitant une analyse manuelle par l\'équipe.',
+                'app_reason' => 'other',
+                'severity' => 'medium',
+                'default_action' => 'keep_online',
+            ],
         ];
 
         foreach ($rules as $data) {

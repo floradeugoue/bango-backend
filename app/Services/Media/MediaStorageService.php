@@ -3,8 +3,10 @@
 namespace App\Services\Media;
 
 use App\Enums\Square\PostMediaKind;
+use App\Models\Message\Message;
 use App\Models\Reel\Reel;
 use App\Models\Reel\Sound;
+use App\Models\Square\Post;
 use App\Models\Square\PostMedia;
 use App\Models\User;
 use DateTimeInterface;
@@ -440,7 +442,7 @@ class MediaStorageService
      *     duration: ?int
      * }
      */
-    public function storeSquareMedia(UploadedFile $file, User $user, ?string $disk = null): array
+    public function storeSquareMedia(UploadedFile $file, User $user, ?string $disk = null, bool $syncTranscode = false): array
     {
         $disk = $disk ?? $this->getDisk();
         $mime = $this->resolveMimeType($file);
@@ -496,7 +498,7 @@ class MediaStorageService
         $originalUrl = $url;
         $playbackUrl = $url;
 
-        if ($isVideo) {
+        if ($isVideo && $syncTranscode) {
             /** @var VideoTranscodingService $transcoder */
             $transcoder = app(VideoTranscodingService::class);
             $transcoded = $transcoder->transcode($path, 'square/renditions', $user->id, $disk);
@@ -521,6 +523,7 @@ class MediaStorageService
             'width' => $width,
             'height' => $height,
             'duration' => null,
+            'status' => $isVideo ? ($syncTranscode ? 'completed' : 'pending') : 'completed',
         ];
     }
 
@@ -665,6 +668,208 @@ class MediaStorageService
     }
 
     /**
+     * Vérifie si un chemin ou URL de fichier est encore référencé par un autre modèle en base de données.
+     * Protège les médias partagés, réutilisés ou cités contre toute suppression accidentelle.
+     */
+    public function isFileReferenced(
+        string $pathOrUrl,
+        ?string $excludeModelType = null,
+        int|string|null $excludeModelId = null
+    ): bool {
+        $path = $this->extractRelativePath($pathOrUrl);
+        if (empty($path)) {
+            return false;
+        }
+
+        // 1. PostMedia (Square)
+        $postMediaQuery = PostMedia::query()
+            ->where(function ($q) use ($path) {
+                $q->where('media_url', $path)
+                    ->orWhere('media_url', 'like', '%/'.$path)
+                    ->orWhere('poster_url', $path)
+                    ->orWhere('poster_url', 'like', '%/'.$path)
+                    ->orWhere('edit_metadata', 'like', '%'.$path.'%');
+            });
+        if ($excludeModelType === 'PostMedia' && $excludeModelId) {
+            $postMediaQuery->where('id', '!=', $excludeModelId);
+        }
+        if ($postMediaQuery->exists()) {
+            return true;
+        }
+
+        // 2. Reels
+        $reelQuery = Reel::query()
+            ->where(function ($q) use ($path) {
+                $q->where('video_url', $path)
+                    ->orWhere('video_url', 'like', '%/'.$path)
+                    ->orWhere('thumbnail_url', $path)
+                    ->orWhere('thumbnail_url', 'like', '%/'.$path);
+            });
+        if ($excludeModelType === 'Reel' && $excludeModelId) {
+            $reelQuery->where('id', '!=', $excludeModelId);
+        }
+        if ($reelQuery->exists()) {
+            return true;
+        }
+
+        // 3. Messages privés
+        $messageQuery = Message::query()
+            ->where(function ($q) use ($path) {
+                $q->where('attachment_path', $path)
+                    ->orWhere('attachment_path', 'like', '%/'.$path);
+            });
+        if ($excludeModelType === 'Message' && $excludeModelId) {
+            $messageQuery->where('id', '!=', $excludeModelId);
+        }
+        if ($messageQuery->exists()) {
+            return true;
+        }
+
+        // 4. Sons (Sound)
+        $soundQuery = Sound::query()
+            ->where(function ($q) use ($path) {
+                $q->where('audio_url', $path)
+                    ->orWhere('audio_url', 'like', '%/'.$path);
+            });
+        if ($excludeModelType === 'Sound' && $excludeModelId) {
+            $soundQuery->where('id', '!=', $excludeModelId);
+        }
+        if ($soundQuery->exists()) {
+            return true;
+        }
+
+        // 5. Avatars utilisateurs
+        if (User::query()->where('avatar_url', $path)->orWhere('avatar_url', 'like', '%/'.$path)->exists()) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Supprime un fichier physique UNIQUEMENT s'il n'est plus référencé par un autre modèle.
+     */
+    public function deleteSafely(
+        string $pathOrUrl,
+        ?string $disk = null,
+        ?string $excludeModelType = null,
+        int|string|null $excludeModelId = null
+    ): bool {
+        if ($this->isExternalUrl($pathOrUrl)) {
+            return false;
+        }
+
+        $path = $this->extractRelativePath($pathOrUrl);
+        if (empty($path)) {
+            return false;
+        }
+
+        // Vérification de référence croisée
+        if ($this->isFileReferenced($path, $excludeModelType, $excludeModelId)) {
+            Log::info("Suppression ignorée pour le fichier {$path} : média partagé ou encore référencé en base de données.");
+
+            return false;
+        }
+
+        $disk = $disk ?? $this->getDisk();
+
+        try {
+            if (Storage::disk($disk)->exists($path)) {
+                $deleted = Storage::disk($disk)->delete($path);
+                if ($deleted) {
+                    Log::info("Fichier média supprimé avec succès : [{$disk}] {$path}");
+                }
+
+                return $deleted;
+            }
+        } catch (\Throwable $e) {
+            Log::error("Erreur lors de la suppression physique du fichier [{$disk}] {$path} : {$e->getMessage()}");
+        }
+
+        return false;
+    }
+
+    /**
+     * Supprime tous les fichiers physiques associés à un PostMedia (source, poster, variantes FFmpeg).
+     */
+    public function deletePostMediaFiles(PostMedia $postMedia, ?string $disk = null): void
+    {
+        $disk = $disk ?? $this->getDisk();
+
+        // 1. Média principal (image ou vidéo)
+        $mediaPath = $postMedia->getRawOriginal('media_url');
+        if ($mediaPath) {
+            $this->deleteSafely($mediaPath, $disk, 'PostMedia', $postMedia->id);
+        }
+
+        // 2. Poster / miniature
+        $posterPath = $postMedia->getRawOriginal('poster_url');
+        if ($posterPath) {
+            $this->deleteSafely($posterPath, $disk, 'PostMedia', $postMedia->id);
+        }
+
+        // 3. Variantes adaptatives FFmpeg (480p, 720p, 1080p)
+        $meta = $postMedia->edit_metadata ?? [];
+        if (! empty($meta['renditions']) && is_array($meta['renditions'])) {
+            $dirsToCheck = [];
+            foreach ($meta['renditions'] as $renditionUrl) {
+                if (is_string($renditionUrl)) {
+                    $renditionPath = $this->extractRelativePath($renditionUrl);
+                    $this->deleteSafely($renditionPath, $disk, 'PostMedia', $postMedia->id);
+                    $dir = dirname($renditionPath);
+                    if ($dir && $dir !== '.' && ! in_array($dir, $dirsToCheck, true)) {
+                        $dirsToCheck[] = $dir;
+                    }
+                }
+            }
+
+            // Nettoyage sécurisé du répertoire complet de transcodage s'il est désormais vide
+            foreach ($dirsToCheck as $dir) {
+                try {
+                    if (Storage::disk($disk)->exists($dir)) {
+                        $remainingFiles = Storage::disk($disk)->allFiles($dir);
+                        if (empty($remainingFiles)) {
+                            Storage::disk($disk)->deleteDirectory($dir);
+                            Log::info("Dossier de variantes FFmpeg supprimé : [{$disk}] {$dir}");
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning("Impossible de supprimer le dossier de variantes {$dir}: {$e->getMessage()}");
+                }
+            }
+        }
+    }
+
+    /**
+     * Supprime tous les médias physiques d'une publication Square.
+     */
+    public function deletePostFiles(Post $post, ?string $disk = null): void
+    {
+        $post->loadMissing('media');
+        foreach ($post->media as $media) {
+            $this->deletePostMediaFiles($media, $disk);
+        }
+    }
+
+    /**
+     * Supprime la pièce jointe ou note vocale d'un message si elle n'est plus référencée.
+     */
+    public function deleteMessageAttachment(Message $message): bool
+    {
+        $path = $message->attachment_path;
+        if (! $path) {
+            return false;
+        }
+
+        $privateDisk = config('media.private_disk', 'local');
+        $publicDisk = config('media.disk', 'public');
+
+        $disk = Storage::disk($privateDisk)->exists($path) ? $privateDisk : $publicDisk;
+
+        return $this->deleteSafely($path, $disk, 'Message', $message->id);
+    }
+
+    /**
      * Extrait le chemin de fichier relatif à partir d'une URL publique ou d'un chemin.
      */
     public function extractRelativePath(string $urlOrPath): string
@@ -701,19 +906,19 @@ class MediaStorageService
 
         // 1. Vidéo source (uniquement si fichier local hébergé)
         if ($reel->video_url && ! $this->isExternalUrl($reel->video_url)) {
-            $this->delete($reel->video_url, $disk);
+            $this->deleteSafely($reel->video_url, $disk, 'Reel', $reel->id);
         }
 
         // 2. Couverture
         if ($reel->thumbnail_url && ! $this->isExternalUrl($reel->thumbnail_url)) {
-            $this->delete($reel->thumbnail_url, $disk);
+            $this->deleteSafely($reel->thumbnail_url, $disk, 'Reel', $reel->id);
         }
 
         // 3. Clips de la composition
         if (! empty($reel->composition['clips']) && is_array($reel->composition['clips'])) {
             foreach ($reel->composition['clips'] as $clip) {
                 if (! empty($clip['uri']) && ! $this->isExternalUrl($clip['uri'])) {
-                    $this->delete($clip['uri'], $disk);
+                    $this->deleteSafely($clip['uri'], $disk, 'Reel', $reel->id);
                 }
             }
         }

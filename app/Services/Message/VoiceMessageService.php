@@ -49,7 +49,7 @@ class VoiceMessageService
             ]);
         }
 
-        $disk = config('media.disk', 'public');
+        $disk = config('media.private_disk', 'local');
         $extension = $audioFile->getClientOriginalExtension() ?: 'm4a';
         $filename = Str::uuid().'.'.$extension;
         $directory = 'messages/voices/'.$conversation->id;

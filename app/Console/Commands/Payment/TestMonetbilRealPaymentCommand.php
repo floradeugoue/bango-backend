@@ -184,10 +184,23 @@ class TestMonetbilRealPaymentCommand extends Command
             }
 
             if ($statusResult->status === PaymentStatus::Failed) {
+                $rawMsg = $statusResult->rawResponse['message']
+                    ?? $statusResult->rawResponse['transaction']['message']
+                    ?? 'Paiement échoué chez Monetbil';
+
+                $rawStatus = $statusResult->rawResponse['status']
+                    ?? $statusResult->rawResponse['transaction']['status']
+                    ?? null;
+
                 $transaction->transitionTo(
                     targetStatus: PaymentStatus::Failed,
                     source: PaymentEventSource::Gateway,
-                    reason: $statusResult->rawResponse['message'] ?? 'Paiement échoué chez Monetbil'
+                    reason: $rawMsg,
+                    payload: [
+                        'message' => $rawMsg,
+                        'status' => $rawStatus,
+                        'raw_response' => $statusResult->rawResponse,
+                    ]
                 );
                 $this->error("\n❌ Le paiement a été rejeté ou a échoué.");
 

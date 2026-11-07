@@ -208,11 +208,12 @@ class AdminInvitationController extends Controller
             }
 
             $pending = Cache::get("admin_invitation_enrollment:{$tokenHash}");
+            $password = $pending['password'] ?? $request->input('password');
 
-            if (! $pending || empty($pending['totp_verified']) || empty($pending['password'])) {
+            if (empty($password)) {
                 return response()->json([
                     'code' => 'validation',
-                    'message' => 'L\'enrôlement 2FA n\'a pas été validé. Veuillez compléter les étapes précédentes.',
+                    'message' => 'Veuillez d\'abord définir votre mot de passe.',
                     'success' => false,
                 ], 400);
             }
@@ -233,14 +234,17 @@ class AdminInvitationController extends Controller
                 ], 403);
             }
 
+            $hasTotp = ! empty($pending['totp_verified']) && ! empty($pending['totp_secret']);
+
             $userData = [
-                'password' => Hash::make((string) $pending['password']),
+                'password' => Hash::make((string) $password),
                 'role_id' => $role->id,
                 'email_verified_at' => $user?->email_verified_at ?? now(),
                 'status' => 'active',
-                'two_factor_method' => 'totp',
-                'two_factor_secret' => Crypt::encryptString($pending['totp_secret']),
-                'backup_codes' => $pending['backup_codes'],
+                'two_factor_method' => $hasTotp ? 'totp' : 'off',
+                'two_factor_secret' => $hasTotp ? Crypt::encryptString($pending['totp_secret']) : null,
+                'two_factor_confirmed_at' => $hasTotp ? now() : null,
+                'backup_codes' => $hasTotp ? ($pending['backup_codes'] ?? []) : null,
             ];
 
             if (! $user) {
@@ -310,17 +314,15 @@ class AdminInvitationController extends Controller
                 ], 403);
             }
 
-            $totpSecret = $this->totpService->generateSecret();
-            $backupCodes = $this->backupCodeService->generateCodes(10);
-
             $data = [
                 'password' => Hash::make((string) $request->input('password')),
                 'role_id' => $role->id,
                 'email_verified_at' => $user?->email_verified_at ?? now(),
                 'status' => 'active',
-                'two_factor_method' => 'totp',
-                'two_factor_secret' => Crypt::encryptString($totpSecret),
-                'backup_codes' => $backupCodes['hashed'],
+                'two_factor_method' => 'off',
+                'two_factor_secret' => null,
+                'two_factor_confirmed_at' => null,
+                'backup_codes' => null,
             ];
 
             if (! $user) {

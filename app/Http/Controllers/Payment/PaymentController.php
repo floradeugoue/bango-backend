@@ -535,11 +535,33 @@ class PaymentController extends Controller
                     ]
                 );
             } elseif ($checkResult->status === PaymentStatus::Failed) {
+                $rawMsg = $checkResult->rawResponse['transaction']['message']
+                    ?? $checkResult->rawResponse['transaction']['operator_message']
+                    ?? $checkResult->rawResponse['message']
+                    ?? $checkResult->errorMessage
+                    ?? 'Paiement échoué selon l\'opérateur';
+
+                $rawStatus = $checkResult->rawResponse['transaction']['status']
+                    ?? $checkResult->rawResponse['status']
+                    ?? null;
+
+                $failureReason = $checkResult->rawResponse['transaction']['operator_message']
+                    ?? $checkResult->rawResponse['operator_message']
+                    ?? $checkResult->rawResponse['transaction']['message']
+                    ?? $checkResult->rawResponse['message']
+                    ?? $checkResult->errorMessage;
+
                 $this->paymentEngineService->failTransaction(
                     transaction: $transaction,
-                    reason: $checkResult->errorMessage ?? 'Paiement échoué selon l\'opérateur',
+                    reason: $rawMsg,
                     source: PaymentEventSource::Gateway,
-                    details: ['error_code' => $checkResult->errorCode]
+                    details: [
+                        'error_code' => $checkResult->errorCode,
+                        'message' => $rawMsg,
+                        'status' => $rawStatus,
+                        'failure_reason' => $failureReason,
+                        'raw_response' => $checkResult->rawResponse,
+                    ]
                 );
             } else {
                 // Vérification du timeout (120 secondes depuis la création)

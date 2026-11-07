@@ -12,6 +12,7 @@ use App\Services\Subscription\SubscriptionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\DB;
 
 class SubscriptionManagementController extends Controller
 {
@@ -20,6 +21,17 @@ class SubscriptionManagementController extends Controller
      */
     public function index(Request $request): AnonymousResourceCollection
     {
+        Subscription::where('state', 'active')
+            ->where(function ($subQ) {
+                $subQ->whereDoesntHave('user')
+                    ->orWhereHas('user', fn ($uq) => $uq->whereNotNull('deleted_at')->orWhere('status', 'deleted'));
+            })
+            ->update([
+                'state' => 'cancelled',
+                'canceled_at' => now(),
+                'cancel_reason' => 'Compte utilisateur supprimé',
+            ]);
+
         $query = Subscription::with(['user', 'product', 'price'])
             ->orderByDesc('created_at');
 
@@ -28,7 +40,8 @@ class SubscriptionManagementController extends Controller
         }
 
         if ($request->filled('state')) {
-            $query->where('state', $request->state);
+            $states = is_array($request->state) ? $request->state : explode(',', (string) $request->state);
+            $query->whereIn('state', array_map('trim', $states));
         }
 
         if ($request->filled('cadence')) {
@@ -40,12 +53,14 @@ class SubscriptionManagementController extends Controller
         }
 
         if ($request->filled('q')) {
-            $search = $request->q;
-            $query->whereHas('user', function ($uq) use ($search) {
-                $uq->where('name', 'ilike', "%{$search}%")
-                    ->orWhere('email', 'ilike', "%{$search}%")
-                    ->orWhere('phone', 'ilike', "%{$search}%")
-                    ->orWhere('handle', 'ilike', "%{$search}%");
+            $search = trim((string) $request->q);
+            $like = DB::connection()->getDriverName() === 'pgsql' ? 'ilike' : 'like';
+            $query->whereHas('user', function ($uq) use ($search, $like) {
+                $uq->where('name', $like, "%{$search}%")
+                    ->orWhere('display_name', $like, "%{$search}%")
+                    ->orWhere('email', $like, "%{$search}%")
+                    ->orWhere('phone', 'like', "%{$search}%")
+                    ->orWhere('handle', $like, "%{$search}%");
             });
         }
 

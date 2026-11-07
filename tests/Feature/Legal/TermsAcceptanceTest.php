@@ -130,3 +130,40 @@ test('ensure terms accepted middleware blocks user until mandatory terms are acc
         ->assertOk()
         ->assertJsonPath('secret', 'access_granted');
 });
+
+test('terms.accepted does not block users when enforce_terms_acceptance config is false', function () {
+    config(['legal.enforce_terms_acceptance' => false]);
+
+    Route::middleware(['auth:api', 'terms.accepted'])->get('/api/test-disabled-terms', function () {
+        return response()->json(['status' => 'allowed_without_terms']);
+    });
+
+    Passport::actingAs($this->user);
+
+    // Même sans acceptation des CGU, l'accès est autorisé
+    $response = $this->getJson('/api/test-disabled-terms');
+    $response->assertOk()
+        ->assertJsonPath('status', 'allowed_without_terms');
+});
+
+test('terms:backfill artisan command synchronizes legacy accounts with missing terms acceptance', function () {
+    $user1 = User::factory()->create(['accepted_terms_version' => null, 'terms_accepted_at' => null]);
+    $user2 = User::factory()->create(['accepted_terms_version' => null, 'terms_accepted_at' => null]);
+
+    $this->artisan('terms:backfill', ['--terms-version' => '3.1.0'])
+        ->assertSuccessful();
+
+    $user1->refresh();
+    $user2->refresh();
+
+    expect($user1->accepted_terms_version)->toBe('3.1.0')
+        ->and($user1->terms_accepted_at)->not->toBeNull()
+        ->and($user2->accepted_terms_version)->toBe('3.1.0')
+        ->and($user2->terms_accepted_at)->not->toBeNull();
+
+    $this->assertDatabaseHas('terms_acceptances', [
+        'user_id' => $user1->id,
+        'version' => '3.1.0',
+        'document_slug' => 'terms-of-service',
+    ]);
+});

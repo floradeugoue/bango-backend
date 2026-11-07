@@ -6,7 +6,9 @@ use App\Enums\Square\PostAudience;
 use App\Enums\Square\PostCommentsBy;
 use App\Models\Square\Post;
 use App\Models\User;
+use App\Services\Media\MediaStorageService;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 
 class PostManagementService
@@ -117,14 +119,37 @@ class PostManagementService
     }
 
     /**
-     * Supprime un post de façon sécurisée en nettoyant les compteurs de hashtags.
+     * Supprime un post de façon sécurisée en nettoyant les compteurs de hashtags et les fichiers médias.
      */
     public function delete(Post $post): bool
     {
-        return DB::transaction(function () use ($post) {
+        $post->loadMissing('media');
+        $mediaItems = $post->media;
+
+        return DB::transaction(function () use ($post, $mediaItems) {
             $this->hashtagService->detachAll($post);
 
-            return (bool) $post->delete();
+            // Supprimer les enregistrements post_media rattachés
+            foreach ($mediaItems as $media) {
+                $media->delete();
+            }
+
+            $deleted = (bool) $post->delete();
+
+            // Supprimer les fichiers physiques UNIQUEMENT après validation définitive de la transaction
+            DB::afterCommit(function () use ($mediaItems) {
+                /** @var MediaStorageService $storageService */
+                $storageService = app(MediaStorageService::class);
+                foreach ($mediaItems as $media) {
+                    try {
+                        $storageService->deletePostMediaFiles($media);
+                    } catch (\Throwable $e) {
+                        Log::warning("Erreur suppression fichiers post_media #{$media->id}: {$e->getMessage()}");
+                    }
+                }
+            });
+
+            return $deleted;
         });
     }
 }

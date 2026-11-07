@@ -8,6 +8,7 @@ use App\Models\Geo\City;
 use App\Models\Geo\Neighbourhood;
 use App\Models\Geo\Operator;
 use App\Models\Legal\LegalDocument;
+use App\Models\Listing\Listing;
 use App\Models\Profile\Interest;
 use App\Models\Subscription\PricingChangeProposal;
 use App\Models\Subscription\Subscription;
@@ -15,6 +16,7 @@ use App\Models\Subscription\SubscriptionPrice;
 use App\Models\Subscription\SubscriptionProduct;
 use App\Models\User;
 use DomainException;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -324,38 +326,120 @@ class AdminSystemSettingsService
     // =========================================================================
 
     /**
-     * Consultation des villes avec compteurs.
+     * Consultation des villes avec pagination, filtres et compteurs agrégés.
+     *
+     * @param  array<string, mixed>  $filters
      */
-    public function getCities(): Collection
+    public function getCities(array $filters = [], int $perPage = 20): LengthAwarePaginator
     {
-        return City::withCount('neighbourhoods')->with('country:id,name,iso2')->get();
+        $query = City::query()
+            ->withCount('neighbourhoods')
+            ->with('country:id,name,iso2');
+
+        // Compteurs agrégés pour des millions de lignes
+        $query->addSelect([
+            'listings_count' => Listing::selectRaw('count(*)')
+                ->where(function ($q) {
+                    $q->whereColumn('listings.city', 'cities.name')
+                        ->orWhereRaw('LOWER(listings.city) = LOWER(cities.name)');
+                }),
+            'users_count' => User::selectRaw('count(*)')
+                ->where(function ($q) {
+                    $q->whereColumn('users.city_id', 'cities.id')
+                        ->orWhereRaw('LOWER(users.city) = LOWER(cities.name)');
+                }),
+        ]);
+
+        if (! empty($filters['q'])) {
+            $search = strtolower(trim((string) $filters['q']));
+            $like = DB::connection()->getDriverName() === 'pgsql' ? 'ILIKE' : 'LIKE';
+            $query->where(function ($q) use ($search, $like) {
+                $q->where('name', $like, "%{$search}%")
+                    ->orWhere('slug', $like, "%{$search}%")
+                    ->orWhereHas('country', function ($cq) use ($search, $like) {
+                        $cq->where('name', $like, "%{$search}%")
+                            ->orWhere('iso2', $like, "%{$search}%");
+                    });
+            });
+        }
+
+        if (! empty($filters['country_id'])) {
+            $query->where('country_id', (int) $filters['country_id']);
+        }
+
+        if (! empty($filters['country'])) {
+            $country = trim((string) $filters['country']);
+            $like = DB::connection()->getDriverName() === 'pgsql' ? 'ILIKE' : 'LIKE';
+            $query->whereHas('country', fn ($cq) => $cq->where('iso2', strtoupper($country))->orWhere('name', $like, "%{$country}%"));
+        }
+
+        if (isset($filters['is_active'])) {
+            $query->where('is_active', filter_var($filters['is_active'], FILTER_VALIDATE_BOOLEAN));
+        }
+
+        $query->orderByDesc('is_active')->orderBy('name', 'asc');
+
+        return $query->paginate($perPage);
     }
 
     /**
-     * Consultation des quartiers par ville ou filtre.
+     * Consultation des quartiers par ville ou filtre avec pagination et compteurs.
+     *
+     * @param  array<string, mixed>|string|null  $filters
      */
-    public function getAreas(?string $cityIdOrSlug = null, ?string $status = null): Collection
+    public function getAreas(array|string|null $filters = [], ?string $legacyStatus = null, int $perPage = 20): LengthAwarePaginator
     {
+        if (is_string($filters) || $filters === null) {
+            $filters = [
+                'city' => $filters,
+                'status' => $legacyStatus,
+            ];
+        }
+
         $query = Neighbourhood::with('city:id,name');
 
-        if ($cityIdOrSlug) {
+        $query->addSelect([
+            'listings_count' => Listing::selectRaw('count(*)')
+                ->where(function ($q) {
+                    $q->whereColumn('listings.neighbourhood', 'neighbourhoods.name')
+                        ->orWhereRaw('LOWER(listings.neighbourhood) = LOWER(neighbourhoods.name)');
+                }),
+        ]);
+
+        if (! empty($filters['city'])) {
+            $cityIdOrSlug = $filters['city'];
             $query->whereHas('city', function ($q) use ($cityIdOrSlug) {
                 if (is_numeric($cityIdOrSlug)) {
                     $q->where('id', $cityIdOrSlug);
                 } else {
-                    $q->where('name', 'like', "%{$cityIdOrSlug}%")
+                    $like = DB::connection()->getDriverName() === 'pgsql' ? 'ILIKE' : 'LIKE';
+                    $q->where('name', $like, "%{$cityIdOrSlug}%")
                         ->orWhere('slug', $cityIdOrSlug);
                 }
             });
         }
 
+        if (! empty($filters['q'])) {
+            $search = strtolower(trim((string) $filters['q']));
+            $like = DB::connection()->getDriverName() === 'pgsql' ? 'ILIKE' : 'LIKE';
+            $query->where(function ($q) use ($search, $like) {
+                $q->where('name', $like, "%{$search}%")
+                    ->orWhere('slug', $like, "%{$search}%");
+            });
+        }
+
+        $status = $filters['status'] ?? null;
         if ($status === 'active') {
             $query->where('is_active', true)->where('is_ignored', false);
         } elseif ($status === 'ignored') {
             $query->where('is_ignored', true);
+        } elseif ($status === 'inactive') {
+            $query->where('is_active', false);
         }
 
-        return $query->get();
+        $query->orderBy('name', 'asc');
+
+        return $query->paginate($perPage);
     }
 
     /**
