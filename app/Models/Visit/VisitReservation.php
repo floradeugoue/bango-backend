@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Str;
 
 /**
  * @property string $id
@@ -64,6 +65,7 @@ class VisitReservation extends Model
     protected $table = 'visit_reservations';
 
     protected $fillable = [
+        'reference',
         'listing_id',
         'slot_id',
         'prospect_id',
@@ -98,6 +100,26 @@ class VisitReservation extends Model
         'dispute_reason',
         'metadata',
     ];
+
+    protected static function booted(): void
+    {
+        static::creating(function (VisitReservation $visit) {
+            if (empty($visit->reference)) {
+                $visit->reference = 'BNG-V-'.strtoupper(Str::random(8));
+            }
+        });
+    }
+
+    public function getShortReferenceAttribute(): string
+    {
+        if (! empty($this->reference)) {
+            return $this->reference;
+        }
+
+        $cleanUuid = str_replace('-', '', (string) $this->id);
+
+        return 'BNG-V-'.strtoupper(substr($cleanUuid, 0, 8));
+    }
 
     public function getFeeAmountAttribute(): float
     {
@@ -139,24 +161,6 @@ class VisitReservation extends Model
         $meta = $this->metadata ?? [];
         $meta['prospect_phone'] = $value;
         $this->metadata = $meta;
-    }
-
-    /**
-     * Référence courte de la visite (ex: 8 premiers caractères de l'UUID pour recherche facile par le support : "01A16DFA").
-     */
-    public function getShortReferenceAttribute(): string
-    {
-        // 1. Si payment_reference contient un UUID (ex: VISIT-CREDIT-01a16dfa-0a10-...), extraire les 8 premiers caractères de l'UUID
-        if ($this->payment_reference) {
-            $cleaned = preg_replace('/^VISIT-CREDIT-|^VISIT-/', '', (string) $this->payment_reference);
-            $parts = explode('-', $cleaned);
-            if (! empty($parts[0]) && strlen($parts[0]) >= 8) {
-                return strtoupper(substr($parts[0], 0, 8));
-            }
-        }
-
-        // 2. Par défaut, les 8 premiers caractères de l'identifiant (UUID)
-        return strtoupper(substr(str_replace('-', '', (string) $this->id), 0, 8));
     }
 
     public function getPricingSnapshotAttribute(): ?array

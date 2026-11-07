@@ -59,6 +59,7 @@ class PaymentTransactionResource extends JsonResource
             'charged' => (float) $this->amount_charged,
             'currency' => $this->currency,
             'status' => $this->status->value,
+            'failure_reason' => $this->failure_reason,
             'method' => [
                 'operator' => $latestAttempt?->metadata['operator'] ?? $this->provider->value,
                 'label' => $this->channel->label(),
@@ -82,6 +83,16 @@ class PaymentTransactionResource extends JsonResource
                     ?? (isset($this->metadata['period_end']) ? Carbon::parse($this->metadata['period_end'])->toIso8601String() : null)
                     ?? ($this->confirmed_at ? $this->confirmed_at->copy()->addMonth()->toIso8601String() : null))
                 : null,
+            'user' => $this->user ? [
+                'id' => (int) $this->user->id,
+                'name' => $this->user->name,
+                'display_name' => $this->user->display_name ?: $this->user->name,
+                'handle' => $this->user->handle,
+                'email' => $this->user->email,
+                'avatar_url' => $this->user->avatar_url,
+                'city' => $this->user->city,
+                'badge' => $this->user->badge,
+            ] : null,
         ];
     }
 }

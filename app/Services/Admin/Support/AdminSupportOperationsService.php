@@ -30,22 +30,21 @@ class AdminSupportOperationsService
      * 4.1. Liste paginée des tickets avec détection des retards et filtres avancés.
      *
      * @param  array<string, mixed>  $filters
+     * @return array{paginator: LengthAwarePaginator, counts: array<string, int>}
      */
-    public function getTickets(array $filters, int $perPage = 20): LengthAwarePaginator
+    public function getTickets(array $filters, int $perPage = 20): array
     {
         $perPage = min(max($perPage, 1), 100);
 
-        $query = SupportTicket::with(['user:id,name,display_name,email,phone,avatar_url', 'assignedAgent:id,name,email', 'resolvedBy:id,name,email'])
+        $query = SupportTicket::with(['user:id,name,display_name,email,phone,handle,avatar_url', 'assignedAgent:id,name,email', 'resolvedBy:id,name,email'])
             ->withCount('messages');
-
-        // Filtre par statut
-        if (! empty($filters['status'])) {
-            $query->where('status', $filters['status']);
-        }
 
         // Filtre par priorité
         if (! empty($filters['priority'])) {
-            $query->where('priority', $filters['priority']);
+            $priorities = is_array($filters['priority'])
+                ? $filters['priority']
+                : explode(',', (string) $filters['priority']);
+            $query->whereIn('priority', array_map('trim', $priorities));
         }
 
         // Filtre par catégorie
@@ -62,15 +61,20 @@ class AdminSupportOperationsService
             }
         }
 
-        // Recherche textuelle (référence, sujet, email ou nom demandeur)
-        if (! empty($filters['search'])) {
-            $search = trim((string) $filters['search']);
-            $query->where(function (Builder $q) use ($search) {
-                $q->where('reference', 'like', "%{$search}%")
-                    ->orWhere('subject', 'like', "%{$search}%")
-                    ->orWhereHas('user', function (Builder $uq) use ($search) {
-                        $uq->where('name', 'like', "%{$search}%")
-                            ->orWhere('email', 'like', "%{$search}%");
+        // Recherche textuelle (référence, sujet, email, handle, display_name ou nom demandeur)
+        $searchTerm = $filters['q'] ?? $filters['search'] ?? null;
+        if (! empty($searchTerm)) {
+            $search = trim((string) $searchTerm);
+            $like = DB::connection()->getDriverName() === 'pgsql' ? 'ILIKE' : 'LIKE';
+            $query->where(function (Builder $q) use ($search, $like) {
+                $q->where('reference', $like, "%{$search}%")
+                    ->orWhere('subject', $like, "%{$search}%")
+                    ->orWhereHas('user', function (Builder $uq) use ($search, $like) {
+                        $uq->where('name', $like, "%{$search}%")
+                            ->orWhere('display_name', $like, "%{$search}%")
+                            ->orWhere('handle', $like, "%{$search}%")
+                            ->orWhere('email', $like, "%{$search}%")
+                            ->orWhere('phone', 'like', "%{$search}%");
                     });
             });
         }
@@ -85,6 +89,24 @@ class AdminSupportOperationsService
                 });
         }
 
+        // Compteurs d'onglets calculés avant filtre de statut
+        $baseQuery = clone $query;
+        $statusCounts = $baseQuery
+            ->selectRaw('status, count(*) as count')
+            ->groupBy('status')
+            ->pluck('count', 'status')
+            ->toArray();
+        $totalAll = array_sum($statusCounts);
+        $counts = array_merge(['all' => $totalAll], $statusCounts);
+
+        // Filtre par statut (simple ou multiple)
+        if (! empty($filters['status'])) {
+            $statuses = is_array($filters['status'])
+                ? $filters['status']
+                : explode(',', (string) $filters['status']);
+            $query->whereIn('status', array_map('trim', $statuses));
+        }
+
         // Tri sur liste blanche
         $sort = $filters['sort'] ?? 'created_at';
         $order = strtolower($filters['order'] ?? 'desc') === 'asc' ? 'asc' : 'desc';
@@ -96,7 +118,10 @@ class AdminSupportOperationsService
             $query->orderByDesc('created_at');
         }
 
-        return $query->paginate($perPage);
+        return [
+            'paginator' => $query->paginate($perPage),
+            'counts' => $counts,
+        ];
     }
 
     /**

@@ -50,6 +50,7 @@ use App\Http\Controllers\Listing\ListingMapController;
 use App\Http\Controllers\Listing\ListingMediaController;
 use App\Http\Controllers\Listing\ListingSaveController;
 use App\Http\Controllers\Media\MediaUploadController;
+use App\Http\Controllers\Message\MessageAttachmentController;
 use App\Http\Controllers\Message\MessageController;
 use App\Http\Controllers\Message\MessageGroupController;
 use App\Http\Controllers\Message\MessageRequestController;
@@ -107,6 +108,7 @@ use App\Http\Controllers\Square\PostCommentsStatusController;
 use App\Http\Controllers\Square\PostController;
 use App\Http\Controllers\Square\PostFeedController;
 use App\Http\Controllers\Square\PostLikeController;
+use App\Http\Controllers\Square\PostMediaProcessingController;
 use App\Http\Controllers\Square\PostSaveController;
 use App\Http\Controllers\Square\PostShareController;
 use App\Http\Controllers\Square\PostViewController;
@@ -378,6 +380,13 @@ Route::get('/system/version', AppVersionController::class)->name('api.system.ver
 Route::post('/translate', [TranslationController::class, 'translate'])
     ->middleware('throttle:60,1')
     ->name('api.translate');
+
+// --------------------------------------------------------------------------
+// MESSAGES — PIÈCES JOINTES & NOTES VOCALES PRIVÉES (Streaming & Téléchargement Sécurisés)
+// --------------------------------------------------------------------------
+// Accessible soit avec Bearer token (auth:api), soit avec signature URL temporaire (players audio mobiles)
+Route::get('/messages/{id}/attachment', [MessageAttachmentController::class, 'show'])->name('api.messages.attachment.show');
+Route::get('/messages/{id}/voice', [MessageAttachmentController::class, 'show'])->name('api.messages.voice.show');
 
 // --------------------------------------------------------------------------
 // SESSION (Requiert un Token Passport valide)
@@ -1033,6 +1042,10 @@ Route::middleware('auth:api')->group(function () {
 
         // Téléverser un média photo ou vidéo sécurisé pour le carrousel Square (CR-02, CR-04, CR-12)
         Route::post('/media/upload', [MediaUploadController::class, 'upload'])->name('api.media.upload');
+
+        // Traitement vidéo asynchrone FFmpeg (statut et relance)
+        Route::post('/posts/media/{id}/retry', [PostMediaProcessingController::class, 'retry'])->name('api.square.media.retry');
+        Route::get('/posts/media/{id}/status', [PostMediaProcessingController::class, 'show'])->name('api.square.media.status');
 
         // Rechercher des publications Square par recherche plein texte (RC-06)
         Route::get('/search/posts', [PostSearchController::class, 'index']);

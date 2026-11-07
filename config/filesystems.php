@@ -73,6 +73,19 @@ return [
             'report' => false,
         ],
 
+        'r2_private' => [
+            'driver' => 's3',
+            'key' => env('CLOUDFLARE_R2_ACCESS_KEY_ID', env('AWS_ACCESS_KEY_ID')),
+            'secret' => env('CLOUDFLARE_R2_SECRET_ACCESS_KEY', env('AWS_SECRET_ACCESS_KEY')),
+            'region' => 'auto',
+            'bucket' => env('CLOUDFLARE_R2_PRIVATE_BUCKET', env('CLOUDFLARE_R2_BUCKET', env('AWS_BUCKET'))),
+            'url' => null,
+            'endpoint' => env('CLOUDFLARE_R2_ENDPOINT', env('AWS_ENDPOINT')),
+            'use_path_style_endpoint' => env('CLOUDFLARE_R2_USE_PATH_STYLE_ENDPOINT', false),
+            'visibility' => 'private',
+            'throw' => false,
+            'report' => false,
+        ],
     ],
 
     /*

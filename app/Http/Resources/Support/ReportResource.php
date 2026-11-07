@@ -38,7 +38,7 @@ class ReportResource extends JsonResource
             'action_taken' => $this->action_taken,
             'reexamination_requested' => (bool) ($this->metadata['reexamination_requested'] ?? false),
             'reexamined_at' => $this->metadata['reexamined_at'] ?? null,
-            'target' => $this->resolveTargetInfo(),
+            'target' => $this->target,
             'decision' => $this->resolveDecisionInfo(),
             'created_at' => $this->created_at?->toIso8601String(),
             'resolved_at' => $this->resolved_at?->toIso8601String(),

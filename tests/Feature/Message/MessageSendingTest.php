@@ -282,7 +282,8 @@ test('un agent revoque ne peut plus repondre dans le fil de l annonce', function
 });
 
 test('un membre peut envoyer une note vocale audio valide', function (): void {
-    Storage::fake('public');
+    $privateDisk = config('media.private_disk', 'local');
+    Storage::fake($privateDisk);
     Event::fake([MessageSent::class]);
 
     Passport::actingAs($this->alice);
@@ -304,13 +305,14 @@ test('un membre peut envoyer une note vocale audio valide', function (): void {
     $message = Message::findOrFail($messageId);
     expect($message->type)->toBe(MessageType::Voice);
     expect($message->attachment_path)->not->toBeNull();
-    Storage::disk('public')->assertExists($message->attachment_path);
+    Storage::disk($privateDisk)->assertExists($message->attachment_path);
 
     Event::assertDispatched(MessageSent::class);
 });
 
 test('un fichier audio non supporte ou trop volumineux est rejete', function (): void {
-    Storage::fake('public');
+    $privateDisk = config('media.private_disk', 'local');
+    Storage::fake($privateDisk);
 
     Passport::actingAs($this->alice);
 

@@ -13,6 +13,7 @@ use App\Http\Controllers\Admin\Auth\AdminAuthController;
 use App\Http\Controllers\Admin\Auth\AdminDeviceController;
 use App\Http\Controllers\Admin\Auth\AdminInvitationController;
 use App\Http\Controllers\Admin\Auth\AdminPasswordResetController;
+use App\Http\Controllers\Admin\Auth\AdminSecurityController;
 use App\Http\Controllers\Admin\Dashboard\AdminDirectionDashboardController;
 use App\Http\Controllers\Admin\Finance\AdminCampaignManagementController;
 use App\Http\Controllers\Admin\Finance\AdminPaymentExportController;
@@ -190,6 +191,25 @@ Route::middleware(['admin.session'])->group(function () {
     Route::get('/me/approvals', [AdminWorkspaceController::class, 'approvals'])
         ->middleware('admin.permission:approvals:view')
         ->name('me.approvals');
+
+    // ----------------------------------------------------------------------
+    // Sécurité et double authentification de l'opérateur connecté (facultative)
+    // ----------------------------------------------------------------------
+    // Consulter l'état de la double authentification de l'opérateur
+    Route::get('/me/security', [AdminSecurityController::class, 'show'])
+        ->name('me.security');
+
+    // Initialiser l'activation du 2FA TOTP (secret & URI)
+    Route::post('/me/2fa/setup', [AdminSecurityController::class, 'setup2fa'])
+        ->name('me.2fa.setup');
+
+    // Confirmer le code TOTP, activer le 2FA et générer les 10 codes de secours
+    Route::post('/me/2fa/confirm', [AdminSecurityController::class, 'confirm2fa'])
+        ->name('me.2fa.confirm');
+
+    // Désactiver la double authentification avec mot de passe ou code
+    Route::post('/me/2fa/disable', [AdminSecurityController::class, 'disable2fa'])
+        ->name('me.2fa.disable');
 
     // Gestion des demandes d'accès collaborateurs (Direction / Admins)
     // Lister les demandes d'accès collaborateurs en attente d'approbation
@@ -801,6 +821,11 @@ Route::middleware(['admin.session'])->group(function () {
             ->middleware('admin.permission:accounts:view')
             ->name('index');
 
+        // Demandes de suppression en cours et comptes supprimés (5.1 ter)
+        Route::get('/deletions', [AdminAccountOperationsController::class, 'deletions'])
+            ->middleware('admin.permission:accounts:view')
+            ->name('deletions');
+
         // Export administratif de la liste des comptes (5.13 bis)
         Route::post('/exports', [AdminAccountGdprController::class, 'accountsExport'])
             ->middleware('admin.permission:accounts:export')
@@ -1003,6 +1028,10 @@ Route::middleware(['admin.session'])->group(function () {
         Route::get('/visits', [AdminListingVisitController::class, 'index'])
             ->middleware('admin.permission:listings:view')
             ->name('visits.index');
+
+        Route::post('/visits/settle-overdue', [AdminListingVisitController::class, 'settleOverdue'])
+            ->middleware('admin.permission:listings:review')
+            ->name('visits.settle-overdue');
 
         // Détection des doublons potentiels (B.2)
         Route::get('/duplicates', [AdminListingDuplicateController::class, 'index'])

@@ -1,15 +1,22 @@
 <?php
 
+use App\Enums\Media\MediaProcessingStatus;
 use App\Enums\Reel\ReelStatus;
 use App\Jobs\Reel\ProcessReelVideoJob;
+use App\Jobs\Square\ProcessSquareVideoJob;
 use App\Models\Reel\Reel;
+use App\Models\Square\PostMedia;
 use App\Models\User;
 use App\Services\Legal\LegalDocumentService;
 use App\Services\Media\MediaStorageService;
+use App\Services\Media\VideoTranscodingService;
 use App\Services\Reel\CloudflareStreamService;
+use App\Services\Square\VideoProcessingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Passport\Passport;
 
@@ -62,13 +69,14 @@ it('ProcessReelVideoJob transcode les renditions 480p, 720p, 1080p et garde l\'o
     expect(Storage::disk('public')->exists(parse_url($reel->renditions['1080p'], PHP_URL_PATH) ? ltrim(str_replace('/storage/', '', parse_url($reel->renditions['1080p'], PHP_URL_PATH)), '/') : ''))->toBeTrue();
 });
 
-it('POST /media/upload transcode les vidéos en renditions et extrait le poster_url', function () {
+it('POST /media/upload enregistre immédiatement le média sans bloquer sur FFmpeg puis ProcessSquareVideoJob génère les renditions', function () {
     $user = User::factory()->create();
     app(LegalDocumentService::class)->recordAcceptance($user);
     Passport::actingAs($user);
 
     $fakeVideo = UploadedFile::fake()->create('dance.mp4', 8000, 'video/mp4');
 
+    // 1. Upload rapide non bloquant
     $response = postJson('/api/square-cr1/media/upload', [
         'file' => $fakeVideo,
         'kind' => 'video',
@@ -77,27 +85,40 @@ it('POST /media/upload transcode les vidéos en renditions et extrait le poster_
     $response->assertStatus(201)
         ->assertJsonPath('success', true)
         ->assertJsonPath('data.type', 'video')
-        ->assertJsonStructure([
-            'data' => [
-                'id',
-                'url',
-                'original_url',
-                'poster_url',
-                'posterUrl',
-                'renditions' => ['480p', '720p', '1080p'],
+        ->assertJsonPath('data.status', 'pending');
+
+    $uploaded = $response->json('data');
+    expect($uploaded['url'])->not->toBeNull()
+        ->and($uploaded['original_url'])->not->toBeNull();
+
+    // 2. Publication du post et transcodage asynchrone des renditions
+    $postResponse = postJson('/api/square-cr1/posts', [
+        'body' => 'Vidéo avec transcodage adaptatif',
+        'media' => [
+            [
+                'url' => $uploaded['url'],
+                'type' => 'video',
+                'mime_type' => 'video/mp4',
+                'duration' => 20,
             ],
-        ]);
+        ],
+    ]);
 
-    $data = $response->json('data');
+    $postResponse->assertStatus(201);
+    $mediaId = $postResponse->json('data.media_items.0.id');
+    $postMedia = PostMedia::find($mediaId);
 
-    expect($data['original_url'])->toContain('.mp4')
-        ->and($data['url'])->toContain('720p.mp4')
-        ->and($data['url'])->not->toBe($data['original_url']) // L'original est mis hors de la lecture
-        ->and($data['renditions']['480p'])->toContain('480p.mp4')
-        ->and($data['renditions']['720p'])->toContain('720p.mp4')
-        ->and($data['renditions']['1080p'])->toContain('1080p.mp4')
-        ->and($data['poster_url'])->not->toBeNull()
-        ->and($data['poster_url'])->toContain('poster.jpg');
+    // Traitement du Job
+    $job = new ProcessSquareVideoJob($postMedia);
+    $job->handle(app(VideoProcessingService::class), app(VideoTranscodingService::class));
+
+    $postMedia->refresh();
+
+    expect($postMedia->status)->toBe(MediaProcessingStatus::Completed)
+        ->and($postMedia->media_url)->toContain('720p.mp4')
+        ->and($postMedia->poster_url)->not->toBeNull()
+        ->and($postMedia->poster_url)->toContain('poster.jpg')
+        ->and($postMedia->edit_metadata['renditions'])->toHaveKeys(['480p', '720p', '1080p']);
 });
 
 it('storeListingVideo génère les renditions adaptatives et l\'image d\'aperçu', function () {
@@ -119,6 +140,69 @@ it('storeListingVideo génère les renditions adaptatives et l\'image d\'aperçu
     ])
         ->and($result['renditions'])->toHaveKeys(['480p', '720p', '1080p'])
         ->and($result['url'])->toContain('720p.mp4')
-        ->and($result['url'])->not->toBe($result['original_url'])
-        ->and($result['poster_url'])->toContain('poster.jpg');
+        ->and($result['url'])->not->toBe($result['original_url']);
+
+    expect($result['poster_url'])->toContain('poster.jpg');
+});
+
+it('VideoTranscodingService ne sort jamais une version plus lourde que l\'original et n\'agrandit pas au-delà de la source', function () {
+    $service = new VideoTranscodingService;
+
+    // Création d'une petite vidéo originale de 300 octets
+    $originalData = str_repeat('A', 300);
+    Storage::disk('public')->put('videos/small_source.mp4', $originalData);
+    $originalUrl = Storage::disk('public')->url('videos/small_source.mp4');
+
+    $result = $service->transcode($originalUrl, 'videos/renditions', 1, 'public');
+
+    expect($result['renditions'])->toHaveKeys(['480p', '720p', '1080p']);
+
+    $disk = Storage::disk('public');
+    foreach (['480p', '720p', '1080p'] as $profile) {
+        $relPath = $result['relative_renditions'][$profile];
+        expect($disk->exists($relPath))->toBeTrue();
+        // La taille d'aucune rendition ne doit dépasser la taille originale
+        expect(filesize($disk->path($relPath)))->toBeLessThanOrEqual(strlen($originalData));
+    }
+});
+
+it('VideoTranscodingService remplace par l\'original si un profil FFmpeg sort plus lourd que l\'original', function () {
+    $service = new VideoTranscodingService;
+
+    $originalData = str_repeat('X', 500);
+    Storage::disk('public')->put('videos/test_heavy.mp4', $originalData);
+    $disk = Storage::disk('public');
+    $originalUrl = $disk->url('videos/test_heavy.mp4');
+
+    // On force la présence de FFmpeg pour tester le filtre et le remplacement
+    $service->setFfmpegAvailable(true);
+
+    // Process::fake simule un FFmpeg qui produit un fichier de 5000 octets (plus lourd que les 500 octets de l'original)
+    Process::fake([
+        'ffprobe *' => Process::result("540x960\n"),
+        'ffmpeg *' => function (PendingProcess $process) {
+            // Si c'est l'extraction de poster
+            if (str_contains($process->command, '-vframes 1')) {
+                return Process::result();
+            }
+
+            // Récupérer le fichier de destination MP4 à la fin de la commande (même avec espaces dans le chemin)
+            if (preg_match('/[\'"]([^\'"]+\.mp4)[\'"]\s*$/', $process->command, $matches)) {
+                $targetFile = $matches[1];
+                @file_put_contents($targetFile, str_repeat('HEAVY_DATA_', 400)); // ~4400 octets
+            }
+
+            return Process::result();
+        },
+    ]);
+
+    $result = $service->transcode($originalUrl, 'videos/renditions_guard', 2, 'public');
+
+    foreach (['480p', '720p', '1080p'] as $profile) {
+        $relPath = $result['relative_renditions'][$profile];
+        expect($disk->exists($relPath))->toBeTrue();
+        $fileSize = filesize($disk->path($relPath));
+        // Doit avoir été ramené à la taille de l'original (500 octets) et non 4400 octets
+        expect($fileSize)->toBeLessThanOrEqual(500);
+    }
 });

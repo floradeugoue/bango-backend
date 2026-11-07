@@ -21,9 +21,9 @@ class ModerationTrendService
      *
      * @return array<string, mixed>
      */
-    public function getTrendsWithExclusions(?User $viewer = null): array
+    public function getTrendsWithExclusions(?User $viewer = null, ?string $country = null): array
     {
-        $rawTrends = $this->trendsService->getTrends($viewer);
+        $rawTrends = $this->trendsService->getTrends($viewer, $country);
 
         $activeExclusions = HashtagExclusion::query()
             ->where('is_active', true)

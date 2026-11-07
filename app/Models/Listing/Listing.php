@@ -99,9 +99,20 @@ class Listing extends Model
     {
         static::creating(function (Listing $listing) {
             if (empty($listing->reference)) {
-                $listing->reference = 'LST-'.strtoupper(Str::random(10));
+                $listing->reference = 'BNG-L-'.strtoupper(Str::random(8));
             }
         });
+    }
+
+    public function getShortReferenceAttribute(): string
+    {
+        if (! empty($this->reference)) {
+            return $this->reference;
+        }
+
+        $cleanUuid = str_replace('-', '', (string) $this->id);
+
+        return 'BNG-L-'.strtoupper(substr($cleanUuid, 0, 8));
     }
 
     protected function casts(): array

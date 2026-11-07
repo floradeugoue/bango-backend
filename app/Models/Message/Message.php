@@ -12,7 +12,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
 
 /**
  * @property string $id
@@ -115,7 +115,13 @@ class Message extends Model
             return $this->attachment_path;
         }
 
-        return Storage::disk(config('media.disk', 'public'))->url($this->attachment_path);
+        $ttl = (int) config('media.temporary_url_ttl', 60);
+
+        return URL::temporarySignedRoute(
+            'api.messages.attachment.show',
+            now()->addMinutes($ttl),
+            ['id' => $this->id]
+        );
     }
 
     /**

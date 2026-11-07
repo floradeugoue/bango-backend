@@ -27,7 +27,7 @@ class AdminCampaignManagementController extends Controller
         $filters = $request->only(['status', 'user_id', 'boostable_type', 'from', 'to', 'q']);
         $perPage = $request->integer('per_page', 20);
 
-        $paginator = $this->boostService->getCampaigns($filters, $perPage);
+        ['paginator' => $paginator, 'counts' => $counts, 'totals' => $totals] = $this->boostService->getCampaigns($filters, $perPage);
 
         $items = collect($paginator->items())->map(function (Campaign $c) {
             $budget = (float) $c->budget_amount;
@@ -76,6 +76,8 @@ class AdminCampaignManagementController extends Controller
                 'per_page' => $paginator->perPage(),
                 'total' => $paginator->total(),
                 'last_page' => $paginator->lastPage(),
+                'counts' => $counts,
+                'totals' => $totals,
             ],
         ]);
     }

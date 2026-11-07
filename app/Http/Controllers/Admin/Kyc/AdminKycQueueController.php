@@ -63,14 +63,25 @@ class AdminKycQueueController extends Controller
                 default => 'pending',
             };
 
+            $requiredDocs = match ($sub->profile_category) {
+                'page' => 4,
+                'agent' => 4,
+                'landlord', 'bailleur' => 4,
+                default => 2,
+            };
+            $receivedDocs = $sub->documents->count();
+            $headlineOk = ($receivedDocs >= $requiredDocs) && ! empty($sub->id_number);
+
             return [
                 'id' => (string) $sub->id,
                 'reference' => $sub->reference,
                 'account' => [
                     'id' => $user ? (string) $user->id : null,
                     'name' => $user?->name ?? $sub->full_name,
+                    'display_name' => $user?->display_name ?? $user?->name ?? $sub->full_name,
                     'handle' => $user?->handle ?? ($user ? 'user'.$user->id : null),
                     'avatarUrl' => $user?->avatar_url,
+                    'avatar_url' => $user?->avatar_url,
                     'city' => $user?->city,
                 ],
                 'accountKind' => $accountKind,
@@ -82,12 +93,12 @@ class AdminKycQueueController extends Controller
                 'submittedAt' => $sub->created_at->toISOString(),
                 'attempt' => 1,
                 'docs' => [
-                    'received' => $sub->documents->count(),
-                    'required' => 2,
+                    'received' => $receivedDocs,
+                    'required' => $requiredDocs,
                 ],
                 'headline' => [
-                    'key' => 'id_valid',
-                    'ok' => true,
+                    'key' => $headlineOk ? 'id_valid' : 'docs_missing',
+                    'ok' => $headlineOk,
                     'vars' => ['city' => $user?->city],
                 ],
                 'alerts' => 0,
@@ -110,6 +121,9 @@ class AdminKycQueueController extends Controller
                 'user' => $user ? [
                     'id' => $user->id,
                     'name' => $user->name,
+                    'display_name' => $user->display_name ?? $user->name,
+                    'avatar_url' => $user->avatar_url,
+                    'city' => $user->city,
                     'email' => $user->email,
                     'phone' => $user->phone,
                     'badge' => $user->badge,
@@ -119,7 +133,7 @@ class AdminKycQueueController extends Controller
                 'full_name' => $sub->full_name,
                 'id_type' => $sub->id_type,
                 'id_number' => $sub->id_number,
-                'documents_count' => $sub->documents->count(),
+                'documents_count' => $receivedDocs,
                 'submitted_at' => $sub->created_at->toISOString(),
                 'expires_on' => $sub->expires_on?->toDateString(),
                 'decided_at' => $sub->decided_at?->toISOString(),
@@ -134,11 +148,111 @@ class AdminKycQueueController extends Controller
             ];
         });
 
-        $toVerifyCount = KycSubmission::whereHas('user')->whereIn('status', ['pending', 'supplement_requested'])->count();
+        $pendingQuery = KycSubmission::whereHas('user')->whereIn('status', ['pending', 'supplement_requested']);
+
+        $toVerifyCount = (clone $pendingQuery)->count();
         $activeCount = KycSubmission::whereHas('user')->where('status', 'approved')->count();
         $expiringCount = KycSubmission::whereHas('user')->where('status', 'approved')->where('expires_on', '<=', now()->addDays(30))->count();
         $refusalsCount = KycSubmission::whereHas('user')->where('status', 'rejected')->count();
         $awaitingCount = KycSubmission::whereHas('user')->where('status', 'supplement_requested')->count();
+
+        // 1. Facettes - Badges
+        $badgeCounts = (clone $pendingQuery)
+            ->selectRaw("CASE 
+                WHEN profile_category IN ('landlord', 'bailleur') THEN 'bailleur'
+                WHEN profile_category = 'agent' THEN 'agent'
+                WHEN profile_category = 'page' THEN 'page'
+                WHEN profile_category = 'double' THEN 'double'
+                ELSE 'other' END as cat, count(*) as cnt")
+            ->groupBy('cat')
+            ->pluck('cnt', 'cat');
+
+        $facetBadges = [
+            ['value' => 'bailleur', 'count' => (int) ($badgeCounts['bailleur'] ?? 0)],
+            ['value' => 'agent', 'count' => (int) ($badgeCounts['agent'] ?? 0)],
+            ['value' => 'page', 'count' => (int) ($badgeCounts['page'] ?? 0)],
+        ];
+        if (isset($badgeCounts['double'])) {
+            $facetBadges[] = ['value' => 'double', 'count' => (int) $badgeCounts['double']];
+        }
+
+        // 2. Facettes - Kinds
+        $kindCounts = (clone $pendingQuery)
+            ->get(['metadata'])
+            ->map(fn ($s) => $s->metadata['kind'] ?? 'new')
+            ->countBy();
+
+        $facetKinds = [
+            ['value' => 'new', 'count' => (int) ($kindCounts['new'] ?? 0)],
+            ['value' => 'renewal', 'count' => (int) ($kindCounts['renewal'] ?? 0)],
+            ['value' => 'add_property', 'count' => (int) ($kindCounts['add_property'] ?? 0)],
+            ['value' => 'appeal', 'count' => (int) ($kindCounts['appeal'] ?? 0)],
+        ];
+
+        // 3. Facettes - Villes réelles des demandeurs
+        $facetCities = (clone $pendingQuery)
+            ->with('user:id,city')
+            ->get(['id', 'user_id'])
+            ->pluck('user.city')
+            ->filter(fn ($city) => ! empty($city))
+            ->countBy()
+            ->map(fn ($cnt, $city) => ['value' => (string) $city, 'count' => (int) $cnt])
+            ->values()
+            ->all();
+
+        // 4. Facettes - Anciennetés réelles & délais SLA
+        $now = now();
+        $sixHoursAgo = $now->copy()->subHours(6);
+        $twentyFourHoursAgo = $now->copy()->subHours(24);
+        $eighteenHoursAgo = $now->copy()->subHours(18);
+
+        $lt6h = (clone $pendingQuery)->where('kyc_submissions.created_at', '>=', $sixHoursAgo)->count();
+        $sixTo24h = (clone $pendingQuery)
+            ->where('kyc_submissions.created_at', '<', $sixHoursAgo)
+            ->where('kyc_submissions.created_at', '>=', $twentyFourHoursAgo)
+            ->count();
+        $gt24h = (clone $pendingQuery)->where('kyc_submissions.created_at', '<', $twentyFourHoursAgo)->count();
+
+        $facetAges = [
+            ['value' => 'lt6h', 'count' => $lt6h],
+            ['value' => '6to24h', 'count' => $sixTo24h],
+            ['value' => 'gt24h', 'count' => $gt24h],
+        ];
+
+        $overdue = $gt24h;
+
+        // Near limit (entre 18h et 24h d'ancienneté)
+        $nearLimit = (clone $pendingQuery)
+            ->where('kyc_submissions.created_at', '<', $eighteenHoursAgo)
+            ->where('kyc_submissions.created_at', '>=', $twentyFourHoursAgo)
+            ->pluck('reference')
+            ->all();
+
+        // Calcul dynamique de la médiane SLA en heures
+        $durations = KycSubmission::whereNotNull('decided_at')
+            ->latest('decided_at')
+            ->limit(50)
+            ->get(['created_at', 'decided_at'])
+            ->map(fn ($s) => $s->created_at->diffInRealMinutes($s->decided_at) / 60)
+            ->sort()
+            ->values();
+
+        if ($durations->isEmpty()) {
+            $durations = (clone $pendingQuery)
+                ->limit(50)
+                ->get(['created_at'])
+                ->map(fn ($s) => $s->created_at->diffInRealMinutes($now) / 60)
+                ->sort()
+                ->values();
+        }
+
+        $medianHours = 0.0;
+        if ($durations->isNotEmpty()) {
+            $mid = (int) floor($durations->count() / 2);
+            $medianHours = round($durations->count() % 2 === 0
+                ? ($durations[$mid - 1] + $durations[$mid]) / 2
+                : $durations[$mid], 1);
+        }
 
         return response()->json([
             // Contract Page<T> format
@@ -157,30 +271,15 @@ class AdminKycQueueController extends Controller
                 'awaiting' => $awaitingCount,
             ],
             'facets' => [
-                'badges' => [
-                    ['value' => 'bailleur', 'count' => $toVerifyCount],
-                    ['value' => 'agent', 'count' => 0],
-                    ['value' => 'page', 'count' => 0],
-                ],
-                'kinds' => [
-                    ['value' => 'new', 'count' => $toVerifyCount],
-                    ['value' => 'renewal', 'count' => 0],
-                    ['value' => 'add_property', 'count' => 0],
-                    ['value' => 'appeal', 'count' => 0],
-                ],
-                'cities' => [
-                    ['value' => 'Dakar', 'count' => $toVerifyCount],
-                ],
-                'ages' => [
-                    ['value' => 'lt6h', 'count' => $toVerifyCount],
-                    ['value' => '6to24h', 'count' => 0],
-                    ['value' => 'gt24h', 'count' => 0],
-                ],
+                'badges' => $facetBadges,
+                'kinds' => $facetKinds,
+                'cities' => $facetCities,
+                'ages' => $facetAges,
             ],
-            'nearLimit' => [],
-            'overdue' => 0,
+            'nearLimit' => $nearLimit,
+            'overdue' => $overdue,
             'targetHours' => 24,
-            'medianHours' => 3.5,
+            'medianHours' => $medianHours,
 
             // Legacy keys for backward compatibility
             'success' => true,
@@ -221,21 +320,69 @@ class AdminKycQueueController extends Controller
             ];
         });
 
+        $user = $sub->user;
+
+        // Position dans la file active
+        $queueItems = KycSubmission::whereHas('user')
+            ->whereIn('status', ['pending', 'supplement_requested'])
+            ->orderByRaw("CASE WHEN status = 'pending' THEN 1 WHEN status = 'supplement_requested' THEN 2 ELSE 3 END ASC")
+            ->orderBy('created_at', 'asc')
+            ->select(['id', 'reference'])
+            ->get();
+
+        $totalQueue = $queueItems->count();
+        $currentIdx = $queueItems->search(fn ($item) => (string) $item->id === (string) $sub->id || $item->reference === $sub->reference);
+
+        if ($currentIdx !== false) {
+            $index = $currentIdx + 1;
+            $prevItem = $currentIdx > 0 ? $queueItems->get($currentIdx - 1) : null;
+            $nextItem = $currentIdx < ($totalQueue - 1) ? $queueItems->get($currentIdx + 1) : null;
+
+            $prev = $prevItem ? ($prevItem->reference ?? (string) $prevItem->id) : null;
+            $next = $nextItem ? ($nextItem->reference ?? (string) $nextItem->id) : null;
+        } else {
+            $index = null;
+            $prev = null;
+            $next = $totalQueue > 0 ? ($queueItems->first()->reference ?? (string) $queueItems->first()->id) : null;
+        }
+
+        $position = [
+            'index' => $index,
+            'total' => $totalQueue,
+            'prev' => $prev,
+            'next' => $next,
+        ];
+
         return response()->json([
             'success' => true,
             'data' => [
                 'id' => $sub->id,
                 'reference' => $sub->reference,
+                'account' => [
+                    'id' => $user ? (string) $user->id : null,
+                    'name' => $user?->name ?? $sub->full_name,
+                    'display_name' => $user?->display_name ?? $user?->name ?? $sub->full_name,
+                    'handle' => $user?->handle ?? ($user ? 'user'.$user->id : null),
+                    'avatar_url' => $user?->avatar_url,
+                    'avatarUrl' => $user?->avatar_url,
+                    'city' => $user?->city,
+                    'badge' => $user?->badge,
+                    'is_verified' => (bool) $user?->is_verified,
+                ],
                 'user' => [
                     'id' => $sub->user->id,
                     'name' => $sub->user->name,
+                    'display_name' => $sub->user->display_name ?? $sub->user->name,
                     'email' => $sub->user->email,
                     'phone' => $sub->user->phone,
+                    'avatar_url' => $sub->user->avatar_url,
+                    'city' => $sub->user->city,
                     'badge' => $sub->user->badge,
                     'is_verified' => (bool) $sub->user->is_verified,
                     'verification_lapsed' => (bool) $sub->user->verification_lapsed,
                     'active_subscriptions_count' => $sub->user->subscriptions->count(),
                 ],
+                'position' => $position,
                 'profile_category' => $sub->profile_category,
                 'status' => $sub->status->value,
                 'full_name' => $sub->full_name,

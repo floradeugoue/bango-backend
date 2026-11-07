@@ -131,13 +131,33 @@ class PaymentReconciliationService
             }
 
             if ($statusResult->status === PaymentStatus::Failed) {
+                $rawMsg = $statusResult->rawResponse['transaction']['message']
+                    ?? $statusResult->rawResponse['transaction']['operator_message']
+                    ?? $statusResult->rawResponse['message']
+                    ?? $statusResult->errorMessage
+                    ?? 'Échec confirmé lors de la réconciliation serveur';
+
+                $rawStatus = $statusResult->rawResponse['transaction']['status']
+                    ?? $statusResult->rawResponse['status']
+                    ?? null;
+
+                $failureReason = $statusResult->rawResponse['transaction']['operator_message']
+                    ?? $statusResult->rawResponse['operator_message']
+                    ?? $statusResult->rawResponse['transaction']['message']
+                    ?? $statusResult->rawResponse['message']
+                    ?? $rawMsg;
+
                 $this->paymentEngineService->failTransaction(
                     transaction: $lockedTx,
-                    reason: $statusResult->errorMessage ?? 'Échec confirmé lors de la réconciliation serveur',
+                    reason: $rawMsg,
                     source: PaymentEventSource::System,
                     details: [
                         'reconciliation' => true,
                         'error_code' => $statusResult->errorCode,
+                        'message' => $rawMsg,
+                        'status' => $rawStatus,
+                        'failure_reason' => $failureReason,
+                        'raw_response' => $statusResult->rawResponse,
                     ]
                 );
 

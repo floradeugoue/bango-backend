@@ -2,6 +2,7 @@
 
 namespace App\Services\Payment;
 
+use App\Enums\Payment\PaymentAttemptStatus;
 use App\Enums\Payment\PaymentChannel;
 use App\Enums\Payment\PaymentEventSource;
 use App\Enums\Payment\PaymentProvider;
@@ -285,6 +286,32 @@ class PaymentEngineService
             $lockedTx = PaymentTransaction::where('id', $transaction->id)
                 ->lockForUpdate()
                 ->firstOrFail();
+
+            $latestAttempt = $lockedTx->attempts()->latest('attempt_number')->first();
+            if ($latestAttempt && $latestAttempt->status === PaymentAttemptStatus::Initiated) {
+                $latestAttempt->markFailed(
+                    errorCode: $details['error_code'] ?? 'PAYMENT_FAILED',
+                    errorMessage: $reason,
+                    metadata: array_merge($latestAttempt->metadata ?? [], $details)
+                );
+            }
+
+            $metadata = $lockedTx->metadata ?? [];
+            if (! empty($details['failure_reason'])) {
+                $metadata['failure_reason'] = $details['failure_reason'];
+            } elseif (! empty($reason)) {
+                $metadata['failure_reason'] = $reason;
+            }
+            if (! empty($details['raw_response'])) {
+                $metadata['raw_response'] = $details['raw_response'];
+            }
+            if (! empty($details['message'])) {
+                $metadata['operator_message'] = $details['message'];
+            }
+            if (isset($details['status'])) {
+                $metadata['operator_status'] = $details['status'];
+            }
+            $lockedTx->metadata = $metadata;
 
             $lockedTx->transitionTo(
                 targetStatus: PaymentStatus::Failed,

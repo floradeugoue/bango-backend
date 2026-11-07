@@ -55,6 +55,11 @@ class EnsureTermsAccepted
             }
         }
 
+        // Si le contrôle obligatoire des CGU est désactivé (ex: transition vers la nouvelle version mobile)
+        if (! config('legal.enforce_terms_acceptance', false)) {
+            return $next($request);
+        }
+
         // Vérification de l'acceptation de la version obligatoire des CGU
         if (! $this->legalDocumentService->hasUserAcceptedMandatoryTerms($user)) {
             $mandatoryVersion = $this->legalDocumentService->getMandatoryTermsVersion();

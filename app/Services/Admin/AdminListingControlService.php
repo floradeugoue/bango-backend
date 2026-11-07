@@ -43,10 +43,12 @@ class AdminListingControlService
      * Liste paginée des annonces pour le back-office avec filtres et facettes.
      *
      * @param  array<string, mixed>  $filters
+     * @return array{paginator: LengthAwarePaginator, counts: array<string, int>}
      */
-    public function getListings(array $filters = [], int $perPage = 20): LengthAwarePaginator
+    public function getListings(array $filters = [], int $perPage = 20): array
     {
-        $query = Listing::with(['owner', 'agent', 'page', 'photos', 'campaigns']);
+        $query = Listing::with(['owner', 'agent', 'page', 'photos', 'campaigns'])
+            ->withCount(['conversations']);
 
         // Filtrage selon les pays autorisés dans la session de l'opérateur (Point 20)
         $adminSession = request()?->attributes?->get('admin_session');
@@ -60,69 +62,121 @@ class AdminListingControlService
             });
         }
 
-        // 1. Statut de publication
-        if (! empty($filters['status'])) {
-            $query->where('status', $filters['status']);
-        }
-
-        // 2. Mode de transaction (rent, sale, flatshare)
+        // 1. Mode de transaction (rent, sale, flatshare) (simple ou multiple)
         if (! empty($filters['mode'])) {
-            $query->where('mode', $filters['mode']);
+            $modes = is_array($filters['mode'])
+                ? $filters['mode']
+                : explode(',', (string) $filters['mode']);
+            $query->whereIn('mode', array_map('trim', $modes));
         }
 
-        // 3. Type de bien (studio, flat, villa, etc.)
+        // 2. Type de bien (studio, flat, villa, etc.) (simple ou multiple)
         if (! empty($filters['kind'])) {
-            $query->where('kind', $filters['kind']);
+            $kinds = is_array($filters['kind'])
+                ? $filters['kind']
+                : explode(',', (string) $filters['kind']);
+            $query->whereIn('kind', array_map('trim', $kinds));
         }
 
-        // 4. Ville et quartier
+        // 3. Ville et quartier
         if (! empty($filters['city'])) {
             $query->whereRaw('LOWER(city) = ?', [strtolower(trim((string) $filters['city']))]);
+        }
+        if (! empty($filters['city_id'])) {
+            $query->where('city_id', (int) $filters['city_id']);
         }
         if (! empty($filters['neighbourhood'])) {
             $query->whereRaw('LOWER(neighbourhood) = ?', [strtolower(trim((string) $filters['neighbourhood']))]);
         }
 
-        // 5. Visité par un agent
+        // 4. Visité par un agent
         if (isset($filters['agent_visited'])) {
-            $query->where('agent_visited', (bool) $filters['agent_visited']);
+            $query->where('agent_visited', filter_var($filters['agent_visited'], FILTER_VALIDATE_BOOLEAN));
         }
 
-        // 6. Présence d'un badge professionnel chez le propriétaire
+        // 5. Propriétaire vérifié (distinction bailleur / agent / tous)
         if (isset($filters['verified_owner'])) {
-            $query->whereHas('owner', function (Builder $oq) {
-                $oq->where('is_verified', true)
-                    ->whereIn('badge', ['landlord', 'agent', 'double']);
-            });
+            $val = strtolower((string) $filters['verified_owner']);
+            if ($val === 'landlord') {
+                $query->whereHas('owner', fn (Builder $oq) => $oq->where('is_verified', true)->where('badge', 'landlord'));
+            } elseif ($val === 'agent') {
+                $query->whereHas('owner', fn (Builder $oq) => $oq->where('is_verified', true)->where('badge', 'agent'));
+            } elseif ($val === 'true' || $val === '1' || $val === 'all') {
+                $query->whereHas('owner', fn (Builder $oq) => $oq->where('is_verified', true)->whereIn('badge', ['landlord', 'agent', 'double']));
+            } elseif ($val === 'false' || $val === '0') {
+                $query->whereHas('owner', fn (Builder $oq) => $oq->where('is_verified', false));
+            }
         }
 
-        // 7. Filtre de prix
-        if (! empty($filters['min_price'])) {
-            $query->where('price', '>=', (float) $filters['min_price']);
+        // 6. Filtre de prix
+        $minPrice = $filters['min_price'] ?? $filters['price_min'] ?? null;
+        if (! empty($minPrice)) {
+            $query->where('price', '>=', (float) $minPrice);
         }
-        if (! empty($filters['max_price'])) {
-            $query->where('price', '<=', (float) $filters['max_price']);
+        $maxPrice = $filters['max_price'] ?? $filters['price_max'] ?? null;
+        if (! empty($maxPrice)) {
+            $query->where('price', '<=', (float) $maxPrice);
         }
 
-        // 8. Recherche textuelle (id, référence, titre, localisation, nom du propriétaire)
+        // 7. Recherche textuelle (référence BNG-L-, id, titre, description, adresse, ville, propriétaire)
         if (! empty($filters['q'])) {
             $search = strtolower(trim((string) $filters['q']));
-            $query->where(function (Builder $q) use ($search) {
-                $q->where('id', 'LIKE', "%{$search}%")
-                    ->orWhereRaw('LOWER(title) LIKE ?', ["%{$search}%"])
-                    ->orWhereRaw('LOWER(city) LIKE ?', ["%{$search}%"])
-                    ->orWhereRaw('LOWER(neighbourhood) LIKE ?', ["%{$search}%"])
-                    ->orWhereHas('owner', function (Builder $oq) use ($search) {
-                        $oq->whereRaw('LOWER(name) LIKE ?', ["%{$search}%"])
-                            ->orWhere('email', 'LIKE', "%{$search}%")
-                            ->orWhere('phone', 'LIKE', "%{$search}%");
+            $like = DB::connection()->getDriverName() === 'pgsql' ? 'ilike' : 'like';
+
+            $query->where(function (Builder $q) use ($search, $like) {
+                $q->where('reference', $like, "%{$search}%")
+                    ->orWhere('id', 'LIKE', "%{$search}%")
+                    ->orWhere('title', $like, "%{$search}%")
+                    ->orWhere('description', $like, "%{$search}%")
+                    ->orWhere('address', $like, "%{$search}%")
+                    ->orWhere('city', $like, "%{$search}%")
+                    ->orWhere('neighbourhood', $like, "%{$search}%")
+                    ->orWhereHas('owner', function (Builder $oq) use ($search, $like) {
+                        $oq->where('name', $like, "%{$search}%")
+                            ->orWhere('display_name', $like, "%{$search}%")
+                            ->orWhere('handle', $like, "%{$search}%")
+                            ->orWhere('email', $like, "%{$search}%")
+                            ->orWhere('phone', 'like', "%{$search}%");
                     });
             });
         }
 
-        $query->orderByDesc('created_at');
+        // Compteurs d'onglets avant application du filtre de statut
+        $baseQuery = clone $query;
+        $statusCounts = $baseQuery
+            ->selectRaw('status, count(*) as count')
+            ->groupBy('status')
+            ->pluck('count', 'status')
+            ->toArray();
+        $totalAll = array_sum($statusCounts);
+        $counts = array_merge(['all' => $totalAll], $statusCounts);
 
-        return $query->paginate($perPage);
+        // 8. Statut de publication (simple ou multi-statuts)
+        if (! empty($filters['status'])) {
+            $statuses = is_array($filters['status'])
+                ? $filters['status']
+                : explode(',', (string) $filters['status']);
+            $query->whereIn('status', array_map('trim', $statuses));
+        }
+
+        // 9. Tri (sort=price|oldest|newest|views)
+        $sort = strtolower((string) ($filters['sort'] ?? $filters['sort_by'] ?? 'newest'));
+        $dir = strtolower((string) ($filters['dir'] ?? $filters['sort_order'] ?? 'desc')) === 'asc' ? 'asc' : 'desc';
+
+        match ($sort) {
+            'price', 'price_asc' => $query->orderBy('price', 'asc'),
+            'price_desc' => $query->orderBy('price', 'desc'),
+            'oldest' => $query->orderBy('created_at', 'asc'),
+            'views' => $query->orderBy('views_count', 'desc'),
+            default => $query->orderBy('created_at', $dir),
+        };
+
+        $paginator = $query->paginate($perPage);
+
+        return [
+            'paginator' => $paginator,
+            'counts' => $counts,
+        ];
     }
 
     /**
@@ -827,68 +881,94 @@ class AdminListingControlService
         }
 
         if (! empty($filters['status'])) {
-            $query->where('status', $filters['status']);
+            $statuses = is_array($filters['status'])
+                ? $filters['status']
+                : explode(',', (string) $filters['status']);
+            $query->whereIn('status', array_map('trim', $statuses));
         }
 
         if (! empty($filters['kind'])) {
-            $query->where('kind', $filters['kind']);
+            $kinds = is_array($filters['kind'])
+                ? $filters['kind']
+                : explode(',', (string) $filters['kind']);
+            $query->whereIn('kind', array_map('trim', $kinds));
         }
 
-        return $query->limit(200)->get()->map(function (Listing $l) {
-            return [
-                'id' => $l->id,
-                'title' => $l->title,
-                'lat' => (float) $l->lat,
-                'lng' => (float) $l->lng,
-                'price' => (float) $l->price,
-                'currency' => $l->currency,
-                'city' => $l->city,
-                'neighbourhood' => $l->neighbourhood,
-                'kind' => $l->kind->value,
-                'status' => $l->status->value,
-                'agent_visited' => (bool) $l->agent_visited,
-            ];
-        });
+        $isDetailed = filter_var($filters['detailed'] ?? false, FILTER_VALIDATE_BOOLEAN);
+
+        if ($isDetailed) {
+            return $query->limit(500)->get()->map(function (Listing $l) {
+                return [
+                    'id' => $l->id,
+                    'reference' => $l->reference,
+                    'short_reference' => $l->short_reference,
+                    'title' => $l->title,
+                    'lat' => (float) $l->lat,
+                    'lng' => (float) $l->lng,
+                    'price' => (float) $l->price,
+                    'currency' => $l->currency,
+                    'city' => $l->city,
+                    'neighbourhood' => $l->neighbourhood,
+                    'kind' => $l->kind instanceof \BackedEnum ? $l->kind->value : $l->kind,
+                    'status' => $l->status instanceof \BackedEnum ? $l->status->value : $l->status,
+                    'agent_visited' => (bool) $l->agent_visited,
+                ];
+            });
+        }
+
+        // Vue agrégée par ville pour performances
+        return (clone $query)
+            ->whereNotNull('city')
+            ->selectRaw("city, avg(lat) as lat, avg(lng) as lng, count(*) as total, sum(case when status = 'published' then 1 else 0 end) as online")
+            ->groupBy('city')
+            ->get()
+            ->map(function ($r) {
+                return [
+                    'city' => $r->city,
+                    'lat' => round((float) $r->lat, 6),
+                    'lng' => round((float) $r->lng, 6),
+                    'total' => (int) $r->total,
+                    'online' => (int) $r->online,
+                    'offline' => (int) ($r->total - $r->online),
+                ];
+            });
     }
 
     /**
      * B.9. Suivi global des visites réservées avec état du SLA de réponse (18 heures).
      *
      * @param  array<string, mixed>  $filters
+     * @return array{paginator: LengthAwarePaginator, counts: array<string, int>}
      */
-    public function getVisits(array $filters = [], int $perPage = 20): LengthAwarePaginator
+    public function getVisits(array $filters = [], int $perPage = 20): array
     {
         $query = VisitReservation::with(['listing', 'slot', 'prospect', 'owner', 'agent', 'paymentTransaction']);
 
-        // 1. Filtre par statut
-        if (! empty($filters['status'])) {
-            $query->where('status', $filters['status']);
-        }
-
-        // 2. Filtre par annonce
+        // 1. Filtre par annonce
         if (! empty($filters['listing_id'])) {
             $query->where('listing_id', $filters['listing_id']);
         }
 
-        // 3. Filtre dépassement SLA 18h (demandes en attente depuis plus de 18h)
+        // 2. Filtre dépassement SLA 18h (demandes en attente depuis plus de 18h)
         if (! empty($filters['overdue_sla'])) {
             $slaLimit = now()->subHours(18);
             $query->where('status', VisitReservationStatus::Requested->value)
                 ->where('created_at', '<', $slaLimit);
         }
 
-        // 3b. Filtre visites en litige (attendance contradictoire)
+        // 3. Filtre visites en litige (attendance contradictoire)
         if (isset($filters['disputed']) && filter_var($filters['disputed'], FILTER_VALIDATE_BOOLEAN)) {
             $query->whereNotNull('disputed_at');
         }
 
-        // 4. Recherche textuelle (supporte également payment_reference, référence courte ou ID)
+        // 4. Recherche textuelle (supporte référence BNG-V-, payment_reference, ou ID)
         if (! empty($filters['q'])) {
             $search = strtolower(trim((string) $filters['q']));
             $like = DB::connection()->getDriverName() === 'pgsql' ? 'ILIKE' : 'LIKE';
 
             $query->where(function (Builder $q) use ($search, $like) {
-                $q->where('payment_reference', $like, "%{$search}%")
+                $q->where('reference', $like, "%{$search}%")
+                    ->orWhere('payment_reference', $like, "%{$search}%")
                     ->orWhereRaw("CAST(id AS TEXT) {$like} ?", ["%{$search}%"])
                     ->orWhereHas('prospect', fn ($pq) => $pq->where('name', $like, "%{$search}%")->orWhere('email', $like, "%{$search}%")->orWhere('phone', $like, "%{$search}%"))
                     ->orWhereHas('owner', fn ($oq) => $oq->where('name', $like, "%{$search}%")->orWhere('email', $like, "%{$search}%")->orWhere('phone', $like, "%{$search}%"))
@@ -896,8 +976,31 @@ class AdminListingControlService
             });
         }
 
+        // Compteurs d'onglets calculés avant filtre de statut
+        $baseQuery = clone $query;
+        $statusCounts = $baseQuery
+            ->selectRaw('status, count(*) as count')
+            ->groupBy('status')
+            ->pluck('count', 'status')
+            ->toArray();
+        $totalAll = array_sum($statusCounts);
+        $counts = array_merge(['all' => $totalAll], $statusCounts);
+
+        // 5. Filtre par statut (simple ou multiple)
+        if (! empty($filters['status'])) {
+            $statuses = is_array($filters['status'])
+                ? $filters['status']
+                : explode(',', (string) $filters['status']);
+            $query->whereIn('status', array_map('trim', $statuses));
+        }
+
         $query->orderByDesc('created_at');
 
-        return $query->paginate($perPage);
+        $paginator = $query->paginate($perPage);
+
+        return [
+            'paginator' => $paginator,
+            'counts' => $counts,
+        ];
     }
 }

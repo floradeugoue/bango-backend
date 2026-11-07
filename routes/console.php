@@ -208,3 +208,12 @@ Schedule::command('kyc:purge-documents')
     ->dailyAt('02:00')
     ->withoutOverlapping()
     ->onOneServer();
+
+// --------------------------------------------------------------------------
+// PLANIFICATEUR DES DÉLAIS DE CORRECTION MODÉRATION (Demander une correction)
+// --------------------------------------------------------------------------
+// 11. Masquage automatique des contenus signalés dont le délai de correction a expiré
+Schedule::command('moderation:enforce-expired-corrections')
+    ->hourly()
+    ->withoutOverlapping()
+    ->onOneServer();

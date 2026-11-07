@@ -2,9 +2,11 @@
 
 namespace App\Services\Square;
 
+use App\Enums\Media\MediaProcessingStatus;
 use App\Enums\Square\PostAudience;
 use App\Enums\Square\PostCommentsBy;
 use App\Enums\Square\PostMediaKind;
+use App\Jobs\Square\ProcessSquareVideoJob;
 use App\Models\Page\Page;
 use App\Models\Square\Post;
 use App\Models\Square\PostMedia;
@@ -153,18 +155,18 @@ class PostCreationService
                     || $mediaType === 'video';
 
                 if ($isKindVideo && is_array($editMetadata)) {
-                    $processed = $this->videoProcessingService->processSquareVideo(
-                        $mediaUrl,
-                        $editMetadata,
-                        $user->id,
-                        $duration
-                    );
-
-                    $mediaUrl = $processed['media_url'] ?? $mediaUrl;
-                    $posterUrl = $processed['poster_url'] ?? $posterUrl;
-                    $duration = $processed['duration'] ?? $duration;
-                    $editMetadata = $processed['edit_metadata'] ?? $editMetadata;
+                    $normalizedEdit = $this->videoProcessingService->normalizeEditMetadata($editMetadata);
+                    if (isset($normalizedEdit['trim'])) {
+                        $startMs = (int) $normalizedEdit['trim']['start_ms'];
+                        $endMs = (int) $normalizedEdit['trim']['end_ms'];
+                        if ($endMs > $startMs) {
+                            $duration = (int) max(1, round(($endMs - $startMs) / 1000));
+                        }
+                    }
+                    $editMetadata = $normalizedEdit;
                 }
+
+                $status = $isKindVideo ? MediaProcessingStatus::Pending : MediaProcessingStatus::Completed;
 
                 $postMedia = PostMedia::create([
                     'post_id' => $post->id,
@@ -178,7 +180,12 @@ class PostCreationService
                     'duration' => $duration,
                     'display_order' => $order,
                     'edit_metadata' => $editMetadata,
+                    'status' => $status,
                 ]);
+
+                if ($isKindVideo) {
+                    ProcessSquareVideoJob::dispatch($postMedia);
+                }
 
                 $createdMediaMap[$index] = $postMedia;
             }

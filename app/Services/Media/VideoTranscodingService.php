@@ -67,118 +67,218 @@ class VideoTranscodingService
         $uniqueId = (string) Str::uuid();
         $relativeBaseDir = trim("{$targetSubDir}/{$userId}/{$uniqueId}", '/');
         $diskInstance->makeDirectory($relativeBaseDir);
-        $absoluteBaseDir = $diskInstance->path($relativeBaseDir);
 
-        if (! is_dir($absoluteBaseDir)) {
-            @mkdir($absoluteBaseDir, 0755, true);
+        // Détection de disque local vs disque distant (R2 / S3)
+        $driver = config("filesystems.disks.{$disk}.driver", 'local');
+        $isRemoteDisk = in_array($driver, ['s3', 'r2', 'ftp', 'sftp'], true) || in_array($disk, ['r2', 'r2_private'], true);
+        $isLocalDisk = ! $isRemoteDisk;
+        $tempLocalDir = storage_path('app/temp/transcode_'.$uniqueId);
+        if (! is_dir($tempLocalDir)) {
+            @mkdir($tempLocalDir, 0755, true);
         }
 
-        // Définition des 3 profils cibles
-        $profiles = [
-            '480p' => [
-                'scale' => '-vf scale=-2:480',
-                'video_bitrate' => '-b:v 1000k -maxrate 1200k -bufsize 2000k',
-                'audio_bitrate' => '-c:a aac -b:a 128k',
-            ],
-            '720p' => [
-                'scale' => '-vf scale=-2:720',
-                'video_bitrate' => '-b:v 2500k -maxrate 3000k -bufsize 5000k',
-                'audio_bitrate' => '-c:a aac -b:a 128k',
-            ],
-            '1080p' => [
-                'scale' => '-vf scale=-2:1080',
-                'video_bitrate' => '-b:v 5000k -maxrate 6000k -bufsize 10000k',
-                'audio_bitrate' => '-c:a aac -b:a 192k',
-            ],
-        ];
+        if ($isLocalDisk) {
+            try {
+                $testPath = $diskInstance->path($relativeBaseDir);
+                $absoluteBaseDir = (is_string($testPath) && is_dir($testPath)) ? $testPath : $tempLocalDir;
+            } catch (\Throwable $e) {
+                $absoluteBaseDir = $tempLocalDir;
+                $isLocalDisk = false;
+            }
+        } else {
+            $absoluteBaseDir = $tempLocalDir;
+        }
 
-        $renditions = [];
-        $relativeRenditions = [];
-        $hasFfmpeg = $this->isFfmpegAvailable();
+        try {
+            // Si le fichier source est distant (sur R2), on le télécharge temporairement sur le VPS pour FFmpeg
+            if (! $inputAbsPath || ! file_exists($inputAbsPath)) {
+                $cleanSource = preg_replace('#^https?://[^/]+/#', '', $sourcePathOrUrl);
+                $cleanSource = preg_replace('#^/?storage/#', '', $cleanSource);
+                $cleanSource = ltrim($cleanSource, '/');
 
-        foreach ($profiles as $profileKey => $cfg) {
-            $relativeFile = "{$relativeBaseDir}/{$profileKey}.mp4";
-            $absoluteFile = $diskInstance->path($relativeFile);
+                if ($diskInstance->exists($cleanSource)) {
+                    $localSourceFile = $tempLocalDir.'/source_'.basename($cleanSource);
+                    $stream = $diskInstance->readStream($cleanSource);
+                    if ($stream) {
+                        $dest = fopen($localSourceFile, 'w');
+                        stream_copy_to_stream($stream, $dest);
+                        fclose($dest);
+                        if (is_resource($stream)) {
+                            fclose($stream);
+                        }
+                        if (file_exists($localSourceFile)) {
+                            $inputAbsPath = $localSourceFile;
+                        }
+                    }
+                }
+            }
 
-            $transcodedSuccessfully = false;
+            // Définition des 3 profils cibles avec scale=-2:'min(X,ih)' pour ne jamais agrandir au-delà de la source
+            $profiles = [
+                '480p' => [
+                    'target_height' => 480,
+                    'scale' => '-vf "scale=-2:\'min(480,ih)\'"',
+                    'video_bitrate' => '-b:v 1000k -maxrate 1200k -bufsize 2000k',
+                    'audio_bitrate' => '-c:a aac -b:a 128k',
+                ],
+                '720p' => [
+                    'target_height' => 720,
+                    'scale' => '-vf "scale=-2:\'min(720,ih)\'"',
+                    'video_bitrate' => '-b:v 2500k -maxrate 3000k -bufsize 5000k',
+                    'audio_bitrate' => '-c:a aac -b:a 128k',
+                ],
+                '1080p' => [
+                    'target_height' => 1080,
+                    'scale' => '-vf "scale=-2:\'min(1080,ih)\'"',
+                    'video_bitrate' => '-b:v 5000k -maxrate 6000k -bufsize 10000k',
+                    'audio_bitrate' => '-c:a aac -b:a 192k',
+                ],
+            ];
+
+            $renditions = [];
+            $relativeRenditions = [];
+            $hasFfmpeg = $this->isFfmpegAvailable();
+
+            $originalSize = ($inputAbsPath && file_exists($inputAbsPath)) ? filesize($inputAbsPath) : null;
+            $sourceDimensions = $this->probeVideoDimensions($inputAbsPath);
+            $sourceHeight = $sourceDimensions['height'] ?? null;
+
+            $previousRenditionAbsPath = null;
+
+            foreach ($profiles as $profileKey => $cfg) {
+                $relativeFile = "{$relativeBaseDir}/{$profileKey}.mp4";
+                $absoluteFile = $isLocalDisk ? $diskInstance->path($relativeFile) : "{$tempLocalDir}/{$profileKey}.mp4";
+
+                $transcodedSuccessfully = false;
+
+                // Règle 1 : Ne jamais agrandir. Si la source est plus basse que ce profil,
+                // sauter le profil plus haut que la source et réutiliser le plus proche (profil précédent ou original)
+                $isHigherThanSource = ($sourceHeight !== null && $sourceHeight < $cfg['target_height']);
+
+                if ($isHigherThanSource && $previousRenditionAbsPath && file_exists($previousRenditionAbsPath)) {
+                    if (@copy($previousRenditionAbsPath, $absoluteFile)) {
+                        $transcodedSuccessfully = true;
+                        Log::info("VideoTranscodingService: Profil {$profileKey} saute (source height {$sourceHeight} < {$cfg['target_height']}), reutilisation du profil precedent.");
+                    }
+                } elseif ($hasFfmpeg && $inputAbsPath && file_exists($inputAbsPath)) {
+                    // Transcodage H.264 + AAC avec -movflags +faststart
+                    $cmd = sprintf(
+                        'ffmpeg -y -i %s %s %s %s -c:v libx264 -preset fast -pix_fmt yuv420p -movflags +faststart %s',
+                        escapeshellarg($inputAbsPath),
+                        $cfg['scale'],
+                        $cfg['video_bitrate'],
+                        $cfg['audio_bitrate'],
+                        escapeshellarg($absoluteFile)
+                    );
+
+                    try {
+                        $process = Process::run($cmd);
+                        if ($process->successful() && file_exists($absoluteFile) && filesize($absoluteFile) > 0) {
+                            $transcodedSuccessfully = true;
+                        } else {
+                            Log::warning("VideoTranscodingService: Echec transcodage profil {$profileKey}", [
+                                'error' => $process->errorOutput(),
+                            ]);
+                        }
+                    } catch (\Throwable $e) {
+                        Log::warning("VideoTranscodingService: Exception transcodage {$profileKey}: {$e->getMessage()}");
+                    }
+                }
+
+                // Règle 2 : Si une version sort plus lourde que l'original, garder l'original pour ce profil
+                if ($transcodedSuccessfully && file_exists($absoluteFile)) {
+                    $outputSize = filesize($absoluteFile);
+                    if ($originalSize !== null && $originalSize > 0 && $outputSize > $originalSize) {
+                        Log::info("VideoTranscodingService: Rendition {$profileKey} ({$outputSize} octets) plus lourde que l'original ({$originalSize} octets). Conservation de l'original.");
+                        @copy($inputAbsPath, $absoluteFile);
+                    }
+                }
+
+                // Fallback si FFmpeg n'est pas installé ou a échoué : créer un fichier dédié distinct
+                if (! $transcodedSuccessfully) {
+                    if ($inputAbsPath && file_exists($inputAbsPath)) {
+                        @copy($inputAbsPath, $absoluteFile);
+                    } else {
+                        @file_put_contents($absoluteFile, "dummy video stream {$profileKey}");
+                    }
+                }
+
+                // Pour un disque distant R2/S3, transférer le fichier local temporaire vers le stockage distant
+                if (! $isLocalDisk && file_exists($absoluteFile)) {
+                    $fh = fopen($absoluteFile, 'r');
+                    $diskInstance->put($relativeFile, $fh);
+                    if (is_resource($fh)) {
+                        fclose($fh);
+                    }
+                }
+
+                $previousRenditionAbsPath = $absoluteFile;
+                $relativeRenditions[$profileKey] = $relativeFile;
+                $renditions[$profileKey] = $diskInstance->url($relativeFile);
+            }
+
+            // Extraction de l'image de couverture (poster_url)
+            $posterRelPath = "{$relativeBaseDir}/poster.jpg";
+            $posterAbsPath = $isLocalDisk ? $diskInstance->path($posterRelPath) : "{$tempLocalDir}/poster.jpg";
+            $posterExtracted = false;
 
             if ($hasFfmpeg && $inputAbsPath && file_exists($inputAbsPath)) {
-                // Transcodage H.264 + AAC avec -movflags +faststart
-                $cmd = sprintf(
-                    'ffmpeg -y -i %s %s %s %s -c:v libx264 -preset fast -pix_fmt yuv420p -movflags +faststart %s',
+                $posterCmd = sprintf(
+                    'ffmpeg -y -ss 00:00:01 -i %s -vframes 1 -q:v 2 %s',
                     escapeshellarg($inputAbsPath),
-                    $cfg['scale'],
-                    $cfg['video_bitrate'],
-                    $cfg['audio_bitrate'],
-                    escapeshellarg($absoluteFile)
+                    escapeshellarg($posterAbsPath)
                 );
 
                 try {
-                    $process = Process::run($cmd);
-                    if ($process->successful() && file_exists($absoluteFile) && filesize($absoluteFile) > 0) {
-                        $transcodedSuccessfully = true;
-                    } else {
-                        Log::warning("VideoTranscodingService: Échec transcodage profil {$profileKey}", [
-                            'error' => $process->errorOutput(),
-                        ]);
+                    $process = Process::run($posterCmd);
+                    if ($process->successful() && file_exists($posterAbsPath) && filesize($posterAbsPath) > 0) {
+                        $posterExtracted = true;
                     }
                 } catch (\Throwable $e) {
-                    Log::warning("VideoTranscodingService: Exception transcodage {$profileKey}: {$e->getMessage()}");
+                    Log::warning("VideoTranscodingService: Exception extraction poster: {$e->getMessage()}");
                 }
             }
 
-            // Fallback si FFmpeg n'est pas installé ou a échoué : créer un fichier dédié distinct
-            if (! $transcodedSuccessfully) {
-                if ($inputAbsPath && file_exists($inputAbsPath)) {
-                    @copy($inputAbsPath, $absoluteFile);
-                } else {
-                    @file_put_contents($absoluteFile, "dummy video stream {$profileKey}");
+            if (! $posterExtracted) {
+                $this->generateFallbackPoster($posterAbsPath);
+            }
+
+            // Pour un disque distant R2, transférer le poster vers le stockage distant
+            if (! $isLocalDisk && file_exists($posterAbsPath)) {
+                $fh = fopen($posterAbsPath, 'r');
+                $diskInstance->put($posterRelPath, $fh);
+                if (is_resource($fh)) {
+                    fclose($fh);
                 }
             }
 
-            $relativeRenditions[$profileKey] = $relativeFile;
-            $renditions[$profileKey] = $diskInstance->url($relativeFile);
-        }
+            $posterUrl = $diskInstance->exists($posterRelPath) ? $diskInstance->url($posterRelPath) : null;
 
-        // Extraction de l'image de couverture (poster_url)
-        $posterRelPath = "{$relativeBaseDir}/poster.jpg";
-        $posterAbsPath = $diskInstance->path($posterRelPath);
-        $posterExtracted = false;
+            // La vidéo de lecture par défaut est la version 720p (ou 480p) pour éviter de saturer le réseau avec l'original 4K
+            $defaultPlaybackUrl = $renditions['720p'] ?? $renditions['480p'] ?? $originalUrl;
 
-        if ($hasFfmpeg && $inputAbsPath && file_exists($inputAbsPath)) {
-            $posterCmd = sprintf(
-                'ffmpeg -y -ss 00:00:01 -i %s -vframes 1 -q:v 2 %s',
-                escapeshellarg($inputAbsPath),
-                escapeshellarg($posterAbsPath)
-            );
-
-            try {
-                $process = Process::run($posterCmd);
-                if ($process->successful() && file_exists($posterAbsPath) && filesize($posterAbsPath) > 0) {
-                    $posterExtracted = true;
+            return [
+                'renditions' => $renditions,
+                'relative_renditions' => $relativeRenditions,
+                'poster_url' => $posterUrl,
+                'poster_path' => $posterRelPath,
+                'default_url' => $defaultPlaybackUrl,
+                'original_url' => $originalUrl,
+            ];
+        } finally {
+            // Nettoyage immédiat de l'espace temporaire de traitement local du VPS
+            if (is_dir($tempLocalDir)) {
+                $tempFiles = glob("{$tempLocalDir}/*");
+                if (is_array($tempFiles)) {
+                    foreach ($tempFiles as $tFile) {
+                        if (is_file($tFile)) {
+                            @unlink($tFile);
+                        }
+                    }
                 }
-            } catch (\Throwable $e) {
-                Log::warning("VideoTranscodingService: Exception extraction poster: {$e->getMessage()}");
+                @rmdir($tempLocalDir);
             }
         }
-
-        if (! $posterExtracted) {
-            $this->generateFallbackPoster($posterAbsPath);
-        }
-
-        $posterUrl = file_exists($posterAbsPath) ? $diskInstance->url($posterRelPath) : null;
-
-        // La vidéo de lecture par défaut est la version 720p (ou 480p) pour éviter de saturer le réseau avec l'original 4K
-        $defaultPlaybackUrl = $renditions['720p'] ?? $renditions['480p'] ?? $originalUrl;
-
-        return [
-            'renditions' => $renditions,
-            'relative_renditions' => $relativeRenditions,
-            'poster_url' => $posterUrl,
-            'poster_path' => $posterRelPath,
-            'default_url' => $defaultPlaybackUrl,
-            'original_url' => $originalUrl,
-        ];
     }
 
     /**
@@ -246,5 +346,39 @@ class VideoTranscodingService
         $cleanPath = ltrim($cleanPath, '/');
 
         return Storage::disk($disk)->url($cleanPath);
+    }
+
+    /**
+     * Détecte les dimensions (largeur et hauteur) de la vidéo source via ffprobe.
+     *
+     * @return array{width: int, height: int}|null
+     */
+    public function probeVideoDimensions(?string $inputAbsPath): ?array
+    {
+        if (! $inputAbsPath || ! file_exists($inputAbsPath) || ! $this->isFfmpegAvailable()) {
+            return null;
+        }
+
+        try {
+            $cmd = sprintf(
+                'ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 %s',
+                escapeshellarg($inputAbsPath)
+            );
+            $process = Process::run($cmd);
+            if ($process->successful()) {
+                $output = trim($process->output());
+                $firstLine = explode("\n", str_replace("\r", '', $output))[0] ?? '';
+                if (preg_match('/^(\d+)x(\d+)$/', trim($firstLine), $matches)) {
+                    return [
+                        'width' => (int) $matches[1],
+                        'height' => (int) $matches[2],
+                    ];
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::debug("VideoTranscodingService: Impossible de sonder les dimensions de la vidéo: {$e->getMessage()}");
+        }
+
+        return null;
     }
 }

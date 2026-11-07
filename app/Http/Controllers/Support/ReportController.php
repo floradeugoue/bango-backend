@@ -70,7 +70,7 @@ class ReportController extends Controller
             'details' => $validated['details'] ?? null,
             'status' => ReportStatus::Pending,
             'metadata' => [
-                'target_label' => method_exists($target, 'getTitle') ? $target->getTitle() : ($target->title ?? $target->name ?? null),
+                'target_label' => method_exists($target, 'getTitle') ? $target->getTitle() : ($target->title ?? $target->display_name ?? $target->name ?? null),
             ],
         ]);
 

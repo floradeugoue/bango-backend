@@ -6,6 +6,7 @@ use App\Enums\Support\TicketCategory;
 use App\Enums\Support\TicketMessageSenderType;
 use App\Enums\Support\TicketPriority;
 use App\Enums\Support\TicketStatus;
+use App\Models\Boost\Campaign;
 use App\Models\Listing\Listing;
 use App\Models\Page\Page;
 use App\Models\Payment\PaymentTransaction;
@@ -21,6 +22,7 @@ use App\Models\User;
 use DomainException;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Pagination\LengthAwarePaginator as ConcreteLengthAwarePaginator;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -53,21 +55,80 @@ class AdminAccountOperationsService
             });
         }
 
-        // Recherche par nom, display_name, email, phone, handle
-        if (! empty($filters['search'])) {
-            $search = trim((string) $filters['search']);
-            $query->where(function (Builder $q) use ($search) {
-                $q->where('name', 'like', "%{$search}%")
-                    ->orWhere('display_name', 'like', "%{$search}%")
-                    ->orWhere('email', 'like', "%{$search}%")
-                    ->orWhere('phone', 'like', "%{$search}%")
-                    ->orWhere('handle', 'like', "%{$search}%");
+        // Gestion des comptes supprimés et suppressions en cours
+        $isDeletionPending = ! empty($filters['deletion_pending'])
+            || ($filters['tab'] ?? '') === 'deletions'
+            || ($filters['status'] ?? '') === 'scheduled_for_deletion'
+            || (is_array($filters['status'] ?? null) && in_array('scheduled_for_deletion', $filters['status'], true));
+
+        $showTrashed = $isDeletionPending
+            || ($filters['trashed'] ?? '') === 'with'
+            || ($filters['trashed'] ?? '') === 'only'
+            || (is_array($filters['status'] ?? null) && in_array('deleted', $filters['status'], true));
+
+        if ($isDeletionPending) {
+            $query->withTrashed()->where(function (Builder $q) {
+                $q->whereNotNull('deleted_at')
+                    ->orWhere('status', 'scheduled_for_deletion')
+                    ->orWhereNotNull('scheduled_for_deletion_at');
+            });
+        } elseif ($showTrashed) {
+            $query->withTrashed();
+        }
+
+        // Recherche insensible à la casse (support PostgreSQL ilike et index trigramme)
+        $search = trim((string) ($filters['q'] ?? $filters['search'] ?? ''));
+        if ($search !== '') {
+            $likeSearch = "%{$search}%";
+            $isPgsql = DB::connection()->getDriverName() === 'pgsql';
+
+            $query->where(function (Builder $q) use ($likeSearch, $isPgsql) {
+                if ($isPgsql) {
+                    $q->where('name', 'ilike', $likeSearch)
+                        ->orWhere('display_name', 'ilike', $likeSearch)
+                        ->orWhere('email', 'ilike', $likeSearch)
+                        ->orWhere('phone', 'ilike', $likeSearch)
+                        ->orWhere('handle', 'ilike', $likeSearch);
+                } else {
+                    $q->whereRaw('LOWER(name) LIKE LOWER(?)', [$likeSearch])
+                        ->orWhereRaw('LOWER(display_name) LIKE LOWER(?)', [$likeSearch])
+                        ->orWhereRaw('LOWER(email) LIKE LOWER(?)', [$likeSearch])
+                        ->orWhereRaw('LOWER(phone) LIKE LOWER(?)', [$likeSearch])
+                        ->orWhereRaw('LOWER(handle) LIKE LOWER(?)', [$likeSearch]);
+                }
             });
         }
 
-        // Filtre statut
-        if (! empty($filters['status'])) {
-            $query->where('status', $filters['status']);
+        // Filtre statut validé contre une liste fermée (accepte chaîne ou tableau)
+        $allowedStatuses = ['active', 'inactive', 'suspended', 'blocked', 'banned', 'pending_verification', 'scheduled_for_deletion', 'deleted'];
+        if (! empty($filters['status']) && ! $isDeletionPending) {
+            $statuses = is_array($filters['status']) ? $filters['status'] : [$filters['status']];
+            $validStatuses = array_values(array_intersect($statuses, $allowedStatuses));
+            if (! empty($validStatuses)) {
+                $query->whereIn('status', $validStatuses);
+            }
+        }
+
+        // Filtre ville
+        if (! empty($filters['city_id'])) {
+            $query->where('city_id', (int) $filters['city_id']);
+        } elseif (! empty($filters['city'])) {
+            $cityVal = trim((string) $filters['city']);
+            if (is_numeric($cityVal)) {
+                $query->where('city_id', (int) $cityVal);
+            } else {
+                $query->whereHas('city', function (Builder $cq) use ($cityVal) {
+                    $cq->where('name', 'like', "%{$cityVal}%");
+                });
+            }
+        }
+
+        // Filtre ancienneté / période d'inscription
+        if (! empty($filters['created_from'])) {
+            $query->where('created_at', '>=', Carbon::parse($filters['created_from']));
+        }
+        if (! empty($filters['created_to'])) {
+            $query->where('created_at', '<=', Carbon::parse($filters['created_to']));
         }
 
         // Filtre vérification KYC
@@ -80,14 +141,18 @@ class AdminAccountOperationsService
             $query->where('is_certified', filter_var($filters['is_certified'], FILTER_VALIDATE_BOOLEAN));
         }
 
-        // Filtre badge
+        // Filtre badge (accepte chaîne ou tableau)
         if (! empty($filters['badge'])) {
-            $query->where('badge', $filters['badge']);
+            if (is_array($filters['badge'])) {
+                $query->whereIn('badge', $filters['badge']);
+            } else {
+                $query->where('badge', $filters['badge']);
+            }
         }
 
         // Tri sur liste blanche
         $sort = $filters['sort'] ?? 'created_at';
-        $order = strtolower($filters['order'] ?? 'desc') === 'asc' ? 'asc' : 'desc';
+        $order = strtolower($filters['order'] ?? $filters['dir'] ?? 'desc') === 'asc' ? 'asc' : 'desc';
         $allowedSorts = ['created_at', 'name', 'email', 'status', 'badge'];
 
         if (in_array($sort, $allowedSorts, true)) {
@@ -134,6 +199,58 @@ class AdminAccountOperationsService
         $user->masked_phone = $this->maskPhone($user->phone);
         $user->masked_email = $this->maskEmail($user->email);
 
+        // Métriques agrégées 360° pour les cartes de la fiche compte
+        $postsViews = (int) Post::where('user_id', $user->id)->sum('views_count');
+        $reelsViews = (int) Reel::where('user_id', $user->id)->sum('views_count');
+        $listingsViews = (int) Listing::where('owner_id', $user->id)->sum('views_count');
+        $user->views_count = $postsViews + $reelsViews + $listingsViews;
+        $user->views_breakdown = [
+            'posts' => $postsViews,
+            'reels' => $reelsViews,
+            'listings' => $listingsViews,
+        ];
+
+        // Contacts reçus sur les annonces du compte
+        $user->contacts_count = (int) DB::table('listing_visit_requests')
+            ->join('listings', 'listing_visit_requests.listing_id', '=', 'listings.id')
+            ->where('listings.owner_id', $user->id)
+            ->count();
+
+        // Biens loués (statut rented ou taken)
+        $user->rented_listings_count = Listing::where('owner_id', $user->id)
+            ->whereIn('status', ['rented', 'taken'])
+            ->count();
+
+        // Campagnes actives
+        $user->active_campaigns_count = Campaign::where('user_id', $user->id)
+            ->whereIn('status', ['active', 'running'])
+            ->count();
+
+        // Signalements reçus (impliquant le compte ou ses publications/reels/annonces)
+        $user->reports_received_count = Report::where(function (Builder $q) use ($user) {
+            $q->whereIn('reportable_type', [User::class, 'user', 'users', 'account', 'accounts', 'profile', (new User)->getMorphClass()])
+                ->where('reportable_id', (string) $user->id);
+        })
+            ->orWhere(function (Builder $q) use ($user) {
+                $q->whereIn('reportable_type', [Post::class, 'post', 'posts'])
+                    ->whereIn('reportable_id', Post::where('user_id', $user->id)->select('id'));
+            })
+            ->orWhere(function (Builder $q) use ($user) {
+                $q->whereIn('reportable_type', [Reel::class, 'reel', 'reels'])
+                    ->whereIn('reportable_id', Reel::where('user_id', $user->id)->select('id'));
+            })
+            ->orWhere(function (Builder $q) use ($user) {
+                $q->whereIn('reportable_type', [Listing::class, 'listing', 'listings'])
+                    ->whereIn('reportable_id', Listing::where('owner_id', $user->id)->select('id'));
+            })
+            ->count();
+
+        // Total payé sur les 12 derniers mois
+        $user->total_paid_12m = (float) PaymentTransaction::where('user_id', $user->id)
+            ->whereIn('status', ['confirmed', 'completed'])
+            ->where('created_at', '>=', now()->subYear())
+            ->sum('amount');
+
         return $user;
     }
 
@@ -173,17 +290,17 @@ class AdminAccountOperationsService
      *
      * @return array<string, mixed>
      */
-    public function getUserContents(User $user, int $perPage = 10): array
+    public function getUserContents(User $user, int $perPage = 10, int $page = 1): array
     {
         $posts = Post::where('user_id', $user->id)
             ->withCount(['comments', 'likes', 'shares'])
             ->orderByDesc('created_at')
-            ->paginate($perPage, ['*'], 'posts_page');
+            ->paginate($perPage, ['*'], 'posts_page', $page);
 
         $reels = Reel::where('user_id', $user->id)
             ->withCount(['comments', 'reactions', 'views'])
             ->orderByDesc('created_at')
-            ->paginate($perPage, ['*'], 'reels_page');
+            ->paginate($perPage, ['*'], 'reels_page', $page);
 
         return [
             'posts' => $posts,
@@ -192,13 +309,18 @@ class AdminAccountOperationsService
     }
 
     /**
-     * 5.3. Sous-onglet : Transactions financières de l'utilisateur.
+     * 5.3. Sous-onglet : Transactions financières de l'utilisateur avec filtre de période.
      */
-    public function getUserPayments(User $user, int $perPage = 15): LengthAwarePaginator
+    public function getUserPayments(User $user, int $perPage = 15, ?string $from = null): LengthAwarePaginator
     {
-        return PaymentTransaction::where('user_id', $user->id)
-            ->orderByDesc('created_at')
-            ->paginate(min(max($perPage, 1), 50));
+        $query = PaymentTransaction::where('user_id', $user->id);
+
+        if (! empty($from)) {
+            $query->where('created_at', '>=', Carbon::parse($from));
+        }
+
+        return $query->orderByDesc('created_at')
+            ->paginate(min(max($perPage, 1), 100));
     }
 
     /**
@@ -233,7 +355,10 @@ class AdminAccountOperationsService
      *
      * @return Collection<int, array<string, mixed>>
      */
-    public function getUserTimeline(User $user): Collection
+    /**
+     * 5.4. Chronologie unifiée paginée des événements du compte depuis son inscription.
+     */
+    public function getUserTimeline(User $user, int $page = 1, int $perPage = 25): LengthAwarePaginator
     {
         $events = collect();
 
@@ -259,7 +384,7 @@ class AdminAccountOperationsService
         }
 
         // 3. Transactions financières récentes
-        $transactions = PaymentTransaction::where('user_id', $user->id)->limit(20)->get();
+        $transactions = PaymentTransaction::where('user_id', $user->id)->limit(50)->get();
         foreach ($transactions as $tx) {
             $events->push([
                 'type' => 'payment_transaction',
@@ -271,7 +396,7 @@ class AdminAccountOperationsService
         }
 
         // 4. Tickets de support
-        $tickets = SupportTicket::where('user_id', $user->id)->limit(20)->get();
+        $tickets = SupportTicket::where('user_id', $user->id)->limit(50)->get();
         foreach ($tickets as $ticket) {
             $events->push([
                 'type' => 'support_ticket',
@@ -306,7 +431,16 @@ class AdminAccountOperationsService
             ]);
         }
 
-        return $events->sortByDesc('date')->values();
+        $sortedEvents = $events->sortByDesc('date')->values();
+        $slice = $sortedEvents->slice(($page - 1) * $perPage, $perPage)->values();
+
+        return new ConcreteLengthAwarePaginator(
+            $slice,
+            $sortedEvents->count(),
+            $perPage,
+            $page,
+            ['path' => request()->url(), 'query' => request()->query()]
+        );
     }
 
     /**

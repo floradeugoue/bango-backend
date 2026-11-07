@@ -25,6 +25,7 @@ use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 
 class CampaignService
@@ -152,6 +153,11 @@ class CampaignService
         $boostableType = (string) $data['boostable_type'];
         $boostableId = (string) $data['boostable_id'];
         $budget = (float) $data['budget'];
+        if ($budget < 2000) {
+            throw ValidationException::withMessages([
+                'budget' => ['Le budget minimum d\'une campagne de Boost est de 2 000 FCFA.'],
+            ]);
+        }
         $currency = strtoupper($data['currency'] ?? 'XAF');
         $durationDays = max(1, (int) $data['duration_days']);
         $objective = isset($data['objective'])

@@ -51,6 +51,8 @@ class PostMediaResource extends JsonResource
             'duration' => $this->duration !== null ? (int) $this->duration : null,
             'sound' => $soundMeta,
             'renditions' => $this->edit_metadata['renditions'] ?? null,
+            'status' => is_object($this->status) ? $this->status->value : ($this->status ?? 'completed'),
+            'error_message' => $this->error_message,
             'display_order' => (int) $this->display_order,
             'edit_metadata' => $this->edit_metadata,
             'tags' => PostTagResource::collection($this->whenLoaded('tags')),

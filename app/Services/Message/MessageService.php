@@ -12,8 +12,10 @@ use App\Models\User;
 use App\Notifications\Message\NewMessageNotification;
 use App\Notifications\Message\NewStoryReplyNotification;
 use App\Services\Listing\ListingService;
+use App\Services\Media\MediaStorageService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
 class MessageService
@@ -218,7 +220,21 @@ class MessageService
             throw new AccessDeniedHttpException('Seul l\'auteur du message peut le rétracter.');
         }
 
+        $oldAttachmentPath = $message->attachment_path;
+
         $message->retract();
+
+        if ($oldAttachmentPath) {
+            try {
+                /** @var MediaStorageService $storageService */
+                $storageService = app(MediaStorageService::class);
+                $dummy = new Message(['attachment_path' => $oldAttachmentPath]);
+                $dummy->id = $message->id;
+                $storageService->deleteMessageAttachment($dummy);
+            } catch (\Throwable $e) {
+                Log::warning("Échec suppression physique de la pièce jointe rétractée: {$e->getMessage()}");
+            }
+        }
 
         return $message;
     }

@@ -35,5 +35,6 @@
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
         <env name="RESEND_API_KEY" value="test_key"/>
+        <env name="ENFORCE_TERMS_ACCEPTANCE" value="true"/>
     </php>
 </phpunit>

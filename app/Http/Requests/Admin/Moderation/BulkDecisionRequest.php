@@ -19,8 +19,9 @@ class BulkDecisionRequest extends FormRequest
         return [
             'case_refs' => ['required', 'array', 'min:1', 'max:50'],
             'case_refs.*' => ['required', 'string'],
-            'action' => ['required', 'string', 'in:keep_online,hide,remove,warn_author,suspend_author'],
+            'action' => ['required', 'string', 'in:keep_online,hide,remove,warn_author,suspend_author,request_correction'],
             'justification' => ['required', 'string', 'min:3', 'max:1000'],
+            'correction_delay_hours' => ['nullable', 'integer', 'min:1', 'max:720'],
         ];
     }
 }

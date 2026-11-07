@@ -196,26 +196,53 @@ class AdminSystemSettingsController extends Controller
     // 5.4. RÉFÉRENTIEL GÉOGRAPHIQUE
     // =========================================================================
 
-    public function cities(): JsonResponse
+    public function cities(Request $request): JsonResponse
     {
-        $data = $this->settingsService->getCities();
+        $filters = $request->only(['q', 'country', 'country_id', 'is_active']);
+        $perPage = $request->integer('per_page', 20);
+
+        $paginator = $this->settingsService->getCities($filters, $perPage);
 
         return response()->json([
+            'items' => $paginator->items(),
+            'page' => $paginator->currentPage(),
+            'perPage' => $paginator->perPage(),
+            'total' => $paginator->total(),
+            'pageCount' => $paginator->lastPage(),
+
             'success' => true,
-            'data' => $data,
+            'data' => $paginator->items(),
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+                'last_page' => $paginator->lastPage(),
+            ],
         ]);
     }
 
     public function areas(Request $request): JsonResponse
     {
-        $city = $request->input('city');
-        $status = $request->input('status');
+        $filters = $request->only(['city', 'status', 'q']);
+        $perPage = $request->integer('per_page', 20);
 
-        $data = $this->settingsService->getAreas($city, $status);
+        $paginator = $this->settingsService->getAreas($filters, null, $perPage);
 
         return response()->json([
+            'items' => $paginator->items(),
+            'page' => $paginator->currentPage(),
+            'perPage' => $paginator->perPage(),
+            'total' => $paginator->total(),
+            'pageCount' => $paginator->lastPage(),
+
             'success' => true,
-            'data' => $data,
+            'data' => $paginator->items(),
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+                'last_page' => $paginator->lastPage(),
+            ],
         ]);
     }
 

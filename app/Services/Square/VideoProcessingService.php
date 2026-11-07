@@ -149,9 +149,9 @@ class VideoProcessingService
             try {
                 $process = Process::run($cmd);
                 if (! $process->successful() || ! file_exists($absoluteOutputFile) || filesize($absoluteOutputFile) === 0) {
-                    // Tentative 2 : ré-encodage rapide si la copie de flux a échoué
+                    // Tentative 2 : ré-encodage rapide avec CRF 23 pour éviter d'agrandir la vidéo si la copie de flux a échoué
                     $reencodeCmd = sprintf(
-                        'ffmpeg -y -ss %s -i %s -t %s -c:v libx264 -preset ultrafast -c:a aac %s',
+                        'ffmpeg -y -ss %s -i %s -t %s -c:v libx264 -preset ultrafast -crf 23 -movflags +faststart -c:a aac %s',
                         escapeshellarg($startSec),
                         escapeshellarg($inputPath),
                         escapeshellarg($durationSec),
@@ -326,10 +326,19 @@ class VideoProcessingService
             $startMs = $sound['start_ms'] ?? $sound['startMs'] ?? 0;
 
             if ($soundId) {
+                $soundModel = Sound::find($soundId);
+                $audioUrl = $soundModel?->audio_url
+                    ? (str_starts_with($soundModel->audio_url, 'http') ? $soundModel->audio_url : Storage::disk('public')->url($soundModel->audio_url))
+                    : ($sound['audio_url'] ?? $sound['audioUrl'] ?? null);
+
                 $normalized['sound'] = [
                     'id' => (string) $soundId,
                     'sound_id' => (string) $soundId,
                     'soundId' => (string) $soundId,
+                    'title' => $soundModel?->title ?? ($sound['title'] ?? 'Son sélectionné'),
+                    'artist' => $soundModel?->artist ?? ($sound['artist'] ?? null),
+                    'audio_url' => $audioUrl,
+                    'audioUrl' => $audioUrl,
                     'start_ms' => (int) $startMs,
                     'startMs' => (int) $startMs,
                 ];

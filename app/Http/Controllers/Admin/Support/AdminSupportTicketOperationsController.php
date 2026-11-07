@@ -36,13 +36,14 @@ class AdminSupportTicketOperationsController extends Controller
             'category',
             'assigned_to',
             'search',
+            'q',
             'overdue',
             'sort',
             'order',
         ]);
 
         $perPage = (int) $request->query('per_page', 20);
-        $tickets = $this->supportService->getTickets($filters, $perPage);
+        ['paginator' => $tickets, 'counts' => $counts] = $this->supportService->getTickets($filters, $perPage);
 
         $data = $tickets->toArray();
         $data['items'] = $tickets->items();
@@ -50,6 +51,13 @@ class AdminSupportTicketOperationsController extends Controller
         $data['perPage'] = $tickets->perPage();
         $data['total'] = $tickets->total();
         $data['pageCount'] = $tickets->lastPage();
+        $data['meta'] = [
+            'current_page' => $tickets->currentPage(),
+            'per_page' => $tickets->perPage(),
+            'total' => $tickets->total(),
+            'last_page' => $tickets->lastPage(),
+            'counts' => $counts,
+        ];
 
         return response()->json($data);
     }

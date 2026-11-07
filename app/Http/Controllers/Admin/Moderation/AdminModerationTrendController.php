@@ -20,11 +20,16 @@ class AdminModerationTrendController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $trends = $this->trendService->getTrendsWithExclusions($request->user());
+        $country = $request->query('country');
+        $trends = $this->trendService->getTrendsWithExclusions($request->user(), $country);
 
         return response()->json([
             'success' => true,
             'data' => $trends,
+            'meta' => [
+                'country' => $country ?: 'ALL',
+                'period' => '7_days',
+            ],
         ]);
     }
 

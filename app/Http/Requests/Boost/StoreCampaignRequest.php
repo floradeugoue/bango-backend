@@ -21,7 +21,7 @@ class StoreCampaignRequest extends FormRequest
             'boostable_type' => ['required', 'string', 'in:post,posts,reel,reels,listing,listings'],
             'boostable_id' => ['required', 'string'],
             'objective' => ['nullable', 'string', 'in:reach,profile_visits,followers,messages,engagement'],
-            'budget' => ['required', 'numeric', 'min:100'],
+            'budget' => ['required', 'numeric', 'min:2000'],
             'currency' => ['nullable', 'string', 'size:3'],
             'duration_days' => ['required', 'integer', 'min:1', 'max:30'],
             'targeting' => ['nullable', 'array'],

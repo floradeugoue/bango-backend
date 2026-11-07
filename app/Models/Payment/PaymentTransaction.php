@@ -193,15 +193,45 @@ class PaymentTransaction extends Model
         $this->save();
 
         // Ajout immuable dans payment_events
+        $eventPayload = [
+            'reason' => $reason,
+        ];
+
+        if (is_array($payload)) {
+            $rawMsg = $payload['message']
+                ?? $payload['raw_response']['message']
+                ?? $payload['raw_response']['transaction']['message']
+                ?? $payload['operator_message']
+                ?? $reason;
+
+            $rawStatus = $payload['status']
+                ?? $payload['raw_response']['status']
+                ?? $payload['raw_response']['transaction']['status']
+                ?? null;
+
+            if ($rawMsg !== null) {
+                $eventPayload['message'] = $rawMsg;
+            }
+            if ($rawStatus !== null) {
+                $eventPayload['status'] = $rawStatus;
+            }
+            if (isset($payload['raw_response'])) {
+                $eventPayload['raw_response'] = $payload['raw_response'];
+            }
+            if (isset($payload['failure_reason'])) {
+                $eventPayload['failure_reason'] = $payload['failure_reason'];
+            }
+            $eventPayload['details'] = $payload;
+        } elseif ($payload !== null) {
+            $eventPayload['details'] = $payload;
+        }
+
         $this->events()->create([
             'event_type' => 'status_transition',
             'source' => $source->value,
             'from_status' => $oldStatus->value,
             'to_status' => $targetStatus->value,
-            'payload' => array_filter([
-                'reason' => $reason,
-                'details' => $payload,
-            ], fn ($val) => $val !== null),
+            'payload' => $eventPayload,
         ]);
 
         return $this;
@@ -344,5 +374,48 @@ class PaymentTransaction extends Model
     public function scopeExternalReference(Builder $query, string $reference): Builder
     {
         return $query->where('external_reference', $reference);
+    }
+
+    /**
+     * Récupère le motif d'échec ou d'annulation (si disponible auprès de l'opérateur).
+     */
+    public function getFailureReasonAttribute(): ?string
+    {
+        if ($this->status !== PaymentStatus::Failed && $this->status !== PaymentStatus::Cancelled) {
+            return null;
+        }
+
+        if (! empty($this->metadata['failure_reason'])) {
+            return $this->metadata['failure_reason'];
+        }
+
+        if (! empty($this->metadata['operator_message'])) {
+            return $this->metadata['operator_message'];
+        }
+
+        $latestAttempt = $this->relationLoaded('attempts')
+            ? $this->attempts->sortByDesc('attempt_number')->first()
+            : $this->attempts()->latest('attempt_number')->first();
+
+        if ($latestAttempt?->error_message && $latestAttempt->error_message !== 'PAYMENT_FAILED') {
+            return $latestAttempt->error_message;
+        }
+
+        if (! empty($latestAttempt?->metadata['failure_reason'])) {
+            return $latestAttempt->metadata['failure_reason'];
+        }
+
+        if (! empty($latestAttempt?->metadata['message'])) {
+            return $latestAttempt->metadata['message'];
+        }
+
+        $failedEvent = $this->relationLoaded('events')
+            ? $this->events->where('to_status', 'failed')->sortByDesc('id')->first()
+            : $this->events()->where('to_status', 'failed')->latest('id')->first();
+
+        return $failedEvent?->payload['failure_reason']
+            ?? $failedEvent?->payload['message']
+            ?? $failedEvent?->payload['reason']
+            ?? null;
     }
 }
