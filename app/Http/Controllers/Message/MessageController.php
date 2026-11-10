@@ -12,6 +12,7 @@ use App\Services\Message\MessageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 
 class MessageController extends Controller
@@ -106,25 +107,33 @@ class MessageController extends Controller
         $message = Message::query()->findOrFail($id);
         Gate::authorize('view', $message->conversation);
 
-        $reactions = $message->metadata['reactions'] ?? [];
         $user = $request->user();
 
-        // Enlever la réaction précédente de l'utilisateur s'il y en avait une
-        $filtered = array_values(array_filter($reactions, fn ($r) => ($r['user_id'] ?? null) !== $user->id));
-        $filtered[] = [
-            'user_id' => $user->id,
-            'user_name' => $user->name ?? $user->handle,
-            'emoji' => $validated['emoji'],
-            'created_at' => now()->toIso8601String(),
-        ];
+        $filtered = DB::transaction(function () use ($id, $user, $validated) {
+            /** @var Message $lockedMessage */
+            $lockedMessage = Message::where('id', $id)->lockForUpdate()->firstOrFail();
 
-        $meta = $message->metadata ?? [];
-        $meta['reactions'] = $filtered;
-        $message->metadata = $meta;
-        $message->save();
+            $reactions = $lockedMessage->metadata['reactions'] ?? [];
+            $filtered = array_values(array_filter($reactions, fn ($r) => ($r['user_id'] ?? null) !== $user->id));
+            $filtered[] = [
+                'user_id' => $user->id,
+                'user_name' => $user->name ?? $user->handle,
+                'emoji' => $validated['emoji'],
+                'created_at' => now()->toIso8601String(),
+            ];
+
+            $meta = $lockedMessage->metadata ?? [];
+            $meta['reactions'] = $filtered;
+            $lockedMessage->metadata = $meta;
+            $lockedMessage->save();
+
+            return $filtered;
+        });
 
         return response()->json([
             'success' => true,
+            'user_reaction' => $validated['emoji'],
+            'reactions_count' => count($filtered),
             'reactions' => $filtered,
         ]);
     }
@@ -140,18 +149,27 @@ class MessageController extends Controller
         $message = Message::query()->findOrFail($id);
         Gate::authorize('view', $message->conversation);
 
-        $reactions = $message->metadata['reactions'] ?? [];
         $user = $request->user();
 
-        $filtered = array_values(array_filter($reactions, fn ($r) => ($r['user_id'] ?? null) !== $user->id));
+        $filtered = DB::transaction(function () use ($id, $user) {
+            /** @var Message $lockedMessage */
+            $lockedMessage = Message::where('id', $id)->lockForUpdate()->firstOrFail();
 
-        $meta = $message->metadata ?? [];
-        $meta['reactions'] = $filtered;
-        $message->metadata = $meta;
-        $message->save();
+            $reactions = $lockedMessage->metadata['reactions'] ?? [];
+            $filtered = array_values(array_filter($reactions, fn ($r) => ($r['user_id'] ?? null) !== $user->id));
+
+            $meta = $lockedMessage->metadata ?? [];
+            $meta['reactions'] = $filtered;
+            $lockedMessage->metadata = $meta;
+            $lockedMessage->save();
+
+            return $filtered;
+        });
 
         return response()->json([
             'success' => true,
+            'user_reaction' => null,
+            'reactions_count' => count($filtered),
             'reactions' => $filtered,
         ]);
     }

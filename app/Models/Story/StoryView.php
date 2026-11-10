@@ -2,6 +2,7 @@
 
 namespace App\Models\Story;
 
+use App\Models\Page\Page;
 use App\Models\User;
 use Database\Factories\Story\StoryViewFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -17,6 +18,7 @@ class StoryView extends Model
         'story_id',
         'story_slide_id',
         'viewer_id',
+        'page_id',
         'ip_address',
         'viewed_at',
     ];
@@ -44,5 +46,10 @@ class StoryView extends Model
     public function viewer(): BelongsTo
     {
         return $this->belongsTo(User::class, 'viewer_id');
+    }
+
+    public function page(): BelongsTo
+    {
+        return $this->belongsTo(Page::class, 'page_id');
     }
 }

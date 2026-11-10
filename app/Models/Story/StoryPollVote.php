@@ -2,6 +2,7 @@
 
 namespace App\Models\Story;
 
+use App\Models\Page\Page;
 use App\Models\User;
 use Database\Factories\Story\StoryPollVoteFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -17,6 +18,7 @@ class StoryPollVote extends Model
         'story_slide_id',
         'sticker_id',
         'user_id',
+        'page_id',
         'option_index',
     ];
 
@@ -43,5 +45,10 @@ class StoryPollVote extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function page(): BelongsTo
+    {
+        return $this->belongsTo(Page::class, 'page_id');
     }
 }

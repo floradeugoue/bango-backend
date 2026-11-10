@@ -19,10 +19,17 @@ class StoreMessageThreadRequest extends FormRequest
     {
         return [
             'peer_id' => [
-                'required',
+                'required_without:page_id',
+                'nullable',
                 'integer',
                 'exists:users,id',
                 'different:'.$this->user()?->id,
+            ],
+            'page_id' => [
+                'required_without:peer_id',
+                'nullable',
+                'integer',
+                'exists:pages,id',
             ],
             'listing_id' => [
                 'nullable',
@@ -42,9 +49,11 @@ class StoreMessageThreadRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'peer_id.required' => 'L\'interlocuteur est obligatoire pour initier une conversation.',
+            'peer_id.required_without' => 'Un destinataire (peer_id ou page_id) est obligatoire pour initier une conversation.',
             'peer_id.different' => 'Vous ne pouvez pas démarrer une conversation avec vous-même.',
             'peer_id.exists' => 'L\'utilisateur sélectionné n\'existe pas.',
+            'page_id.required_without' => 'Un destinataire (peer_id ou page_id) est obligatoire pour initier une conversation.',
+            'page_id.exists' => 'La Page Professionnelle sélectionnée n\'existe pas.',
             'listing_id.exists' => 'L\'annonce immobilière spécifiée n\'existe pas.',
         ];
     }

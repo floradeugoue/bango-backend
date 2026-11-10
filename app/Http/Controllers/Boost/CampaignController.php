@@ -26,8 +26,12 @@ class CampaignController extends Controller
      */
     public function index(Request $request): AnonymousResourceCollection
     {
+        $activePage = $request->attributes->get('acting_page') ?? $request->attributes->get('active_page');
+        $activePageId = $activePage?->id;
+
         $campaigns = Campaign::query()
             ->where('user_id', $request->user()->id)
+            ->when($activePageId, fn ($q) => $q->where('page_id', $activePageId), fn ($q) => $q->whereNull('page_id'))
             ->with([
                 'boostable',
                 'impressions.user',

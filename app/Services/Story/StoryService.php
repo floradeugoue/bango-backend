@@ -453,13 +453,17 @@ class StoryService
     }
 
     /**
-     * Récupère les Stories actives de l'utilisateur connecté.
+     * Récupère les Stories actives de l'utilisateur connecté ou de la page active.
      *
      * @return Collection<int, Story>
      */
     public function getMyActiveStories(User $user): Collection
     {
+        $activePage = request()?->attributes?->get('acting_page') ?? request()?->attributes?->get('active_page');
+        $activePageId = $activePage?->id;
+
         return Story::where('user_id', $user->id)
+            ->when($activePageId, fn ($q) => $q->where('page_id', $activePageId), fn ($q) => $q->whereNull('page_id'))
             ->active()
             ->with(['slides.stickers', 'slides.sound'])
             ->orderByDesc('published_at')
@@ -467,11 +471,15 @@ class StoryService
     }
 
     /**
-     * Récupère les Stories archivées de l'utilisateur connecté (paginées).
+     * Récupère les Stories archivées de l'utilisateur connecté ou de la page active (paginées).
      */
     public function getArchivedStories(User $user, int $perPage = 20): LengthAwarePaginator
     {
+        $activePage = request()?->attributes?->get('acting_page') ?? request()?->attributes?->get('active_page');
+        $activePageId = $activePage?->id;
+
         return Story::where('user_id', $user->id)
+            ->when($activePageId, fn ($q) => $q->where('page_id', $activePageId), fn ($q) => $q->whereNull('page_id'))
             ->with(['slides.stickers', 'slides.sound'])
             ->orderByDesc('created_at')
             ->paginate($perPage);
@@ -531,9 +539,13 @@ class StoryService
             abort(404, 'Story indisponible ou restreinte.');
         }
 
-        // Vérification de déduplication : une vue par utilisateur par Story
+        // Vérification de déduplication : une vue par utilisateur ou page active par Story
+        $activePage = request()?->attributes?->get('acting_page') ?? request()?->attributes?->get('active_page');
+        $activePageId = $activePage?->id;
+
         $alreadyViewed = StoryView::where('story_id', $story->id)
             ->where('viewer_id', $viewer->id)
+            ->when($activePageId, fn ($q) => $q->where('page_id', $activePageId), fn ($q) => $q->whereNull('page_id'))
             ->exists();
 
         if ($alreadyViewed) {
@@ -547,11 +559,12 @@ class StoryService
         $hashedIp = $ip ? hash('sha256', $ip.config('app.key')) : null;
 
         try {
-            DB::transaction(function () use ($story, $viewer, $slideId, $hashedIp) {
+            DB::transaction(function () use ($story, $viewer, $slideId, $hashedIp, $activePageId) {
                 StoryView::create([
                     'story_id' => $story->id,
                     'story_slide_id' => $slideId,
                     'viewer_id' => $viewer->id,
+                    'page_id' => $activePageId,
                     'ip_address' => $hashedIp,
                     'viewed_at' => now(),
                 ]);
@@ -608,9 +621,13 @@ class StoryService
             ]);
         }
 
+        $activePage = request()?->attributes?->get('acting_page') ?? request()?->attributes?->get('active_page');
+        $activePageId = $activePage?->id;
+
         // Vérification de double vote (contrainte d'unicité stricte)
         $hasVoted = StoryPollVote::where('sticker_id', $stickerId)
             ->where('user_id', $user->id)
+            ->when($activePageId, fn ($q) => $q->where('page_id', $activePageId), fn ($q) => $q->whereNull('page_id'))
             ->exists();
 
         if ($hasVoted) {
@@ -618,11 +635,12 @@ class StoryService
         }
 
         try {
-            DB::transaction(function () use ($slide, $sticker, $user, $optionIndex) {
+            DB::transaction(function () use ($slide, $sticker, $user, $optionIndex, $activePageId) {
                 StoryPollVote::create([
                     'story_slide_id' => $slide->id,
                     'sticker_id' => $sticker->id,
                     'user_id' => $user->id,
+                    'page_id' => $activePageId,
                     'option_index' => $optionIndex,
                 ]);
 
@@ -698,10 +716,14 @@ class StoryService
             }
         }
 
+        $activePage = request()?->attributes?->get('acting_page') ?? request()?->attributes?->get('active_page');
+        $activePageId = $activePage?->id;
+
         // Idempotence : Si une clé est fournie et qu'une réponse existe déjà, la renvoyer telle quelle
         $idempotencyKey = $data['idempotency_key'] ?? null;
         if ($idempotencyKey) {
             $existing = StoryReply::where('user_id', $user->id)
+                ->when($activePageId, fn ($q) => $q->where('page_id', $activePageId), fn ($q) => $q->whereNull('page_id'))
                 ->where('idempotency_key', $idempotencyKey)
                 ->first();
 
@@ -742,12 +764,13 @@ class StoryService
         ];
 
         try {
-            $reply = DB::transaction(function () use ($story, $user, $type, $text, $reaction, $idempotencyKey, $storyPreviewCard, $slideId) {
+            $reply = DB::transaction(function () use ($story, $user, $type, $text, $reaction, $idempotencyKey, $storyPreviewCard, $slideId, $activePageId) {
                 $created = StoryReply::create([
                     'story_id' => $story->id,
                     'story_slide_id' => $slideId,
                     'story_author_id' => $story->user_id,
                     'user_id' => $user->id,
+                    'page_id' => $activePageId,
                     'type' => $type,
                     'text' => $type === StoryReplyType::Text ? $text : null,
                     'reaction' => $type === StoryReplyType::Reaction ? $reaction : null,
@@ -764,6 +787,7 @@ class StoryService
             // Protection concurrence : si une insertion concurrente avec même clé idempotente est survenue
             if ($idempotencyKey) {
                 $existing = StoryReply::where('user_id', $user->id)
+                    ->when($activePageId, fn ($q) => $q->where('page_id', $activePageId), fn ($q) => $q->whereNull('page_id'))
                     ->where('idempotency_key', $idempotencyKey)
                     ->first();
                 if ($existing) {
@@ -779,7 +803,12 @@ class StoryService
         // Création du message dans la conversation privée (MS / Point 36)
         try {
             $threadService = app(MessageThreadService::class);
-            $conversation = $threadService->getOrCreateDirectConversation($user, $story->user_id);
+            if ($activePageId) {
+                // Réponse faite au nom d'une page : le fil de discussion est rattaché à cette page
+                $conversation = $threadService->getOrCreatePageConversation($story->user, (int) $activePageId);
+            } else {
+                $conversation = $threadService->getOrCreateDirectConversation($user, $story->user_id);
+            }
             $messageService = app(MessageService::class);
             $messageService->sendMessage($conversation, $user, [
                 'type' => MessageType::StoryReply,
@@ -816,6 +845,9 @@ class StoryService
                 'viewer' => function ($q) {
                     $q->select(['id', 'name', 'handle', 'display_name', 'avatar_url', 'is_verified']);
                 },
+                'page' => function ($q) {
+                    $q->select(['id', 'name', 'handle', 'logo_url', 'certification_status']);
+                },
                 'story.slides',
             ])
             ->orderByDesc('viewed_at')
@@ -845,9 +877,13 @@ class StoryService
     {
         $story = $this->getStory($id, $user);
 
+        $activePage = request()?->attributes?->get('acting_page') ?? request()?->attributes?->get('active_page');
+        $activePageId = $activePage?->id;
+
         StoryLike::firstOrCreate([
             'story_id' => $story->id,
             'user_id' => $user->id,
+            'page_id' => $activePageId,
         ]);
 
         $count = StoryLike::where('story_id', $story->id)->count();
@@ -875,8 +911,12 @@ class StoryService
     {
         $story = $this->getStory($id, $user);
 
+        $activePage = request()?->attributes?->get('acting_page') ?? request()?->attributes?->get('active_page');
+        $activePageId = $activePage?->id;
+
         StoryLike::where('story_id', $story->id)
             ->where('user_id', $user->id)
+            ->when($activePageId, fn ($q) => $q->where('page_id', $activePageId), fn ($q) => $q->whereNull('page_id'))
             ->delete();
 
         $count = StoryLike::where('story_id', $story->id)->count();
@@ -893,12 +933,16 @@ class StoryService
         $sticker = StorySticker::with(['slide.story.user'])->findOrFail($stickerId);
         $story = $sticker->slide->story;
 
+        $activePage = request()?->attributes?->get('acting_page') ?? request()?->attributes?->get('active_page');
+        $activePageId = $activePage?->id;
+
         DB::table('story_sticker_answers')->insert([
             'id' => (string) Str::uuid(),
             'story_id' => $story->id,
             'slide_id' => $sticker->story_slide_id ?? $sticker->slide->id,
             'sticker_id' => $sticker->id,
             'user_id' => $user->id,
+            'page_id' => $activePageId,
             'type' => 'question',
             'answer' => $answer,
             'created_at' => now(),

@@ -217,3 +217,18 @@ Schedule::command('moderation:enforce-expired-corrections')
     ->hourly()
     ->withoutOverlapping()
     ->onOneServer();
+
+// --------------------------------------------------------------------------
+// PLANIFICATEUR DES ALERTES IMMO ET TICKETS EN ATTENTE
+// --------------------------------------------------------------------------
+// 12. Mise en pause quotidienne des alertes sans correspondance depuis 90 jours
+Schedule::command('alerts:pause-dormant')
+    ->daily()
+    ->withoutOverlapping()
+    ->onOneServer();
+
+// 13. Clôture automatique quotidienne des tickets support en attente de réponse utilisateur
+Schedule::command('support:auto-close-waiting')
+    ->daily()
+    ->withoutOverlapping()
+    ->onOneServer();

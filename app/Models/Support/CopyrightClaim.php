@@ -19,6 +19,8 @@ class CopyrightClaim extends Model
         'claimant_id',
         'claimant_name',
         'claimant_email',
+        'claim_kind',
+        'country',
         'content_type',
         'content_id',
         'work_title',
@@ -29,6 +31,14 @@ class CopyrightClaim extends Model
         'decision_notes',
         'resolved_by',
         'resolved_at',
+    ];
+
+    /**
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'claim_kind' => 'media',
+        'status' => 'pending',
     ];
 
     /**

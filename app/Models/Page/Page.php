@@ -388,4 +388,17 @@ class Page extends Model
 
         return $this->memberRole($user) === PageRole::Owner;
     }
+
+    /**
+     * Vérifie si un utilisateur est bloqué au nom de cette page.
+     */
+    public function hasBlockedUser(User|int $user): bool
+    {
+        $userId = $user instanceof User ? $user->id : (int) $user;
+
+        return \Illuminate\Support\Facades\DB::table('user_blocks')
+            ->where('page_id', $this->id)
+            ->where('blocked_id', $userId)
+            ->exists();
+    }
 }

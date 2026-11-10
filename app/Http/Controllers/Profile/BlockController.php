@@ -13,14 +13,23 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 class BlockController extends Controller
 {
     /**
-     * List all users blocked by the authenticated user.
+     * List all users blocked by the authenticated user or active page.
      */
     public function index(Request $request): AnonymousResourceCollection
     {
         /** @var User $user */
         $user = $request->user();
+        $activePage = $request->attributes->get('acting_page') ?? $request->attributes->get('active_page');
+        $activePageId = $activePage?->id;
 
-        return FollowUserResource::collection($user->blockedUsers()->paginate(20));
+        $query = $user->blockedUsers();
+        if ($activePageId) {
+            $query->wherePivot('page_id', $activePageId);
+        } else {
+            $query->wherePivotNull('page_id');
+        }
+
+        return FollowUserResource::collection($query->paginate(20));
     }
 
     /**
@@ -37,9 +46,16 @@ class BlockController extends Controller
             return response()->json(['message' => 'Vous ne pouvez pas vous bloquer vous-même.'], 422);
         }
 
+        $activePage = $request->attributes->get('acting_page') ?? $request->attributes->get('active_page');
+        $activePageId = $activePage?->id;
+
         // Sever social connections both ways
         $user->following()->detach($target->id);
         $target->following()->detach($user->id);
+
+        if ($activePage) {
+            $activePage->followers()->detach($target->id);
+        }
 
         // Delete all pending requests both ways
         FollowRequest::where(function ($q) use ($user, $target) {
@@ -49,7 +65,9 @@ class BlockController extends Controller
         })->delete();
 
         // Attach block
-        $user->blockedUsers()->syncWithoutDetaching([$target->id]);
+        $user->blockedUsers()->syncWithoutDetaching([
+            $target->id => ['page_id' => $activePageId],
+        ]);
 
         return response()->json([
             'success' => true,
@@ -64,8 +82,20 @@ class BlockController extends Controller
     {
         /** @var User $user */
         $user = $request->user();
+        $activePage = $request->attributes->get('acting_page') ?? $request->attributes->get('active_page');
+        $activePageId = $activePage?->id;
 
-        $user->blockedUsers()->detach($id);
+        $query = \Illuminate\Support\Facades\DB::table('user_blocks')
+            ->where('blocker_id', $user->id)
+            ->where('blocked_id', $id);
+
+        if ($activePageId) {
+            $query->where('page_id', $activePageId);
+        } else {
+            $query->whereNull('page_id');
+        }
+
+        $query->delete();
 
         return response()->json([
             'success' => true,

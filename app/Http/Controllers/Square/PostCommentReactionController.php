@@ -31,6 +31,7 @@ class PostCommentReactionController extends Controller
             'success' => true,
             'comment_id' => $comment->id,
             'my_reaction' => $result['my_reaction'],
+            'user_reaction' => $result['my_reaction'],
             'likes_count' => $result['likes_count'],
             'dislikes_count' => $result['dislikes_count'],
         ]);
@@ -51,6 +52,7 @@ class PostCommentReactionController extends Controller
             'success' => true,
             'comment_id' => $comment->id,
             'my_reaction' => $result['my_reaction'],
+            'user_reaction' => $result['my_reaction'],
             'likes_count' => $result['likes_count'],
             'dislikes_count' => $result['dislikes_count'],
         ]);

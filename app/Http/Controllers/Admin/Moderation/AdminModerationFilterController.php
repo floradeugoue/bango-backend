@@ -20,16 +20,25 @@ class AdminModerationFilterController extends Controller
     {
         $filters = [
             'category' => $request->query('category'),
+            'step' => $request->query('step'),
+            'appealed' => $request->query('appealed'),
             'action_taken' => $request->query('action_taken'),
             'date_from' => $request->query('date_from'),
             'date_to' => $request->query('date_to'),
             'search' => $request->query('search'),
+            'q' => $request->query('q'),
         ];
 
-        $perPage = (int) $request->query('per_page', 20);
+        $perPage = (int) $request->query('per_page', $request->query('perPage', 20));
         $logs = $this->filterService->getFilterLogs($filters, $perPage);
+        $meta = $this->filterService->getFilterMeta(30);
 
         return response()->json([
+            'items' => $logs->items(),
+            'page' => $logs->currentPage(),
+            'perPage' => $logs->perPage(),
+            'total' => $logs->total(),
+            'pageCount' => $logs->lastPage(),
             'success' => true,
             'data' => $logs->items(),
             'pagination' => [
@@ -38,6 +47,7 @@ class AdminModerationFilterController extends Controller
                 'total' => $logs->total(),
                 'last_page' => $logs->lastPage(),
             ],
+            'meta' => $meta,
         ]);
     }
 }

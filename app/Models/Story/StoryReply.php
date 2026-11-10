@@ -3,6 +3,7 @@
 namespace App\Models\Story;
 
 use App\Enums\Story\StoryReplyType;
+use App\Models\Page\Page;
 use App\Models\User;
 use Database\Factories\Story\StoryReplyFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
@@ -20,6 +21,7 @@ class StoryReply extends Model
         'story_slide_id',
         'story_author_id',
         'user_id',
+        'page_id',
         'type',
         'text',
         'reaction',
@@ -54,5 +56,10 @@ class StoryReply extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class, 'user_id');
+    }
+
+    public function page(): BelongsTo
+    {
+        return $this->belongsTo(Page::class, 'page_id');
     }
 }

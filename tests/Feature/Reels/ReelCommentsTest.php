@@ -1,9 +1,17 @@
 <?php
 
+use App\Enums\Reel\ReelReactionType;
 use App\Models\Reel\Reel;
 use App\Models\Reel\ReelComment;
+use App\Models\Reel\ReelCommentReaction;
+use App\Models\Square\Post;
+use App\Models\Square\PostComment;
+use App\Models\Square\PostCommentReaction;
 use App\Models\User;
+use App\Services\Reel\ReelCommentService;
+use App\Services\Square\PostCommentReactionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Laravel\Passport\Passport;
 
 uses(RefreshDatabase::class);
@@ -120,4 +128,75 @@ test('reactions sur les commentaires avec exclusivite like et dislike', function
         ->assertJsonPath('data.user_reaction', 'dislike')
         ->assertJsonPath('data.likes_count', 0)
         ->assertJsonPath('data.dislikes_count', 1);
+});
+
+test('aimer un commentaire de reel ou square deux fois simultanement ne renvoie jamais une erreur 500 en cas de collision unique', function () {
+    $comment = ReelComment::create([
+        'reel_id' => $this->reel->id,
+        'user_id' => $this->user->id,
+        'body' => 'Commentaire concurrent',
+        'likes_count' => 0,
+        'dislikes_count' => 0,
+    ]);
+
+    // Simuler une insertion concurrente juste au moment où ReelCommentReaction::create() est appelé
+    $simulatedRace = false;
+    ReelCommentReaction::creating(function (ReelCommentReaction $reaction) use (&$simulatedRace) {
+        if (! $simulatedRace) {
+            $simulatedRace = true;
+            DB::table('reel_comment_reactions')->insert([
+                'comment_id' => $reaction->comment_id,
+                'user_id' => $reaction->user_id,
+                'type' => 'like',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+            DB::table('reel_comments')->where('id', $reaction->comment_id)->increment('likes_count');
+        }
+    });
+
+    $res = $this->putJson("/api/reels/comments/{$comment->id}/reaction", [
+        'type' => 'like',
+    ]);
+
+    $res->assertStatus(200)
+        ->assertJsonPath('success', true)
+        ->assertJsonPath('data.user_reaction', 'like')
+        ->assertJsonPath('data.likes_count', 1)
+        ->assertJsonPath('data.dislikes_count', 0);
+
+    ReelCommentReaction::flushEventListeners();
+
+    // Même vérification sur un commentaire Square (PostCommentReactionService)
+    $post = Post::factory()->create(['user_id' => $this->user->id]);
+    $postComment = PostComment::create([
+        'post_id' => $post->id,
+        'user_id' => $this->user->id,
+        'body' => 'Commentaire Square concurrent',
+        'likes_count' => 0,
+        'dislikes_count' => 0,
+    ]);
+
+    $simulatedSquareRace = false;
+    PostCommentReaction::creating(function (PostCommentReaction $reaction) use (&$simulatedSquareRace) {
+        if (! $simulatedSquareRace) {
+            $simulatedSquareRace = true;
+            DB::table('post_comment_reactions')->insert([
+                'comment_id' => $reaction->comment_id,
+                'user_id' => $reaction->user_id,
+                'type' => 'like',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+            DB::table('post_comments')->where('id', $reaction->comment_id)->increment('likes_count');
+        }
+    });
+
+    $squareResult = app(PostCommentReactionService::class)->react($postComment, $this->user, 'like');
+    expect($squareResult['my_reaction'])->toBe('like')
+        ->and($squareResult['user_reaction'])->toBe('like')
+        ->and($squareResult['likes_count'])->toBe(1)
+        ->and($squareResult['dislikes_count'])->toBe(0);
+
+    PostCommentReaction::flushEventListeners();
 });

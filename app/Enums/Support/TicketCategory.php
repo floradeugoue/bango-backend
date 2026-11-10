@@ -12,6 +12,7 @@ enum TicketCategory: string
     case Messaging = 'messaging';
     case ProPages = 'pro_pages';
     case SecurityReport = 'security_report';
+    case Feedback = 'feedback';
     case Other = 'other';
 
     public function label(): string
@@ -25,6 +26,7 @@ enum TicketCategory: string
             self::Messaging => 'Messagerie',
             self::ProPages => 'Pages Pro',
             self::SecurityReport => 'Sécurité et signalement',
+            self::Feedback => 'Avis et retour d\'expérience',
             self::Other => 'Autre',
         };
     }

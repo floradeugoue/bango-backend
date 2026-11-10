@@ -41,6 +41,7 @@ class ListingAlertResource extends JsonResource
             'push' => (bool) $this->push,
             'email' => (bool) $this->email,
             'is_active' => $this->is_active ?? ($this->enabled ?? true),
+            'paused_reason' => $this->paused_reason,
             'enabled' => $this->enabled ?? ($this->is_active ?? true),
             'disabled_at' => $this->disabled_at?->toIso8601String(),
             'last_triggered_at' => $this->last_triggered_at?->toIso8601String(),

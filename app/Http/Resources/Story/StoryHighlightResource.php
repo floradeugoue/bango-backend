@@ -21,8 +21,19 @@ class StoryHighlightResource extends JsonResource
             $coverUrl = $this->coverStory->slides->first()?->thumbnail_url ?? $this->coverStory->slides->first()?->media_url;
         }
 
+        $page = $this->page_id ? ($this->relationLoaded('page') ? $this->page : $this->page()->first()) : null;
+
         return [
             'id' => (string) $this->id,
+            'page_id' => $this->page_id ? (int) $this->page_id : null,
+            'page' => $page ? [
+                'id' => (int) $page->id,
+                'name' => $page->name,
+                'handle' => $page->handle,
+                'logo_url' => $page->logo_url,
+                'avatar_url' => $page->logo_url,
+                'is_certified' => $page->isCertified(),
+            ] : null,
             'title' => $this->title,
             'cover_story_id' => $this->cover_story_id ? (string) $this->cover_story_id : null,
             'cover_media_url' => $coverUrl,

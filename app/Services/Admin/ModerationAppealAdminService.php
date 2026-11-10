@@ -141,6 +141,42 @@ class ModerationAppealAdminService
                         'lifted_by_id' => $operator->id,
                         'lift_reason' => $decisionNotes,
                     ]);
+                } elseif ($appeal->sanction_type === 'restriction' && $user) {
+                    $restrictionQuery = UserAccountSanction::where('user_id', $user->id)
+                        ->where('type', 'restriction')
+                        ->where('is_active', true);
+
+                    if (! empty($appeal->sanction_reference) && is_numeric($appeal->sanction_reference)) {
+                        $targetSanction = UserAccountSanction::find((int) $appeal->sanction_reference);
+                        if ($targetSanction && (int) $targetSanction->user_id === (int) $user->id) {
+                            $restrictionQuery = UserAccountSanction::where('id', $targetSanction->id);
+                        }
+                    }
+
+                    $restrictionQuery->update([
+                        'is_active' => false,
+                        'lifted_at' => now(),
+                        'lifted_by_id' => $operator->id,
+                        'lift_reason' => $decisionNotes,
+                    ]);
+
+                    $hasOtherActiveRestrictions = UserAccountSanction::where('user_id', $user->id)
+                        ->where('is_active', true)
+                        ->where(function ($q) {
+                            $q->where('type', 'restriction')
+                                ->orWhere(function ($sub) {
+                                    $sub->where('type', 'warning')->where('level', 3);
+                                })
+                                ->orWhere(function ($sub) {
+                                    $sub->whereNotNull('ends_at')->where('ends_at', '>', now());
+                                });
+                        })
+                        ->exists();
+
+                    if (! $hasOtherActiveRestrictions && $user->restricted_until) {
+                        $user->restricted_until = null;
+                        $user->save();
+                    }
                 } elseif ($appeal->sanction_type === 'warning') {
                     $sanction = null;
                     if (! empty($appeal->sanction_reference) && is_numeric($appeal->sanction_reference)) {

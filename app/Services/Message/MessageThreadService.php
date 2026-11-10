@@ -6,12 +6,14 @@ use App\Enums\Delegation\DelegationStatus;
 use App\Enums\Message\ConversationMemberRole;
 use App\Enums\Message\ConversationType;
 use App\Enums\Message\MessageType;
+use App\Enums\Page\PageRole;
 use App\Events\Message\ConversationCreated;
 use App\Models\Delegation\Delegation;
 use App\Models\Listing\Listing;
 use App\Models\Message\Conversation;
 use App\Models\Message\ConversationMember;
 use App\Models\Message\Message;
+use App\Models\Page\Page;
 use App\Models\User;
 use App\Notifications\Message\AddedToGroupNotification;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -51,6 +53,10 @@ class MessageThreadService
             'listing' => function ($q): void {
                 $q->select(['id', 'title', 'price', 'currency', 'status', 'mode', 'kind', 'owner_id', 'agent_id']);
             },
+            'page',
+            'creator' => function ($q): void {
+                $q->select(['id', 'name', 'display_name', 'handle', 'avatar_url', 'is_verified', 'account_type']);
+            },
         ]);
 
         // Filtrage par catégorie
@@ -62,10 +68,15 @@ class MessageThreadService
                 $query->where('type', ConversationType::Direct)->whereNull('listing_id');
             } elseif ($type === 'group') {
                 $query->where('type', ConversationType::Group);
+            } elseif ($type === 'page') {
+                $query->where(function (Builder $q): void {
+                    $q->where('type', ConversationType::Page)->orWhereNotNull('page_id');
+                });
             }
         }
 
-        // Dans la boîte principale : si pas de page active, exclure les demandes en attente
+        // Filtrage des demandes en attente :
+        // Pour un utilisateur ou une page active, les demandes en attente ne doivent apparaître que si créées par cette identité
         if (! $activePage) {
             $query->where(function (Builder $q) use ($user): void {
                 $q->where(function (Builder $sub) {
@@ -73,6 +84,17 @@ class MessageThreadService
                 })->orWhere(function (Builder $sub) use ($user) {
                     $sub->where('status', 'pending')
                         ->where('created_by_id', $user->id);
+                });
+            })->where(function (Builder $q) {
+                $q->where('status', '!=', 'rejected')->orWhereNull('status');
+            });
+        } else {
+            $query->where(function (Builder $q) use ($activePage): void {
+                $q->where(function (Builder $sub) {
+                    $sub->where('status', 'active')->orWhereNull('status');
+                })->orWhere(function (Builder $sub) use ($activePage) {
+                    $sub->where('status', 'pending')
+                        ->where('page_id', $activePage->id);
                 });
             })->where(function (Builder $q) {
                 $q->where('status', '!=', 'rejected')->orWhereNull('status');
@@ -128,6 +150,12 @@ class MessageThreadService
         // Si une annonce est renseignée, vérifier qu'elle existe
         if ($listingId) {
             Listing::query()->findOrFail($listingId);
+        }
+
+        // Si une page est active dans la requête, la conversation directe est ouverte au nom de cette page
+        $activePage = request()?->attributes?->get('acting_page') ?? request()?->attributes?->get('active_page');
+        if ($activePage) {
+            return $this->getOrCreatePageConversation($peer, (int) $activePage->id, $listingId, $metadata);
         }
 
         return DB::transaction(function () use ($user, $peer, $listingId, $metadata): Conversation {
@@ -231,6 +259,125 @@ class MessageThreadService
 
             return $conversation;
         });
+    }
+
+    /**
+     * Crée ou récupère une conversation avec une Page Professionnelle.
+     */
+    public function getOrCreatePageConversation(
+        User $user,
+        int $pageId,
+        ?string $listingId = null,
+        ?array $metadata = null
+    ): Conversation {
+        /** @var Page $page */
+        $page = Page::query()->with(['activeMembers'])->findOrFail($pageId);
+
+        if ($page->isSuspended()) {
+            throw ValidationException::withMessages([
+                'page_id' => ['Cette Page Professionnelle n\'est pas disponible.'],
+            ]);
+        }
+
+        if ($page->hasBlockedUser($user)) {
+            abort(403, 'Cette page professionnelle ne peut pas être contactée.');
+        }
+
+        if ($listingId) {
+            Listing::query()->findOrFail($listingId);
+        }
+
+        return DB::transaction(function () use ($user, $page, $listingId, $metadata): Conversation {
+            $existingQuery = Conversation::query()
+                ->where('page_id', $page->id)
+                ->where('created_by_id', $user->id);
+
+            if ($listingId) {
+                $listingThread = (clone $existingQuery)->where('listing_id', $listingId)->first();
+                if ($listingThread) {
+                    $this->syncPageConversationMembers($listingThread, $page, $user);
+
+                    return $listingThread->load(['members.user', 'listing', 'page', 'creator']);
+                }
+            }
+
+            $existing = (clone $existingQuery)->first();
+            if ($existing) {
+                if ($listingId && ! $existing->listing_id) {
+                    $existing->update(['listing_id' => $listingId]);
+                }
+
+                $this->syncPageConversationMembers($existing, $page, $user);
+
+                return $existing->load(['members.user', 'listing', 'page', 'creator']);
+            }
+
+            $conversation = Conversation::create([
+                'type' => ConversationType::Page,
+                'status' => 'active',
+                'page_id' => $page->id,
+                'title' => $page->name,
+                'avatar_url' => $page->getRawOriginal('logo_url'),
+                'listing_id' => $listingId,
+                'created_by_id' => $user->id,
+                'metadata' => $metadata,
+            ]);
+
+            $this->syncPageConversationMembers($conversation, $page, $user);
+
+            $conversation->load(['members.user', 'listing', 'page', 'creator']);
+
+            event(new ConversationCreated($conversation));
+
+            return $conversation;
+        });
+    }
+
+    /**
+     * Synchronise l'initiateur et tous les membres de la Page autorisés à répondre.
+     */
+    protected function syncPageConversationMembers(Conversation $conversation, Page $page, User $initiator): void
+    {
+        $initiatorMember = ConversationMember::firstOrCreate([
+            'conversation_id' => $conversation->id,
+            'user_id' => $initiator->id,
+        ], [
+            'role' => ConversationMemberRole::Member,
+            'joined_at' => now(),
+        ]);
+
+        if ($initiatorMember->left_at !== null) {
+            $initiatorMember->update(['left_at' => null, 'joined_at' => now()]);
+        }
+
+        $responderIds = collect([$page->owner_id])
+            ->merge(
+                $page->activeMembers
+                    ->filter(fn ($member) => in_array($member->role, [PageRole::Owner, PageRole::Editor, PageRole::Moderator], true))
+                    ->pluck('user_id')
+            )
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+
+        foreach ($responderIds as $responderId) {
+            if ($responderId === (int) $initiator->id) {
+                continue;
+            }
+
+            $member = ConversationMember::firstOrCreate([
+                'conversation_id' => $conversation->id,
+                'user_id' => $responderId,
+            ], [
+                'role' => ConversationMemberRole::Admin,
+                'joined_at' => now(),
+            ]);
+
+            if ($member->left_at !== null) {
+                $member->update(['left_at' => null, 'joined_at' => now()]);
+            }
+        }
     }
 
     /**

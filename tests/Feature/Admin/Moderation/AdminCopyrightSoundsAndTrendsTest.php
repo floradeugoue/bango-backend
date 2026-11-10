@@ -91,6 +91,120 @@ it('lists copyright claims and applies copyright decisions', function () {
     expect(Post::find($post->id))->toBeNull();
 });
 
+it('supports claim_kind on deposit, request_info decision to under_review, status[]/decided, claim_kind[], country[] filters, and 90-day meta metrics', function () {
+    [$operator, $sessionId, $csrfToken] = createMediaSession('moderation');
+
+    $author = User::factory()->create(['country_code' => 'CM']);
+    $post = Post::factory()->create(['user_id' => $author->id]);
+
+    // 1. Dépôt via le formulaire public avec claim_kind et country
+    $depositResponse = $this->postJson('/api/legal/copyright-claims', [
+        'claimant_name' => 'Marque Déposée SA',
+        'claimant_email' => 'juridique@marque.cm',
+        'claim_kind' => 'trademark',
+        'country' => 'cm',
+        'content_type' => 'post',
+        'content_id' => (string) $post->id,
+        'work_title' => 'Logo Officiel Marque',
+        'reason' => 'Utilisation commerciale non autorisée de notre marque déposée.',
+    ]);
+
+    $depositResponse->assertStatus(201)
+        ->assertJsonPath('data.claim_kind', 'trademark')
+        ->assertJsonPath('data.country', 'CM')
+        ->assertJsonPath('data.status', 'pending');
+
+    $claimRef = $depositResponse->json('data.reference');
+
+    // 2. Décision request_info (avec message au propriétaire des droits) -> passe en under_review
+    $requestInfoResponse = $this->withUnencryptedCookie('bango_admin_session', $sessionId)
+        ->withHeader('X-CSRF-TOKEN', $csrfToken)
+        ->postJson("/api/admin/moderation/rights/{$claimRef}/decision", [
+            'decision' => 'request_info',
+            'message' => 'Veuillez fournir le certificat d\'enregistrement OAPI de la marque.',
+        ]);
+
+    $requestInfoResponse->assertStatus(200)
+        ->assertJsonPath('data.status', 'under_review')
+        ->assertJsonPath('data.decision', 'request_info')
+        ->assertJsonPath('data.message', 'Veuillez fournir le certificat d\'enregistrement OAPI de la marque.');
+
+    // Créer d'autres réclamations décidées (approved et rejected) avec durées connues sur 90 jours
+    $baseTime = now()->subDays(10);
+
+    $approvedClaim = CopyrightClaim::create([
+        'claimant_name' => 'Photographe Pro',
+        'claimant_email' => 'photo@studio.ci',
+        'claim_kind' => 'media',
+        'country' => 'CI',
+        'content_type' => 'post',
+        'content_id' => '501',
+        'work_title' => 'Photo Abidjan',
+        'reason' => 'Copie intégrale de cliché.',
+        'status' => 'approved',
+        'decision' => 'content_removed',
+        'decision_notes' => 'Preuve EXIF fournie.',
+        'resolved_by' => $operator->id,
+        'created_at' => $baseTime,
+        'resolved_at' => $baseTime->copy()->addHours(4), // 4h
+    ]);
+    $approvedClaim->timestamps = false;
+    $approvedClaim->created_at = $baseTime;
+    $approvedClaim->save();
+
+    $rejectedClaim = CopyrightClaim::create([
+        'claimant_name' => 'Auteur Texte',
+        'claimant_email' => 'auteur@texte.sn',
+        'claim_kind' => 'impersonation',
+        'country' => 'SN',
+        'content_type' => 'page',
+        'content_id' => '502',
+        'work_title' => 'Identité Officielle',
+        'reason' => 'Usurpation alléguée.',
+        'status' => 'rejected',
+        'decision' => 'dismissed',
+        'decision_notes' => 'Aucune usurpation constatée.',
+        'resolved_by' => $operator->id,
+        'created_at' => $baseTime,
+        'resolved_at' => $baseTime->copy()->addHours(8), // 8h
+    ]);
+    $rejectedClaim->timestamps = false;
+    $rejectedClaim->created_at = $baseTime;
+    $rejectedClaim->save();
+
+    // 3. Lister toutes les réclamations décidées via status=decided et status[]
+    $decidedResponse = $this->withUnencryptedCookie('bango_admin_session', $sessionId)
+        ->getJson('/api/admin/moderation/rights?status=decided');
+
+    $decidedResponse->assertStatus(200)
+        ->assertJsonPath('total', 2)
+        ->assertJsonPath('meta.counts.under_review', 1)
+        ->assertJsonPath('meta.counts.approved', 1)
+        ->assertJsonPath('meta.counts.rejected', 1)
+        ->assertJsonPath('meta.counts.decided', 2)
+        ->assertJsonPath('meta.median_decision_hours', 6)
+        ->assertJsonPath('meta.accept_rate', 50);
+
+    $statusArrayResponse = $this->withUnencryptedCookie('bango_admin_session', $sessionId)
+        ->getJson('/api/admin/moderation/rights?status[]=approved&status[]=rejected');
+
+    $statusArrayResponse->assertStatus(200)
+        ->assertJsonPath('total', 2);
+
+    // 4. Filtres claim_kind[] et country[]
+    $kindResponse = $this->withUnencryptedCookie('bango_admin_session', $sessionId)
+        ->getJson('/api/admin/moderation/rights?status=all&claim_kind[]=trademark&claim_kind[]=impersonation');
+
+    $kindResponse->assertStatus(200)
+        ->assertJsonPath('total', 2);
+
+    $countryResponse = $this->withUnencryptedCookie('bango_admin_session', $sessionId)
+        ->getJson('/api/admin/moderation/rights?status=all&country[]=CM&country[]=CI');
+
+    $countryResponse->assertStatus(200)
+        ->assertJsonPath('total', 2);
+});
+
 it('lists sounds and applies moderation actions on the audio catalog', function () {
     [$operator, $sessionId, $csrfToken] = createMediaSession('moderation');
 

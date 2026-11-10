@@ -20,6 +20,10 @@ class PagePolicy
      */
     public function view(?User $user, Page $page): bool
     {
+        if ($user && $page->hasBlockedUser($user)) {
+            return false;
+        }
+
         if ($page->isActive()) {
             return true;
         }

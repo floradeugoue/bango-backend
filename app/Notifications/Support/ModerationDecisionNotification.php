@@ -15,7 +15,7 @@ class ModerationDecisionNotification extends Notification implements ShouldQueue
     use Queueable, RespectsNotificationPreferences;
 
     public function __construct(
-        public Report $report,
+        public ?Report $report,
         public string $action,
         public string $justification,
         public ?Carbon $suspendedUntil = null
@@ -98,7 +98,7 @@ class ModerationDecisionNotification extends Notification implements ShouldQueue
 
         return [
             'type' => 'moderation_decision',
-            'report_reference' => $this->report->reference,
+            'report_reference' => $this->report?->reference,
             'action' => $this->action,
             'justification' => $this->justification,
             'suspended_until' => $this->suspendedUntil?->toISOString(),

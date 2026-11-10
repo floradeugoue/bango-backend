@@ -22,16 +22,25 @@ class AdminCopyrightController extends Controller
     {
         $filters = [
             'status' => $request->query('status'),
+            'claim_kind' => $request->query('claim_kind'),
+            'country' => $request->query('country'),
             'content_type' => $request->query('content_type'),
             'date_from' => $request->query('date_from'),
             'date_to' => $request->query('date_to'),
             'search' => $request->query('search'),
+            'q' => $request->query('q'),
         ];
 
-        $perPage = (int) $request->query('per_page', 20);
+        $perPage = (int) $request->query('per_page', $request->query('perPage', 20));
         $claims = $this->copyrightService->getClaimsQueue($filters, $perPage);
+        $meta = $this->copyrightService->getClaimsMeta(90);
 
         return response()->json([
+            'items' => $claims->items(),
+            'page' => $claims->currentPage(),
+            'perPage' => $claims->perPage(),
+            'total' => $claims->total(),
+            'pageCount' => $claims->lastPage(),
             'success' => true,
             'data' => $claims->items(),
             'pagination' => [
@@ -40,6 +49,8 @@ class AdminCopyrightController extends Controller
                 'total' => $claims->total(),
                 'last_page' => $claims->lastPage(),
             ],
+            'counters' => $meta['counts'],
+            'meta' => $meta,
         ]);
     }
 
@@ -48,13 +59,14 @@ class AdminCopyrightController extends Controller
      */
     public function decision(CopyrightDecisionRequest $request, string $ref): JsonResponse
     {
-        $operator = $request->user();
+        $operator = $request->attributes->get('admin_operator') ?? $request->user();
+        $decisionNotes = (string) ($request->input('decision_notes') ?? $request->input('message') ?? '');
 
         try {
             $claim = $this->copyrightService->resolveClaim(
                 claimRef: $ref,
                 decision: $request->input('decision'),
-                decisionNotes: $request->input('decision_notes'),
+                decisionNotes: $decisionNotes,
                 operator: $operator
             );
         } catch (\InvalidArgumentException $e) {
@@ -71,6 +83,7 @@ class AdminCopyrightController extends Controller
                 'status' => $claim->status,
                 'decision' => $claim->decision,
                 'decision_notes' => $claim->decision_notes,
+                'message' => $claim->decision === 'request_info' ? $claim->decision_notes : null,
                 'resolved_by' => $claim->resolved_by,
                 'resolved_at' => $claim->resolved_at?->toIso8601String(),
             ],

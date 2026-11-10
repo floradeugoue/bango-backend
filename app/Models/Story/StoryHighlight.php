@@ -2,6 +2,7 @@
 
 namespace App\Models\Story;
 
+use App\Models\Page\Page;
 use App\Models\User;
 use Database\Factories\Story\StoryHighlightFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
@@ -17,6 +18,7 @@ class StoryHighlight extends Model
 
     protected $fillable = [
         'user_id',
+        'page_id',
         'title',
         'cover_story_id',
         'cover_media_url',
@@ -36,6 +38,11 @@ class StoryHighlight extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function page(): BelongsTo
+    {
+        return $this->belongsTo(Page::class);
     }
 
     public function coverStory(): BelongsTo

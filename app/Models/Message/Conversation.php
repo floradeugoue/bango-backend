@@ -136,8 +136,25 @@ class Conversation extends Model
      */
     public function scopeForUser(Builder $query, int $userId): Builder
     {
-        return $query->whereHas('members', function (Builder $memberQuery) use ($userId): void {
-            $memberQuery->where('user_id', $userId)->whereNull('left_at');
+        return $query->where(function (Builder $q) use ($userId): void {
+            $q->where(function (Builder $memberScope) use ($userId): void {
+                $memberScope->whereHas('members', function (Builder $memberQuery) use ($userId): void {
+                    $memberQuery->where('user_id', $userId)->whereNull('left_at');
+                })->where(function (Builder $notRevoked) use ($userId): void {
+                    $notRevoked->whereNull('page_id')
+                        ->orWhere('created_by_id', $userId)
+                        ->orWhereDoesntHave('page.members', function (Builder $pm) use ($userId): void {
+                            $pm->where('user_id', $userId)->where('status', 'revoked');
+                        });
+                });
+            })->orWhereHas('page', function (Builder $pageQuery) use ($userId): void {
+                $pageQuery->where('owner_id', $userId)
+                    ->orWhereHas('members', function (Builder $pm) use ($userId): void {
+                        $pm->where('user_id', $userId)
+                            ->where('status', 'accepted')
+                            ->whereIn('role', ['owner', 'editor', 'moderator']);
+                    });
+            });
         });
     }
 

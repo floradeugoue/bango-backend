@@ -466,6 +466,39 @@ class PaymentController extends Controller
             errorMessage: $initiateResult->errorMessage ?? 'Erreur lors de l\'appel à la passerelle'
         );
 
+        $failureReason = $initiateResult->errorMessage ?? 'Échec lors de l\'initialisation chez l\'opérateur.';
+
+        $this->paymentEngineService->failTransaction(
+            transaction: $transaction,
+            reason: $failureReason,
+            source: PaymentEventSource::Gateway,
+            details: [
+                'error_code' => $initiateResult->errorCode ?? 'GATEWAY_ERROR',
+                'failure_reason' => $failureReason,
+                'message' => $failureReason,
+                'raw_response' => $initiateResult->raw ?? [],
+            ]
+        );
+
+        // Libération de la ressource réservée (visite ou abonnement)
+        if ($transaction->service_type === PaymentServiceType::Visit && $transaction->payable_type === \App\Models\Visit\VisitReservation::class && $transaction->payable_id) {
+            $reservation = \App\Models\Visit\VisitReservation::find($transaction->payable_id);
+            if ($reservation && $reservation->status === \App\Enums\Visit\VisitReservationStatus::PendingPayment) {
+                $reservation->status = \App\Enums\Visit\VisitReservationStatus::Expired;
+                $reservation->lock_expires_at = null;
+                $reservation->cancellation_reason = $failureReason;
+                $reservation->save();
+            }
+        }
+
+        if ($transaction->subscription_id) {
+            $subscription = $transaction->subscription;
+            if ($subscription && $subscription->state === 'pending') {
+                $subscription->state = 'expired';
+                $subscription->save();
+            }
+        }
+
         if ($initiateResult->errorCode === 'COUNTRY_NOT_SUPPORTED') {
             return $this->paymentError(
                 code: 'COUNTRY_NOT_SUPPORTED',
