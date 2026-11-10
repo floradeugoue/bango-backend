@@ -114,12 +114,22 @@ class PostComment extends Model
             return null;
         }
 
+        $activePage = request()?->attributes?->get('acting_page') ?? request()?->attributes?->get('active_page');
+        $activePageId = $activePage?->id;
+
         if ($this->relationLoaded('reactions')) {
-            $reaction = $this->reactions->firstWhere('user_id', $user->id);
+            $reaction = $this->reactions
+                ->where('user_id', $user->id)
+                ->first(function ($r) use ($activePageId) {
+                    return $activePageId ? (int) $r->page_id === (int) $activePageId : is_null($r->page_id);
+                });
 
             return $reaction?->type;
         }
 
-        return $this->reactions()->where('user_id', $user->id)->value('type');
+        return $this->reactions()
+            ->where('user_id', $user->id)
+            ->when($activePageId, fn ($q) => $q->where('page_id', $activePageId), fn ($q) => $q->whereNull('page_id'))
+            ->value('type');
     }
 }

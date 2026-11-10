@@ -19,6 +19,8 @@ class StoreCopyrightClaimRequest extends FormRequest
         return [
             'claimant_name' => ['required', 'string', 'max:255'],
             'claimant_email' => ['required', 'email', 'max:255'],
+            'claim_kind' => ['nullable', 'string', 'in:media,trademark,text,impersonation'],
+            'country' => ['nullable', 'string', 'max:10'],
             'content_type' => ['required', 'string', 'in:post,reel,sound,listing,page,comment,other'],
             'content_id' => ['required', 'string', 'max:255'],
             'work_title' => ['required', 'string', 'max:255'],

@@ -35,7 +35,7 @@ class StoryResource extends JsonResource
 
         $page = $this->page_id ? ($this->relationLoaded('page') ? $this->page : Page::find($this->page_id)) : null;
 
-        $authorId = $page ? (string) $page->id : (string) $this->user->id;
+        $authorId = $page ? (int) $page->id : (int) $this->user->id;
         $authorName = $page ? $page->name : ($this->user->display_name ?: $this->user->name);
         $authorHandle = $page ? $page->handle : $this->user->handle;
         $authorAvatar = $page ? $page->logo_url : $this->user->avatar_url;

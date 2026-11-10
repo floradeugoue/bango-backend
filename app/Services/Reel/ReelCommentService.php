@@ -11,6 +11,7 @@ use App\Notifications\Social\SocialNotification;
 use App\Services\Admin\AutomatedTextFilterService;
 use App\Services\Translation\TranslationService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -205,58 +206,115 @@ class ReelCommentService
      */
     public function reactToComment(ReelComment $comment, User $user, ReelReactionType $type): array
     {
-        return DB::transaction(function () use ($comment, $user, $type) {
-            $existing = ReelCommentReaction::where('comment_id', $comment->id)
+        $activePage = request()?->attributes?->get('acting_page') ?? request()?->attributes?->get('active_page');
+        $activePageId = $activePage?->id;
+
+        try {
+            return DB::transaction(function () use ($comment, $user, $type, $activePageId) {
+                /** @var ReelComment $lockedComment */
+                $lockedComment = ReelComment::lockForUpdate()->find($comment->id) ?? $comment;
+
+                $existing = ReelCommentReaction::where('comment_id', $lockedComment->id)
+                    ->where('user_id', $user->id)
+                    ->when($activePageId, fn ($q) => $q->where('page_id', $activePageId), fn ($q) => $q->whereNull('page_id'))
+                    ->lockForUpdate()
+                    ->first();
+
+                if (! $existing) {
+                    try {
+                        ReelCommentReaction::create([
+                            'comment_id' => $lockedComment->id,
+                            'user_id' => $user->id,
+                            'page_id' => $activePageId,
+                            'type' => $type,
+                        ]);
+
+                        if ($type === ReelReactionType::Like) {
+                            $lockedComment->increment('likes_count');
+                        } else {
+                            $lockedComment->increment('dislikes_count');
+                        }
+
+                        $userReaction = $type->value;
+                    } catch (Throwable) {
+                        $existing = ReelCommentReaction::where('comment_id', $lockedComment->id)
+                            ->where('user_id', $user->id)
+                            ->when($activePageId, fn ($q) => $q->where('page_id', $activePageId), fn ($q) => $q->whereNull('page_id'))
+                            ->first();
+                        $userReaction = $existing
+                            ? ($existing->type instanceof ReelReactionType ? $existing->type->value : (string) $existing->type)
+                            : null;
+
+                        // En cas de collision concurrente, s'assurer que les compteurs reflètent la réalité
+                        $lockedComment->likes_count = ReelCommentReaction::where('comment_id', $lockedComment->id)->where('type', ReelReactionType::Like->value)->count();
+                        $lockedComment->dislikes_count = ReelCommentReaction::where('comment_id', $lockedComment->id)->where('type', ReelReactionType::Dislike->value)->count();
+                        $lockedComment->saveQuietly();
+                    }
+                } elseif ($existing->type === $type) {
+                    $existing->delete();
+
+                    if ($type === ReelReactionType::Like) {
+                        if ($lockedComment->likes_count > 0) {
+                            $lockedComment->decrement('likes_count');
+                        }
+                    } else {
+                        if ($lockedComment->dislikes_count > 0) {
+                            $lockedComment->decrement('dislikes_count');
+                        }
+                    }
+
+                    $userReaction = null;
+                } else {
+                    $existing->update(['type' => $type]);
+
+                    if ($type === ReelReactionType::Like) {
+                        $lockedComment->increment('likes_count');
+                        if ($lockedComment->dislikes_count > 0) {
+                            $lockedComment->decrement('dislikes_count');
+                        }
+                    } else {
+                        $lockedComment->increment('dislikes_count');
+                        if ($lockedComment->likes_count > 0) {
+                            $lockedComment->decrement('likes_count');
+                        }
+                    }
+
+                    $userReaction = $type->value;
+                }
+
+                return [
+                    'user_reaction' => $userReaction,
+                    'likes_count' => max(0, (int) $lockedComment->likes_count),
+                    'dislikes_count' => max(0, (int) $lockedComment->dislikes_count),
+                ];
+            });
+        } catch (QueryException) {
+            $freshComment = ReelComment::find($comment->id) ?? $comment;
+            $existing = ReelCommentReaction::where('comment_id', $freshComment->id)
                 ->where('user_id', $user->id)
-                ->lockForUpdate()
+                ->when($activePageId, fn ($q) => $q->where('page_id', $activePageId), fn ($q) => $q->whereNull('page_id'))
                 ->first();
 
-            if (! $existing) {
-                ReelCommentReaction::create([
-                    'comment_id' => $comment->id,
-                    'user_id' => $user->id,
-                    'type' => $type,
-                ]);
+            $likesCount = ReelCommentReaction::where('comment_id', $freshComment->id)
+                ->where('type', ReelReactionType::Like->value)
+                ->count();
+            $dislikesCount = ReelCommentReaction::where('comment_id', $freshComment->id)
+                ->where('type', ReelReactionType::Dislike->value)
+                ->count();
 
-                if ($type === ReelReactionType::Like) {
-                    $comment->increment('likes_count');
-                } else {
-                    $comment->increment('dislikes_count');
-                }
-
-                $userReaction = $type->value;
-            } elseif ($existing->type === $type) {
-                $existing->delete();
-
-                if ($type === ReelReactionType::Like) {
-                    $comment->decrement('likes_count');
-                } else {
-                    $comment->decrement('dislikes_count');
-                }
-
-                $userReaction = null;
-            } else {
-                $existing->update(['type' => $type]);
-
-                if ($type === ReelReactionType::Like) {
-                    $comment->increment('likes_count');
-                    $comment->decrement('dislikes_count');
-                } else {
-                    $comment->increment('dislikes_count');
-                    $comment->decrement('likes_count');
-                }
-
-                $userReaction = $type->value;
-            }
-
-            $comment->refresh();
+            $freshComment->forceFill([
+                'likes_count' => $likesCount,
+                'dislikes_count' => $dislikesCount,
+            ])->saveQuietly();
 
             return [
-                'user_reaction' => $userReaction,
-                'likes_count' => (int) $comment->likes_count,
-                'dislikes_count' => (int) $comment->dislikes_count,
+                'user_reaction' => $existing
+                    ? ($existing->type instanceof ReelReactionType ? $existing->type->value : (string) $existing->type)
+                    : null,
+                'likes_count' => $likesCount,
+                'dislikes_count' => $dislikesCount,
             ];
-        });
+        }
     }
 
     /**
@@ -270,28 +328,39 @@ class ReelCommentService
      */
     public function removeCommentReaction(ReelComment $comment, User $user): array
     {
-        return DB::transaction(function () use ($comment, $user) {
-            $existing = ReelCommentReaction::where('comment_id', $comment->id)
+        $activePage = request()?->attributes?->get('acting_page') ?? request()?->attributes?->get('active_page');
+        $activePageId = $activePage?->id;
+
+        return DB::transaction(function () use ($comment, $user, $activePageId) {
+            /** @var ReelComment $lockedComment */
+            $lockedComment = ReelComment::lockForUpdate()->find($comment->id) ?? $comment;
+
+            $existing = ReelCommentReaction::where('comment_id', $lockedComment->id)
                 ->where('user_id', $user->id)
+                ->when($activePageId, fn ($q) => $q->where('page_id', $activePageId), fn ($q) => $q->whereNull('page_id'))
                 ->lockForUpdate()
                 ->first();
 
             if ($existing) {
                 if ($existing->type === ReelReactionType::Like) {
-                    $comment->decrement('likes_count');
+                    if ($lockedComment->likes_count > 0) {
+                        $lockedComment->decrement('likes_count');
+                    }
                 } else {
-                    $comment->decrement('dislikes_count');
+                    if ($lockedComment->dislikes_count > 0) {
+                        $lockedComment->decrement('dislikes_count');
+                    }
                 }
 
                 $existing->delete();
             }
 
-            $comment->refresh();
+            $lockedComment->refresh();
 
             return [
                 'user_reaction' => null,
-                'likes_count' => (int) $comment->likes_count,
-                'dislikes_count' => (int) $comment->dislikes_count,
+                'likes_count' => max(0, (int) $lockedComment->likes_count),
+                'dislikes_count' => max(0, (int) $lockedComment->dislikes_count),
             ];
         });
     }

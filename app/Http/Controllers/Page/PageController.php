@@ -12,6 +12,7 @@ use App\Http\Resources\Message\ConversationResource;
 use App\Http\Resources\Page\PageResource;
 use App\Http\Resources\Reel\ReelResource;
 use App\Http\Resources\Square\PostResource;
+use App\Http\Resources\Story\StoryHighlightResource;
 use App\Models\Page\Page;
 use App\Models\User;
 use App\Notifications\Social\SocialNotification;
@@ -149,11 +150,23 @@ class PageController extends Controller
         Gate::authorize('accessInbox', $page);
 
         $conversations = $page->conversations()
-            ->with(['creator', 'listing', 'latestMessage.sender', 'members.user'])
-            ->orderByDesc('last_message_at')
+            ->with(['creator', 'listing', 'latestMessage.sender', 'members.user', 'page'])
+            ->orderByRaw('COALESCE(last_message_at, created_at) DESC')
             ->paginate($request->integer('per_page', 20));
 
         return ConversationResource::collection($conversations);
+    }
+
+    /**
+     * Collections À la une de la Page Professionnelle.
+     * GET /api/pages/{page}/highlights
+     */
+    public function highlights(Request $request, Page $page): AnonymousResourceCollection
+    {
+        $viewer = $request->user() ?: new \App\Models\User;
+        $highlights = app(\App\Services\Story\HighlightService::class)->getHighlights($viewer, null, (int) $page->id);
+
+        return StoryHighlightResource::collection($highlights);
     }
 
     /**

@@ -112,6 +112,17 @@ class ModerationAppealController extends Controller
                     'message' => 'Votre compte ne fait l\'objet d\'aucune suspension active.',
                 ], 422);
             }
+        } elseif ($validated['sanction_type'] === 'restriction') {
+            $hasActiveRestriction = (bool) $user->restricted_until || UserAccountSanction::where('user_id', $user->id)
+                ->where('type', 'restriction')
+                ->where('is_active', true)
+                ->exists();
+
+            if (! $hasActiveRestriction) {
+                return response()->json([
+                    'message' => 'Votre compte ne fait l\'objet d\'aucune restriction active.',
+                ], 422);
+            }
         } elseif ($validated['sanction_type'] === 'warning') {
             $hasActiveWarning = UserAccountSanction::where('user_id', $user->id)
                 ->where('type', 'warning')

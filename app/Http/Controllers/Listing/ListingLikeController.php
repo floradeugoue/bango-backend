@@ -79,6 +79,8 @@ class ListingLikeController extends Controller
         $activePage = $request->attributes->get('acting_page') ?? $request->attributes->get('active_page');
 
         DB::transaction(function () use ($listing, $request, $activePage) {
+            Listing::where('id', $listing->id)->lockForUpdate()->first();
+
             /** @var User $user */
             $user = $request->user();
 

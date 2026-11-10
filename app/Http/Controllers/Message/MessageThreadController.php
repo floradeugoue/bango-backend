@@ -45,12 +45,21 @@ class MessageThreadController extends Controller
      */
     public function store(StoreMessageThreadRequest $request): JsonResponse
     {
-        $conversation = $this->threadService->getOrCreateDirectConversation(
-            user: $request->user(),
-            peerId: (int) $request->validated('peer_id'),
-            listingId: $request->validated('listing_id'),
-            metadata: $request->validated('metadata')
-        );
+        if ($request->filled('page_id')) {
+            $conversation = $this->threadService->getOrCreatePageConversation(
+                user: $request->user(),
+                pageId: (int) $request->validated('page_id'),
+                listingId: $request->validated('listing_id'),
+                metadata: $request->validated('metadata')
+            );
+        } else {
+            $conversation = $this->threadService->getOrCreateDirectConversation(
+                user: $request->user(),
+                peerId: (int) $request->validated('peer_id'),
+                listingId: $request->validated('listing_id'),
+                metadata: $request->validated('metadata')
+            );
+        }
 
         return (new ConversationResource($conversation))
             ->response()

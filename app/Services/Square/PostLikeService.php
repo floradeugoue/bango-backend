@@ -29,6 +29,8 @@ class PostLikeService
         $activePage = request()?->attributes?->get('active_page');
 
         return DB::transaction(function () use ($post, $user, $activePage) {
+            Post::where('id', $post->id)->lockForUpdate()->first();
+
             $attributes = ['post_id' => $post->id];
             if ($activePage) {
                 $attributes['page_id'] = $activePage->id;

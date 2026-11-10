@@ -17,8 +17,9 @@ class CopyrightDecisionRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'decision' => ['required', 'string', 'in:content_removed,sound_muted,dismissed'],
-            'decision_notes' => ['required', 'string', 'min:3', 'max:1000'],
+            'decision' => ['required', 'string', 'in:content_removed,sound_muted,dismissed,request_info'],
+            'decision_notes' => ['required_without:message', 'nullable', 'string', 'min:3', 'max:1000'],
+            'message' => ['required_without:decision_notes', 'nullable', 'string', 'min:3', 'max:1000'],
         ];
     }
 }

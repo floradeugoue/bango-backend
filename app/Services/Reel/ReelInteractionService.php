@@ -10,6 +10,7 @@ use App\Models\Reel\ReelView;
 use App\Models\User;
 use App\Notifications\Social\SocialNotification;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
 class ReelInteractionService
@@ -27,77 +28,117 @@ class ReelInteractionService
     {
         $activePage = request()?->attributes?->get('active_page');
 
-        return DB::transaction(function () use ($reel, $user, $type, $activePage) {
-            $query = ReelReaction::where('reel_id', $reel->id);
-            if ($activePage) {
-                $query->where('page_id', $activePage->id);
-            } else {
-                $query->where('user_id', $user->id)->whereNull('page_id');
-            }
+        try {
+            return DB::transaction(function () use ($reel, $user, $type, $activePage) {
+                /** @var Reel $lockedReel */
+                $lockedReel = Reel::lockForUpdate()->find($reel->id) ?? $reel;
 
-            $existing = $query->lockForUpdate()->first();
+                $query = ReelReaction::where('reel_id', $lockedReel->id);
+                if ($activePage) {
+                    $query->where('page_id', $activePage->id);
+                } else {
+                    $query->where('user_id', $user->id)->whereNull('page_id');
+                }
 
-            if (! $existing) {
-                // Création d'une nouvelle réaction
-                ReelReaction::create([
-                    'reel_id' => $reel->id,
-                    'user_id' => $user->id,
-                    'page_id' => $activePage?->id,
-                    'type' => $type,
-                ]);
+                $existing = $query->lockForUpdate()->first();
 
-                if ($type === ReelReactionType::Like) {
-                    $reel->increment('likes_count');
-                    if ($reel->user_id && $reel->user_id !== $user->id) {
-                        $author = User::find($reel->user_id);
-                        if ($author) {
-                            $targetPageId = $reel->page_id ?? null;
-                            $author->notify(new SocialNotification('like', $user, [
-                                'reel_id' => (string) $reel->id,
-                                'page_id' => $targetPageId,
-                                'actor_page_id' => $activePage?->id,
-                            ]));
+                if (! $existing) {
+                    try {
+                        ReelReaction::create([
+                            'reel_id' => $lockedReel->id,
+                            'user_id' => $user->id,
+                            'page_id' => $activePage?->id,
+                            'type' => $type,
+                        ]);
+
+                        if ($type === ReelReactionType::Like) {
+                            $lockedReel->increment('likes_count');
+                            if ($lockedReel->user_id && $lockedReel->user_id !== $user->id) {
+                                $author = User::find($lockedReel->user_id);
+                                if ($author) {
+                                    $targetPageId = $lockedReel->page_id ?? null;
+                                    $author->notify(new SocialNotification('like', $user, [
+                                        'reel_id' => (string) $lockedReel->id,
+                                        'page_id' => $targetPageId,
+                                        'actor_page_id' => $activePage?->id,
+                                    ]));
+                                }
+                            }
+                        } else {
+                            $lockedReel->increment('dislikes_count');
+                        }
+
+                        $userReaction = $type->value;
+                    } catch (QueryException) {
+                        $existingQuery = ReelReaction::where('reel_id', $lockedReel->id);
+                        if ($activePage) {
+                            $existingQuery->where('page_id', $activePage->id);
+                        } else {
+                            $existingQuery->where('user_id', $user->id)->whereNull('page_id');
+                        }
+                        $existing = $existingQuery->first();
+                        $userReaction = $existing
+                            ? ($existing->type instanceof ReelReactionType ? $existing->type->value : (string) $existing->type)
+                            : null;
+                    }
+                } elseif ($existing->type === $type) {
+                    $existing->delete();
+
+                    if ($type === ReelReactionType::Like) {
+                        if ($lockedReel->likes_count > 0) {
+                            $lockedReel->decrement('likes_count');
+                        }
+                    } else {
+                        if ($lockedReel->dislikes_count > 0) {
+                            $lockedReel->decrement('dislikes_count');
                         }
                     }
+
+                    $userReaction = null;
                 } else {
-                    $reel->increment('dislikes_count');
+                    $existing->update(['type' => $type]);
+
+                    if ($type === ReelReactionType::Like) {
+                        $lockedReel->increment('likes_count');
+                        if ($lockedReel->dislikes_count > 0) {
+                            $lockedReel->decrement('dislikes_count');
+                        }
+                    } else {
+                        $lockedReel->increment('dislikes_count');
+                        if ($lockedReel->likes_count > 0) {
+                            $lockedReel->decrement('likes_count');
+                        }
+                    }
+
+                    $userReaction = $type->value;
                 }
 
-                $userReaction = $type->value;
-            } elseif ($existing->type === $type) {
-                // Clic répété sur la même réaction : annulation / suppression
-                $existing->delete();
+                $lockedReel->refresh();
 
-                if ($type === ReelReactionType::Like) {
-                    $reel->decrement('likes_count');
-                } else {
-                    $reel->decrement('dislikes_count');
-                }
-
-                $userReaction = null;
+                return [
+                    'user_reaction' => $userReaction,
+                    'likes_count' => max(0, (int) $lockedReel->likes_count),
+                    'dislikes_count' => max(0, (int) $lockedReel->dislikes_count),
+                ];
+            });
+        } catch (QueryException) {
+            $freshReel = Reel::find($reel->id) ?? $reel;
+            $existingQuery = ReelReaction::where('reel_id', $freshReel->id);
+            if ($activePage) {
+                $existingQuery->where('page_id', $activePage->id);
             } else {
-                // Bascule d'une réaction à l'autre (ex: passage de Like à Dislike)
-                $existing->update(['type' => $type]);
-
-                if ($type === ReelReactionType::Like) {
-                    $reel->increment('likes_count');
-                    $reel->decrement('dislikes_count');
-                } else {
-                    $reel->increment('dislikes_count');
-                    $reel->decrement('likes_count');
-                }
-
-                $userReaction = $type->value;
+                $existingQuery->where('user_id', $user->id)->whereNull('page_id');
             }
-
-            $reel->refresh();
+            $existing = $existingQuery->first();
 
             return [
-                'user_reaction' => $userReaction,
-                'likes_count' => (int) $reel->likes_count,
-                'dislikes_count' => (int) $reel->dislikes_count,
+                'user_reaction' => $existing
+                    ? ($existing->type instanceof ReelReactionType ? $existing->type->value : (string) $existing->type)
+                    : null,
+                'likes_count' => max(0, (int) $freshReel->likes_count),
+                'dislikes_count' => max(0, (int) $freshReel->dislikes_count),
             ];
-        });
+        }
     }
 
     /**
@@ -112,27 +153,34 @@ class ReelInteractionService
     public function removeReaction(Reel $reel, User $user): array
     {
         return DB::transaction(function () use ($reel, $user) {
-            $existing = ReelReaction::where('reel_id', $reel->id)
+            /** @var Reel $lockedReel */
+            $lockedReel = Reel::lockForUpdate()->find($reel->id) ?? $reel;
+
+            $existing = ReelReaction::where('reel_id', $lockedReel->id)
                 ->where('user_id', $user->id)
                 ->lockForUpdate()
                 ->first();
 
             if ($existing) {
                 if ($existing->type === ReelReactionType::Like) {
-                    $reel->decrement('likes_count');
+                    if ($lockedReel->likes_count > 0) {
+                        $lockedReel->decrement('likes_count');
+                    }
                 } else {
-                    $reel->decrement('dislikes_count');
+                    if ($lockedReel->dislikes_count > 0) {
+                        $lockedReel->decrement('dislikes_count');
+                    }
                 }
 
                 $existing->delete();
             }
 
-            $reel->refresh();
+            $lockedReel->refresh();
 
             return [
                 'user_reaction' => null,
-                'likes_count' => (int) $reel->likes_count,
-                'dislikes_count' => (int) $reel->dislikes_count,
+                'likes_count' => max(0, (int) $lockedReel->likes_count),
+                'dislikes_count' => max(0, (int) $lockedReel->dislikes_count),
             ];
         });
     }

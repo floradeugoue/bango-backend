@@ -71,6 +71,7 @@ class SupportTicketResource extends JsonResource
             'rating' => $this->rating,
             'rating_comment' => $this->rating_comment,
             'rated_at' => $this->rated_at?->toIso8601String(),
+            'auto_close_days' => (int) config('support.auto_close_days', 5),
             'reopened_at' => $this->reopened_at?->toIso8601String(),
             'last_reply_at' => $this->last_reply_at?->toIso8601String(),
             'resolved_at' => $this->resolved_at?->toIso8601String(),

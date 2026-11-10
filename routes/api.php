@@ -314,6 +314,8 @@ Route::get('/posts/{post}', [PostController::class, 'show'])->whereNumber('post'
 Route::get('/search/pages', [PageSearchController::class, 'index'])->name('api.search.pages');
 // Consulter les annonces immobilières publiées par une page professionnelle
 Route::get('/pages/{page}/listings', [PageController::class, 'listings'])->name('api.pages.listings');
+// Consulter les collections À la une publiées par une page professionnelle
+Route::get('/pages/{page}/highlights', [PageController::class, 'highlights'])->name('api.pages.highlights');
 // Consulter les publications Square publiées par une page professionnelle
 Route::get('/pages/{page}/posts', [PageController::class, 'posts'])->name('api.pages.posts');
 // Consulter les Reels publiés par une page professionnelle
@@ -1559,6 +1561,9 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/{ticketId}/attachments/{attachmentId}', [SupportTicketController::class, 'downloadAttachment'])
             ->name('api.support.tickets.attachments.download');
     });
+
+    // Avis sur l'application (« Comment ça se passe pour toi ? »)
+    Route::post('/app-feedback', [\App\Http\Controllers\Support\AppFeedbackController::class, 'store'])->name('api.app-feedback');
 
     // Consulter les sanctions disciplinaires ou avertissements actifs sur mon compte
     Route::get('/me/sanctions', [SupportTicketController::class, 'mySanctions'])->name('api.me.sanctions');

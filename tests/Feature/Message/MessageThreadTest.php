@@ -2,12 +2,16 @@
 
 use App\Enums\Message\ConversationMemberRole;
 use App\Enums\Message\ConversationType;
+use App\Enums\Page\PageMemberStatus;
+use App\Enums\Page\PageRole;
 use App\Events\Message\ConversationCreated;
 use App\Events\Message\MessageRead;
 use App\Models\Listing\Listing;
 use App\Models\Message\Conversation;
 use App\Models\Message\ConversationMember;
 use App\Models\Message\Message;
+use App\Models\Page\Page;
+use App\Models\Page\PageMember;
 use App\Models\User;
 use Database\Seeders\SubscriptionCatalogSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -276,4 +280,109 @@ test('la liste des fils de discussion utilise display_name et charge avatar_url 
 
     expect($targetThread['latest_message']['sender']['name'])->toBe('Ben Messages')
         ->and($targetThread['latest_message']['sender']['avatar_url'])->toBe('https://example.com/ben.jpg');
+});
+
+test('un utilisateur peut ecrire a une page via page_id, reutiliser le fil existant, et le fil apparait dans l inbox de la page et pour chaque membre habilite sans exposer le proprietaire', function (): void {
+    $owner = User::factory()->create(['name' => 'Secret Owner', 'display_name' => 'Secret Owner']);
+    $editor = User::factory()->create(['name' => 'Page Editor', 'display_name' => 'Page Editor']);
+    $moderator = User::factory()->create(['name' => 'Page Moderator', 'display_name' => 'Page Moderator']);
+    $pendingMember = User::factory()->create(['name' => 'Pending Member', 'display_name' => 'Pending Member']);
+
+    $page = Page::factory()->create([
+        'owner_id' => $owner->id,
+        'name' => 'Agence Immo Douala',
+        'handle' => 'agence-immo-douala',
+        'logo_url' => 'https://example.com/page-logo.jpg',
+    ]);
+
+    PageMember::create([
+        'page_id' => $page->id,
+        'user_id' => $owner->id,
+        'role' => PageRole::Owner,
+        'status' => PageMemberStatus::Accepted,
+        'accepted_at' => now(),
+    ]);
+    PageMember::create([
+        'page_id' => $page->id,
+        'user_id' => $editor->id,
+        'role' => PageRole::Editor,
+        'status' => PageMemberStatus::Accepted,
+        'accepted_at' => now(),
+    ]);
+    PageMember::create([
+        'page_id' => $page->id,
+        'user_id' => $moderator->id,
+        'role' => PageRole::Moderator,
+        'status' => PageMemberStatus::Accepted,
+        'accepted_at' => now(),
+    ]);
+    PageMember::create([
+        'page_id' => $page->id,
+        'user_id' => $pendingMember->id,
+        'role' => PageRole::Moderator,
+        'status' => PageMemberStatus::Pending,
+    ]);
+
+    // 1. Alice écrit à la page via POST /api/messages/threads avec page_id
+    Passport::actingAs($this->alice);
+
+    $res1 = $this->postJson('/api/messages/threads', [
+        'page_id' => $page->id,
+    ]);
+
+    $res1->assertStatus(201)
+        ->assertJsonPath('data.type', 'page')
+        ->assertJsonPath('data.page_id', $page->id)
+        ->assertJsonPath('data.page.id', $page->id)
+        ->assertJsonPath('data.page.name', 'Agence Immo Douala')
+        ->assertJsonPath('data.title', 'Agence Immo Douala');
+
+    $threadId = $res1->json('data.id');
+
+    // Le client ne voit pas l'identité personnelle du propriétaire ou des gestionnaires dans members
+    $memberUserIdsForClient = collect($res1->json('data.members'))->pluck('user_id')->all();
+    expect($memberUserIdsForClient)->toBe([$this->alice->id]);
+
+    // 2. Un second appel réutilise le fil existant entre Alice et cette page
+    $res2 = $this->postJson('/api/messages/threads', [
+        'page_id' => $page->id,
+    ]);
+    $res2->assertStatus(201);
+    expect($res2->json('data.id'))->toBe($threadId);
+    expect(Conversation::where('page_id', $page->id)->count())->toBe(1);
+
+    // 3. Alice envoie un message dans le fil
+    $msgRes = $this->postJson("/api/messages/threads/{$threadId}/messages", [
+        'body' => 'Bonjour, avez-vous des appartements disponibles à Bonapriso ?',
+    ]);
+    $msgRes->assertStatus(201);
+
+    // 4. Le fil apparaît dans GET /api/pages/{page}/inbox pour les membres habilités
+    Passport::actingAs($owner);
+    $inboxRes = $this->getJson("/api/pages/{$page->id}/inbox");
+    $inboxRes->assertStatus(200);
+    $inboxIds = collect($inboxRes->json('data'))->pluck('id')->all();
+    expect($inboxIds)->toContain($threadId);
+
+    // 5. Le fil apparaît aussi pour chaque membre qui a le droit de répondre (Owner, Editor, Moderator), mais pas un membre non accepté
+    foreach ([$owner, $editor, $moderator] as $responder) {
+        Passport::actingAs($responder);
+        $threadsRes = $this->getJson('/api/messages/threads');
+        $threadsRes->assertStatus(200);
+        $ids = collect($threadsRes->json('data'))->pluck('id')->all();
+        expect($ids)->toContain($threadId);
+    }
+
+    Passport::actingAs($pendingMember);
+    $pendingThreads = $this->getJson('/api/messages/threads');
+    $pendingThreads->assertStatus(200);
+    expect(collect($pendingThreads->json('data'))->pluck('id')->all())->not->toContain($threadId);
+
+    // 6. Un modérateur de la page peut répondre au fil
+    Passport::actingAs($moderator);
+    $replyRes = $this->postJson("/api/messages/threads/{$threadId}/messages", [
+        'body' => 'Bonjour Alice, oui nous avons 2 T3 disponibles à Bonapriso.',
+    ]);
+    $replyRes->assertStatus(201);
+    expect(Message::find($replyRes->json('data.id'))?->page_id)->toBe($page->id);
 });

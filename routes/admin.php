@@ -38,6 +38,7 @@ use App\Http\Controllers\Admin\Moderation\AdminModerationTrendController;
 use App\Http\Controllers\Admin\RoleController;
 use App\Http\Controllers\Admin\Settings\AdminSystemSettingsController;
 use App\Http\Controllers\Admin\Shell\AdminNotificationController;
+use App\Http\Controllers\Admin\Shell\AdminPreferenceController;
 use App\Http\Controllers\Admin\Shell\AdminSearchController;
 use App\Http\Controllers\Admin\Shell\AdminShellController;
 use App\Http\Controllers\Admin\Shell\AdminWorkspaceController;
@@ -186,6 +187,13 @@ Route::middleware(['admin.session'])->group(function () {
     // Consulter l'espace de travail personnel de l'opérateur (tâches, assignations, raccourcis)
     Route::get('/me/workspace', [AdminWorkspaceController::class, 'workspace'])
         ->name('me.workspace');
+
+    // Consulter et enregistrer les préférences d'interface de l'opérateur (vues enregistrées, colonnes)
+    Route::get('/me/preferences', [AdminPreferenceController::class, 'index'])
+        ->name('me.preferences.index');
+    Route::put('/me/preferences/{key}', [AdminPreferenceController::class, 'upsert'])
+        ->where('key', '.*')
+        ->name('me.preferences.upsert');
 
     // Consulter la file d'attente des demandes soumises à la validation au principe des 4 yeux
     Route::get('/me/approvals', [AdminWorkspaceController::class, 'approvals'])

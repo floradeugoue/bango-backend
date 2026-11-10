@@ -348,6 +348,7 @@ class User extends Authenticatable
     public function blockedUsers(): BelongsToMany
     {
         return $this->belongsToMany(User::class, 'user_blocks', 'blocker_id', 'blocked_id')
+            ->withPivot(['page_id'])
             ->withTimestamps();
     }
 
@@ -357,6 +358,7 @@ class User extends Authenticatable
     public function blockedByUsers(): BelongsToMany
     {
         return $this->belongsToMany(User::class, 'user_blocks', 'blocked_id', 'blocker_id')
+            ->withPivot(['page_id'])
             ->withTimestamps();
     }
 

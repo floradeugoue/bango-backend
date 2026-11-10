@@ -28,13 +28,23 @@ class ReelCommentResource extends JsonResource
 
         $userReaction = null;
         if ($user) {
+            $activePage = $request->attributes->get('acting_page') ?? $request->attributes->get('active_page');
+            $activePageId = $activePage?->id;
+
             if ($this->relationLoaded('reactions')) {
-                $reaction = $this->reactions->firstWhere('user_id', $user->id);
+                $reaction = $this->reactions
+                    ->where('user_id', $user->id)
+                    ->first(function ($r) use ($activePageId) {
+                        return $activePageId ? (int) $r->page_id === (int) $activePageId : is_null($r->page_id);
+                    });
                 $userReaction = $reaction?->type instanceof ReelReactionType
                     ? $reaction->type->value
                     : ($reaction?->type ?? null);
             } else {
-                $reaction = $this->reactions()->where('user_id', $user->id)->first();
+                $reaction = $this->reactions()
+                    ->where('user_id', $user->id)
+                    ->when($activePageId, fn ($q) => $q->where('page_id', $activePageId), fn ($q) => $q->whereNull('page_id'))
+                    ->first();
                 $userReaction = $reaction?->type instanceof ReelReactionType
                     ? $reaction->type->value
                     : ($reaction?->type ?? null);

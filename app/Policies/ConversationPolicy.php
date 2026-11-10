@@ -14,14 +14,18 @@ class ConversationPolicy
      */
     public function view(User $user, Conversation $conversation): bool
     {
-        if ($conversation->type === ConversationType::Page && $conversation->page_id) {
+        if ($conversation->type === ConversationType::Page || $conversation->page_id) {
             /** @var Page|null $page */
             $page = $conversation->relationLoaded('page') ? $conversation->page : Page::find($conversation->page_id);
             if ($page && $page->members()->where('user_id', $user->id)->where('status', 'revoked')->exists()) {
                 return false;
             }
 
-            return $page ? $page->canUserAccessInbox($user) : false;
+            if ($page && $page->canUserAccessInbox($user)) {
+                return true;
+            }
+
+            return (int) $conversation->created_by_id === (int) $user->id || $conversation->isMember($user->id);
         }
 
         return $conversation->isMember($user->id);
@@ -32,7 +36,7 @@ class ConversationPolicy
      */
     public function sendMessage(User $user, Conversation $conversation): bool
     {
-        if ($conversation->type === ConversationType::Page && $conversation->page_id) {
+        if ($conversation->type === ConversationType::Page || $conversation->page_id) {
             /** @var Page|null $page */
             $page = $conversation->relationLoaded('page') ? $conversation->page : Page::find($conversation->page_id);
             // EDGE-02 : Révocation immédiate
@@ -40,7 +44,15 @@ class ConversationPolicy
                 return false;
             }
 
-            return $page ? $page->canUserAccessInbox($user) : false;
+            if ($conversation->is_read_only) {
+                return false;
+            }
+
+            if ($page && $page->canUserAccessInbox($user)) {
+                return true;
+            }
+
+            return (int) $conversation->created_by_id === (int) $user->id || $conversation->isMember($user->id);
         }
 
         if ($conversation->is_read_only) {

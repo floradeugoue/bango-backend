@@ -21,8 +21,15 @@ class CopyrightClaimController extends Controller
         $user = $request->user();
         if ($user) {
             $validated['claimant_id'] = $user->id;
+            if (empty($validated['country']) && ! empty($user->country_code)) {
+                $validated['country'] = strtoupper((string) $user->country_code);
+            }
         }
 
+        $validated['claim_kind'] = $validated['claim_kind'] ?? 'media';
+        if (! empty($validated['country'])) {
+            $validated['country'] = strtoupper((string) $validated['country']);
+        }
         $validated['status'] = 'pending';
 
         $claim = CopyrightClaim::create($validated);
@@ -33,6 +40,8 @@ class CopyrightClaimController extends Controller
             'data' => [
                 'id' => $claim->id,
                 'reference' => $claim->reference,
+                'claim_kind' => $claim->claim_kind,
+                'country' => $claim->country,
                 'work_title' => $claim->work_title,
                 'content_type' => $claim->content_type,
                 'content_id' => $claim->content_id,

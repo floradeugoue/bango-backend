@@ -2,12 +2,15 @@
 
 namespace App\Services\Message;
 
+use App\Enums\Message\ConversationMemberRole;
 use App\Enums\Message\MessageType;
 use App\Events\Message\MessageRead;
 use App\Events\Message\MessageSent;
 use App\Models\Delegation\Delegation;
 use App\Models\Message\Conversation;
+use App\Models\Message\ConversationMember;
 use App\Models\Message\Message;
+use App\Models\Page\Page;
 use App\Models\User;
 use App\Notifications\Message\NewMessageNotification;
 use App\Notifications\Message\NewStoryReplyNotification;
@@ -29,12 +32,12 @@ class MessageService
      */
     public function listThreadMessages(Conversation $conversation, User $user, int $perPage = 30): LengthAwarePaginator
     {
-        if (! $conversation->isMember($user->id)) {
+        $member = $this->ensureConversationMember($conversation, $user);
+        if (! $member) {
             throw new AccessDeniedHttpException('Vous n\'êtes pas membre de cette conversation.');
         }
 
-        $member = $conversation->member($user->id);
-        $member?->markAsDelivered();
+        $member->markAsDelivered();
 
         return $conversation->messages()
             ->visibleTo($user->id)
@@ -50,8 +53,9 @@ class MessageService
      */
     public function sendMessage(Conversation $conversation, User $sender, array $data): Message
     {
-        // 1. Vérification de l'appartenance
-        if (! $conversation->isMember($sender->id)) {
+        // 1. Vérification de l'appartenance (incluant les membres autorisés d'une Page)
+        $senderMember = $this->ensureConversationMember($conversation, $sender);
+        if (! $senderMember) {
             throw new AccessDeniedHttpException('Vous n\'êtes pas membre de cette conversation.');
         }
 
@@ -125,11 +129,20 @@ class MessageService
             }
 
             $activePage = request()?->attributes?->get('active_page');
+            $effectivePageId = $activePage?->id;
+
+            if (! $effectivePageId && $conversation->page_id && (int) $conversation->created_by_id !== (int) $sender->id) {
+                /** @var Page|null $convPage */
+                $convPage = $conversation->relationLoaded('page') ? $conversation->page : Page::find($conversation->page_id);
+                if ($convPage && $convPage->canUserAccessInbox($sender)) {
+                    $effectivePageId = $convPage->id;
+                }
+            }
 
             $message = Message::create([
                 'conversation_id' => $conversation->id,
                 'sender_id' => $sender->id,
-                'page_id' => $activePage?->id,
+                'page_id' => $effectivePageId,
                 'type' => $type,
                 'body' => $data['body'] ?? null,
                 'client_message_id' => $data['client_message_id'] ?? null,
@@ -182,7 +195,7 @@ class MessageService
      */
     public function markAsRead(Conversation $conversation, User $user, ?string $messageId = null): void
     {
-        $member = $conversation->member($user->id);
+        $member = $this->ensureConversationMember($conversation, $user);
         if (! $member) {
             throw new AccessDeniedHttpException('Vous n\'êtes pas membre de cette conversation.');
         }
@@ -199,12 +212,49 @@ class MessageService
      */
     public function markAsDelivered(Conversation $conversation, User $user): void
     {
-        $member = $conversation->member($user->id);
+        $member = $this->ensureConversationMember($conversation, $user);
         if (! $member) {
             throw new AccessDeniedHttpException('Vous n\'êtes pas membre de cette conversation.');
         }
 
         $member->markAsDelivered();
+    }
+
+    /**
+     * Vérifie ou synchronise l'appartenance d'un utilisateur (notamment membre autorisé d'une Page) au fil.
+     */
+    protected function ensureConversationMember(Conversation $conversation, User $user): ?ConversationMember
+    {
+        if ($conversation->page_id) {
+            /** @var Page|null $page */
+            $page = $conversation->relationLoaded('page') ? $conversation->page : Page::find($conversation->page_id);
+            if ($page && $page->members()->where('user_id', $user->id)->where('status', 'revoked')->exists()) {
+                return null;
+            }
+
+            if ($page && $page->canUserAccessInbox($user)) {
+                $member = ConversationMember::firstOrCreate([
+                    'conversation_id' => $conversation->id,
+                    'user_id' => $user->id,
+                ], [
+                    'role' => ConversationMemberRole::Admin,
+                    'joined_at' => now(),
+                ]);
+
+                if ($member->left_at !== null) {
+                    $member->update(['left_at' => null, 'joined_at' => now()]);
+                }
+
+                return $member;
+            }
+        }
+
+        $member = $conversation->member($user->id);
+        if ($member && $member->left_at === null) {
+            return $member;
+        }
+
+        return null;
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace App\Services\Story;
 
+use App\Models\Page\Page;
 use App\Models\Story\Story;
 use App\Models\Story\StoryHighlight;
 use App\Models\User;
@@ -12,12 +13,45 @@ use Illuminate\Validation\ValidationException;
 class HighlightService
 {
     /**
-     * Récupère les collections À la une visibles pour un utilisateur.
+     * Récupère les collections À la une visibles pour un utilisateur ou une page.
      *
      * @return Collection<int, StoryHighlight>
      */
-    public function getHighlights(User $viewer, ?int $authorId = null): Collection
+    public function getHighlights(User $viewer, ?int $authorId = null, ?int $pageId = null): Collection
     {
+        $activePage = request()?->attributes?->get('acting_page') ?? request()?->attributes?->get('active_page');
+        $effectivePageId = $pageId ?? ($authorId === null ? $activePage?->id : null);
+
+        if ($effectivePageId) {
+            $page = Page::find($effectivePageId);
+            if (! $page) {
+                return new Collection;
+            }
+
+            // Vérification des blocages liés à la page
+            if ($viewer->hasBlocked($page->owner_id) || $viewer->isBlockedBy($page->owner_id)) {
+                return new Collection;
+            }
+
+            $highlights = StoryHighlight::where('page_id', $effectivePageId)
+                ->with(['coverStory', 'stories.slides.stickers', 'user', 'page'])
+                ->orderBy('order', 'asc')
+                ->get();
+
+            return $highlights->map(function (StoryHighlight $highlight) use ($viewer) {
+                $filteredStories = $highlight->stories->filter(function (Story $story) use ($viewer) {
+                    return $story->isAccessibleBy($viewer);
+                });
+                $highlight->setRelation('stories', $filteredStories->values());
+
+                return $highlight;
+            })->filter(function (StoryHighlight $highlight) use ($viewer, $page) {
+                $isPageManager = $page->canUserAccessInbox($viewer);
+
+                return $isPageManager || $highlight->stories->isNotEmpty();
+            })->values();
+        }
+
         $targetUserId = $authorId ?? $viewer->id;
         $targetUser = User::find($targetUserId);
 
@@ -31,6 +65,7 @@ class HighlightService
         }
 
         $highlights = StoryHighlight::where('user_id', $targetUserId)
+            ->whereNull('page_id')
             ->with(['coverStory', 'stories.slides.stickers', 'user'])
             ->orderBy('order', 'asc')
             ->get();
@@ -76,14 +111,18 @@ class HighlightService
             ]);
         }
 
-        // Vérifier que toutes les stories sélectionnées appartiennent bien à l'utilisateur
+        $activePage = request()?->attributes?->get('acting_page') ?? request()?->attributes?->get('active_page');
+        $activePageId = $activePage?->id;
+
+        // Vérifier que toutes les stories sélectionnées appartiennent bien à l'utilisateur ou à la page active
         $validStories = Story::where('user_id', $user->id)
+            ->when($activePageId, fn ($q) => $q->where('page_id', $activePageId), fn ($q) => $q->whereNull('page_id'))
             ->whereIn('id', $storyIds)
             ->get();
 
         if ($validStories->count() !== count($storyIds)) {
             throw ValidationException::withMessages([
-                'story_ids' => ['Une ou plusieurs Stories sélectionnées n\'appartiennent pas à votre compte.'],
+                'story_ids' => ['Une ou plusieurs Stories sélectionnées n\'appartiennent pas à votre compte ou à l\'identité active.'],
             ]);
         }
 
@@ -94,11 +133,14 @@ class HighlightService
             ]);
         }
 
-        return DB::transaction(function () use ($user, $title, $coverStoryId, $data, $storyIds) {
-            $maxOrder = (int) StoryHighlight::where('user_id', $user->id)->max('order');
+        return DB::transaction(function () use ($user, $title, $coverStoryId, $data, $storyIds, $activePageId) {
+            $maxOrder = (int) StoryHighlight::where('user_id', $user->id)
+                ->when($activePageId, fn ($q) => $q->where('page_id', $activePageId), fn ($q) => $q->whereNull('page_id'))
+                ->max('order');
 
             $highlight = StoryHighlight::create([
                 'user_id' => $user->id,
+                'page_id' => $activePageId,
                 'title' => $title,
                 'cover_story_id' => $coverStoryId ?? $storyIds[0],
                 'cover_media_url' => $data['cover_media_url'] ?? null,
@@ -120,13 +162,18 @@ class HighlightService
      */
     public function getHighlight(string $id, User $viewer): ?StoryHighlight
     {
-        $highlight = StoryHighlight::with(['coverStory', 'stories.slides.stickers', 'user'])->find($id);
+        $highlight = StoryHighlight::with(['coverStory', 'stories.slides.stickers', 'user', 'page'])->find($id);
 
         if (! $highlight) {
             return null;
         }
 
-        if ($viewer->id !== $highlight->user_id && ($viewer->hasBlocked($highlight->user_id) || $viewer->isBlockedBy($highlight->user_id))) {
+        if ($highlight->page_id) {
+            $page = $highlight->page;
+            if ($page && ($viewer->hasBlocked($page->owner_id) || $viewer->isBlockedBy($page->owner_id))) {
+                return null;
+            }
+        } elseif ($viewer->id !== $highlight->user_id && ($viewer->hasBlocked($highlight->user_id) || $viewer->isBlockedBy($highlight->user_id))) {
             return null;
         }
 
@@ -134,7 +181,11 @@ class HighlightService
             return $story->isAccessibleBy($viewer);
         });
 
-        if ($highlight->user_id !== $viewer->id && $filteredStories->isEmpty()) {
+        $isOwnerOrManager = $highlight->page_id
+            ? ($highlight->page && $highlight->page->canUserAccessInbox($viewer))
+            : ($highlight->user_id === $viewer->id);
+
+        if (! $isOwnerOrManager && $filteredStories->isEmpty()) {
             return null;
         }
 
@@ -148,9 +199,23 @@ class HighlightService
      */
     public function deleteHighlight(string $id, User $user): bool
     {
-        $highlight = StoryHighlight::where('user_id', $user->id)->find($id);
+        $highlight = StoryHighlight::find($id);
 
         if (! $highlight) {
+            throw ValidationException::withMessages([
+                'highlight' => ['Collection introuvable ou non autorisée.'],
+            ]);
+        }
+
+        $canDelete = false;
+        if ($highlight->page_id) {
+            $page = Page::find($highlight->page_id);
+            $canDelete = $page && $page->canUserPublish($user);
+        } else {
+            $canDelete = (int) $highlight->user_id === (int) $user->id;
+        }
+
+        if (! $canDelete) {
             throw ValidationException::withMessages([
                 'highlight' => ['Collection introuvable ou non autorisée.'],
             ]);

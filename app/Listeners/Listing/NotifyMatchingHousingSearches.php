@@ -136,7 +136,10 @@ class NotifyMatchingHousingSearches implements ShouldQueue
                         $this->sendPushNotification($user, $listing);
                     }
 
-                    $alert->update(['last_triggered_at' => now()]);
+                    $alert->update([
+                        'last_triggered_at' => now(),
+                        'last_matched_at' => now(),
+                    ]);
                 } catch (\Throwable $e) {
                     Log::warning('Échec notification alerte recherche : '.$e->getMessage(), [
                         'user_id' => $user->id,

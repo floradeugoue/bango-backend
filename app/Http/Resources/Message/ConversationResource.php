@@ -47,9 +47,18 @@ class ConversationResource extends JsonResource
 
         // Titre par défaut : pour les conversations directes sans titre explicite, utiliser le nom de l'interlocuteur
         $title = $this->title;
+        $avatarUrl = $this->avatar_url;
         $isMuted = false;
         $isArchived = false;
         $pinnedAt = null;
+        $page = $this->page_id
+            ? ($this->relationLoaded('page') ? $this->page : $this->page()->first())
+            : null;
+        $activePage = $request->attributes->get('active_page');
+        $isPageClientViewer = $page
+            && $currentUserId
+            && (int) $this->created_by_id === (int) $currentUserId
+            && (! $activePage || (int) $activePage->id !== (int) $page->id);
 
         if ($currentUserId) {
             $currentMember = $this->members->firstWhere('user_id', $currentUserId);
@@ -57,7 +66,18 @@ class ConversationResource extends JsonResource
             $pinnedAt = $currentMember?->pinned_at?->toIso8601String();
             $isArchived = in_array($currentUserId, $this->metadata['archived_by'] ?? [], true);
 
-            if (! $title && $this->type === ConversationType::Direct) {
+            if ($page) {
+                if ($isPageClientViewer) {
+                    $title = $page->name ?: $title;
+                    $avatarUrl = $page->logo_url ?: $avatarUrl;
+                } else {
+                    $creator = $this->relationLoaded('creator') ? $this->creator : $this->creator()->first();
+                    if ($creator) {
+                        $title = $creator->display_name ?: ($creator->name ?: ($creator->handle ?: $title));
+                        $avatarUrl = $creator->avatar_url ?: $avatarUrl;
+                    }
+                }
+            } elseif (! $title && $this->type === ConversationType::Direct) {
                 $otherMember = $this->members->firstWhere('user_id', '!=', $currentUserId);
                 $otherUser = $otherMember?->user;
                 if ($otherUser) {
@@ -66,12 +86,30 @@ class ConversationResource extends JsonResource
             }
         }
 
+        $visibleMembers = $this->whenLoaded('members', function () use ($isPageClientViewer, $currentUserId) {
+            $members = $this->members;
+            if ($isPageClientViewer && $currentUserId) {
+                $members = $members->where('user_id', $currentUserId)->values();
+            }
+
+            return ConversationMemberResource::collection($members);
+        });
+
         return [
             'id' => (string) $this->id,
             'thread_id' => (string) $this->id,
             'type' => $this->type->value,
+            'page_id' => $this->page_id ? (int) $this->page_id : null,
+            'page' => $page ? [
+                'id' => (int) $page->id,
+                'name' => $page->name,
+                'handle' => $page->handle,
+                'logo_url' => $page->logo_url,
+                'avatar_url' => $page->logo_url,
+                'is_certified' => $page->isCertified(),
+            ] : null,
             'title' => $title,
-            'avatar_url' => $this->avatar_url,
+            'avatar_url' => $avatarUrl,
             'is_muted' => $isMuted,
             'is_archived' => $isArchived,
             'pinned_at' => $pinnedAt,
@@ -95,7 +133,7 @@ class ConversationResource extends JsonResource
                     'agent_id' => $this->listing->agent_id,
                 ];
             }),
-            'members' => ConversationMemberResource::collection($this->whenLoaded('members')),
+            'members' => $visibleMembers,
             'latest_message' => (function () use ($currentUserId) {
                 if (! $this->relationLoaded('latestMessage') || ! $this->latestMessage) {
                     return null;

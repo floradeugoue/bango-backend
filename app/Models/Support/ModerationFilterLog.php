@@ -23,6 +23,9 @@ class ModerationFilterLog extends Model
         'detected_pattern',
         'original_text',
         'action_taken',
+        'step',
+        'restricted_until',
+        'sanction_id',
         'created_at',
     ];
 
@@ -32,6 +35,8 @@ class ModerationFilterLog extends Model
     protected function casts(): array
     {
         return [
+            'step' => 'integer',
+            'restricted_until' => 'datetime',
             'created_at' => 'datetime',
         ];
     }
@@ -39,5 +44,10 @@ class ModerationFilterLog extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function sanction(): BelongsTo
+    {
+        return $this->belongsTo(UserAccountSanction::class, 'sanction_id');
     }
 }

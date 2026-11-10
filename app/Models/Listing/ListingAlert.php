@@ -36,9 +36,11 @@ class ListingAlert extends Model
         'push',
         'email',
         'is_active',
+        'paused_reason',
         'enabled',
         'disabled_at',
         'last_triggered_at',
+        'last_matched_at',
     ];
 
     protected function casts(): array
@@ -62,6 +64,7 @@ class ListingAlert extends Model
             'enabled' => 'boolean',
             'disabled_at' => 'datetime',
             'last_triggered_at' => 'datetime',
+            'last_matched_at' => 'datetime',
         ];
     }
 
