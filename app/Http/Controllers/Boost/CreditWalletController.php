@@ -87,20 +87,22 @@ class CreditWalletController extends Controller
             idempotencyKey: $request->input('idempotency_key')
         );
 
-        AdminAuditLog::logChainedEvent(
-            event: 'finance.wallet_manual_credit',
-            operator: $operator,
-            targetType: 'User',
-            targetId: (string) $targetUser->id,
-            targetLabel: "Crédit manuel de {$request->input('amount')} crédits BANGO à {$targetUser->name} ({$targetUser->email})",
-            context: [
-                'amount' => (float) $request->input('amount'),
-                'reason' => $reason,
-                'target_user_id' => $targetUser->id,
-                'balance_before' => $transaction->balance_before,
-                'balance_after' => $transaction->balance_after,
-            ]
-        );
+        if ($transaction->wasRecentlyCreated) {
+            AdminAuditLog::logChainedEvent(
+                event: 'finance.wallet_manual_credit',
+                operator: $operator,
+                targetType: 'User',
+                targetId: (string) $targetUser->id,
+                targetLabel: "Crédit manuel de {$request->input('amount')} crédits BANGO à {$targetUser->name} ({$targetUser->email})",
+                context: [
+                    'amount' => (float) $request->input('amount'),
+                    'reason' => $reason,
+                    'target_user_id' => $targetUser->id,
+                    'balance_before' => $transaction->balance_before,
+                    'balance_after' => $transaction->balance_after,
+                ]
+            );
+        }
 
         return (new CreditTransactionResource($transaction))
             ->response()
@@ -130,20 +132,22 @@ class CreditWalletController extends Controller
             idempotencyKey: $validated['idempotency_key'] ?? null
         );
 
-        AdminAuditLog::logChainedEvent(
-            event: 'finance.wallet_manual_credit',
-            operator: $operator,
-            targetType: 'User',
-            targetId: (string) $user->id,
-            targetLabel: "Crédit manuel de {$validated['amount']} crédits BANGO à {$user->name} ({$user->email})",
-            context: [
-                'amount' => (float) $validated['amount'],
-                'reason' => $validated['reason'],
-                'target_user_id' => $user->id,
-                'balance_before' => $transaction->balance_before,
-                'balance_after' => $transaction->balance_after,
-            ]
-        );
+        if ($transaction->wasRecentlyCreated) {
+            AdminAuditLog::logChainedEvent(
+                event: 'finance.wallet_manual_credit',
+                operator: $operator,
+                targetType: 'User',
+                targetId: (string) $user->id,
+                targetLabel: "Crédit manuel de {$validated['amount']} crédits BANGO à {$user->name} ({$user->email})",
+                context: [
+                    'amount' => (float) $validated['amount'],
+                    'reason' => $validated['reason'],
+                    'target_user_id' => $user->id,
+                    'balance_before' => $transaction->balance_before,
+                    'balance_after' => $transaction->balance_after,
+                ]
+            );
+        }
 
         return (new CreditTransactionResource($transaction))
             ->response()

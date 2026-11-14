@@ -48,7 +48,7 @@ class NotificationPreferenceService
             }
         }
 
-        // 2. Paiements : rappels d'échec de paiement, renouvellement d'abonnement, factures, transactions
+        // 2. Paiements : rappels d'échec de paiement, renouvellement d'abonnement, factures, transactions, évolution tarifaire
         $paymentKeywords = [
             'payment',
             'renewal',
@@ -57,6 +57,8 @@ class NotificationPreferenceService
             'payout',
             'billing',
             'invoice',
+            'pricing',
+            'price_change',
         ];
 
         foreach ($paymentKeywords as $keyword) {
@@ -86,7 +88,7 @@ class NotificationPreferenceService
         }
 
         // Likes / J'aime
-        if ($type === 'like' || str_contains($className, 'like') || $type === 'post_like' || $type === 'reel_like') {
+        if ($type === 'like' || str_contains($className, 'like') || $type === 'post_like' || $type === 'reel_like' || $type === 'story_like') {
             return 'likes';
         }
 

@@ -8,6 +8,7 @@ use App\Models\Subscription\Subscription;
 use App\Models\Subscription\SubscriptionPrice;
 use App\Models\Subscription\SubscriptionProduct;
 use App\Models\User;
+use App\Services\Legal\LegalDocumentService;
 use App\Services\Subscription\BadgeResolutionService;
 use App\Services\Subscription\SubscriptionService;
 use Illuminate\Http\JsonResponse;
@@ -119,6 +120,19 @@ class SubscriptionController extends Controller
             ], 404);
         }
 
+        if ($price->required_terms_version) {
+            $legalService = app(LegalDocumentService::class);
+            if (! $legalService->hasUserAcceptedVersion($user, $price->required_terms_version)) {
+                return response()->json([
+                    'message' => "Vous devez accepter la version {$price->required_terms_version} des conditions générales d'utilisation pour souscrire à ce tarif.",
+                    'error' => 'TERMS_ACCEPTANCE_REQUIRED',
+                    'required_version' => $price->required_terms_version,
+                    'accepted_version' => $user->accepted_terms_version,
+                    'document_slug' => LegalDocumentService::TERMS_SLUG,
+                ], 403);
+            }
+        }
+
         $now = now();
         $baseAmount = (float) $price->price_amount;
         $currency = $price->currency;
@@ -192,6 +206,19 @@ class SubscriptionController extends Controller
             return response()->json([
                 'message' => 'Veuillez spécifier soit un price_id, soit un code d\'offre et une cadence.',
             ], 422);
+        }
+
+        if ($price->required_terms_version) {
+            $legalService = app(LegalDocumentService::class);
+            if (! $legalService->hasUserAcceptedVersion($user, $price->required_terms_version)) {
+                return response()->json([
+                    'message' => "Vous devez accepter la version {$price->required_terms_version} des conditions générales d'utilisation pour souscrire à ce tarif.",
+                    'error' => 'TERMS_ACCEPTANCE_REQUIRED',
+                    'required_version' => $price->required_terms_version,
+                    'accepted_version' => $user->accepted_terms_version,
+                    'document_slug' => LegalDocumentService::TERMS_SLUG,
+                ], 403);
+            }
         }
 
         $prepared = $service->prepareSubscription($user, $price, $request->all());

@@ -25,8 +25,13 @@ class ModerationDecisionNotification extends Notification implements ShouldQueue
     {
         $subject = match ($this->action) {
             'warn_author' => 'Avertissement de modération — BANGO',
+            'warn_page' => 'Avertissement concernant votre page — BANGO',
+            'suspend_page' => 'Suspension de votre page professionnelle — BANGO',
+            'unsuspend_page' => 'Levée de suspension de votre page professionnelle — BANGO',
             'request_correction' => 'Demande de correction de contenu — BANGO',
             'suspend_author' => 'Suspension temporaire de votre compte — BANGO',
+            'unsuspend_author' => 'Levée de la suspension de votre compte — BANGO',
+            'unblock_author' => 'Déblocage de votre compte — BANGO',
             'restrict_author', 'restriction' => 'Restriction temporaire de votre compte — BANGO',
             'remove' => 'Retrait de contenu par la modération — BANGO',
             'hide' => 'Masquage de contenu par la modération — BANGO',
@@ -41,6 +46,26 @@ class ModerationDecisionNotification extends Notification implements ShouldQueue
             $mail->line('Vous avez reçu un avertissement officiel de modération suite à un signalement de contenu.')
                 ->line("Motif de l'avertissement : {$this->justification}")
                 ->line('Veuillez vous conformer aux conditions d\'utilisation de la plateforme.');
+        } elseif ($this->action === 'warn_page') {
+            $mail->line('Votre page professionnelle a fait l\'objet d\'un avertissement officiel de modération suite à un signalement.')
+                ->line("Motif de l'avertissement : {$this->justification}")
+                ->line('Veuillez vous conformer aux conditions d\'utilisation de la plateforme.');
+        } elseif ($this->action === 'suspend_page') {
+            $mail->line('Votre page professionnelle a fait l\'objet d\'une mesure de suspension par l\'équipe de modération.')
+                ->line("Motif : {$this->justification}")
+                ->line('Votre compte personnel reste actif. Vous disposez d\'un droit de recours via notre centre de support.');
+        } elseif ($this->action === 'unsuspend_page') {
+            $mail->line('La suspension de votre page professionnelle a été levée par notre équipe de modération.')
+                ->line("Précisions : {$this->justification}")
+                ->line('Votre page est de nouveau active et accessible.');
+        } elseif ($this->action === 'unsuspend_author') {
+            $mail->line('La suspension de votre compte utilisateur a été levée par notre équipe de modération.')
+                ->line("Précisions : {$this->justification}")
+                ->line('Votre compte est de nouveau actif et pleinement accessible.');
+        } elseif ($this->action === 'unblock_author') {
+            $mail->line('Le blocage de votre compte utilisateur a été levé par notre équipe de modération.')
+                ->line("Précisions : {$this->justification}")
+                ->line('Votre compte est de nouveau actif et vous pouvez vous reconnecter.');
         } elseif ($this->action === 'request_correction') {
             $untilFormatted = $this->suspendedUntil ? $this->suspendedUntil->format('d/m/Y à H:i') : 'dans le délai imparti';
             $mail->line("Une demande de correction a été émise sur votre contenu avant le {$untilFormatted}.")
@@ -80,6 +105,11 @@ class ModerationDecisionNotification extends Notification implements ShouldQueue
         $locale = $notifiable->locale ?? 'fr';
         $message = match ($this->action) {
             'warn_author' => ($locale === 'en' ? 'Moderation warning: ' : 'Avertissement de modération : ').$this->justification,
+            'warn_page' => ($locale === 'en' ? 'Page moderation warning: ' : 'Avertissement concernant votre page : ').$this->justification,
+            'suspend_page' => ($locale === 'en' ? 'Page suspended: ' : 'Page professionnelle suspendue : ').$this->justification,
+            'unsuspend_page' => ($locale === 'en' ? 'Page suspension lifted: ' : 'Suspension de la page levée : ').$this->justification,
+            'unsuspend_author' => ($locale === 'en' ? 'Account suspension lifted: ' : 'Suspension du compte levée : ').$this->justification,
+            'unblock_author' => ($locale === 'en' ? 'Account unblocked: ' : 'Déblocage du compte : ').$this->justification,
             'request_correction' => ($locale === 'en'
                 ? 'Correction requested before '.($this->suspendedUntil ? $this->suspendedUntil->format('d/m/Y H:i') : 'deadline').'. Reason: '.$this->justification
                 : 'Correction demandée avant le '.($this->suspendedUntil ? $this->suspendedUntil->format('d/m/Y à H:i') : "l'échéance").'. Motif : '.$this->justification),

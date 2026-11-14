@@ -6,6 +6,8 @@ use App\Enums\Delegation\DelegationStatus;
 use App\Enums\Message\ConversationType;
 use App\Models\Delegation\Delegation;
 use App\Models\Message\Conversation;
+use App\Models\Page\PageMember;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -54,7 +56,7 @@ class ConversationResource extends JsonResource
         $page = $this->page_id
             ? ($this->relationLoaded('page') ? $this->page : $this->page()->first())
             : null;
-        $activePage = $request->attributes->get('active_page');
+        $activePage = $request->attributes->get('active_page') ?? $request->attributes->get('acting_page');
         $isPageClientViewer = $page
             && $currentUserId
             && (int) $this->created_by_id === (int) $currentUserId
@@ -186,6 +188,29 @@ class ConversationResource extends JsonResource
                     'agent_avatar_url' => $agent->avatar_url,
                     'landlord_id' => $listing->owner_id,
                     'label' => "Au nom du bailleur ({$agent->name})",
+                ];
+            })(),
+            'assigned_to_id' => $this->assigned_to_id ? (int) $this->assigned_to_id : null,
+            'assigned_to' => (function () {
+                $assignedUser = $this->relationLoaded('assignedTo')
+                    ? $this->assignedTo
+                    : ($this->assigned_to_id ? User::find($this->assigned_to_id) : null);
+
+                if (! $assignedUser) {
+                    return null;
+                }
+
+                $pageMember = $this->page_id
+                    ? PageMember::where('page_id', $this->page_id)->where('user_id', $assignedUser->id)->first()
+                    : null;
+
+                return [
+                    'id' => (int) $assignedUser->id,
+                    'user_id' => (int) $assignedUser->id,
+                    'member_id' => $pageMember ? (int) $pageMember->id : (int) $assignedUser->id,
+                    'name' => $assignedUser->display_name ?: $assignedUser->name,
+                    'handle' => $assignedUser->handle,
+                    'avatar_url' => $assignedUser->avatar_url,
                 ];
             })(),
             'metadata' => $this->metadata ?? [],

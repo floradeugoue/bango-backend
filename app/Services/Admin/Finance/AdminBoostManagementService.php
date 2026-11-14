@@ -47,8 +47,7 @@ class AdminBoostManagementService
             })
             ->update(['status' => CampaignStatus::Completed->value]);
 
-        $query = Campaign::with(['user:id,name,email,phone,handle', 'page:id,name,slug'])
-            ->orderByDesc('created_at');
+        $query = Campaign::query();
 
         if (! empty($filters['user_id'])) {
             $query->where('user_id', (int) $filters['user_id']);
@@ -84,8 +83,9 @@ class AdminBoostManagementService
             });
         }
 
-        // Compteurs d'onglets et totaux calculés avant filtre de statut
+        // Compteurs d'onglets et totaux calculés avant filtre de statut (requête propre sans tri ni eager loading)
         $statusCounts = (clone $query)
+            ->reorder()
             ->selectRaw('status, count(*) as count')
             ->groupBy('status')
             ->pluck('count', 'status')
@@ -94,8 +94,8 @@ class AdminBoostManagementService
         $counts = array_merge(['all' => $totalAll], $statusCounts);
 
         $totals = [
-            'total_budget' => (float) (clone $query)->sum('budget_amount'),
-            'total_spent' => (float) (clone $query)->sum('spent_amount'),
+            'total_budget' => (float) (clone $query)->reorder()->sum('budget_amount'),
+            'total_spent' => (float) (clone $query)->reorder()->sum('spent_amount'),
         ];
 
         // Filtre par statut (simple ou multiple)
@@ -108,8 +108,12 @@ class AdminBoostManagementService
 
         $boundedPerPage = min(100, max(1, $perPage));
 
+        $paginator = $query->with(['user:id,name,email,phone,handle', 'page:id,name,slug'])
+            ->orderByDesc('created_at')
+            ->paginate($boundedPerPage);
+
         return [
-            'paginator' => $query->paginate($boundedPerPage),
+            'paginator' => $paginator,
             'counts' => $counts,
             'totals' => $totals,
         ];

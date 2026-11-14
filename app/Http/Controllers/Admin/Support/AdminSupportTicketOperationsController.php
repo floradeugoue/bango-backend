@@ -289,6 +289,22 @@ class AdminSupportTicketOperationsController extends Controller
     }
 
     /**
+     * 4.8 ter A. Statistiques des avis et moyenne de satisfaction par conseiller du support.
+     *
+     * GET /api/admin/support/advisors/ratings
+     */
+    public function advisorRatings(Request $request): JsonResponse
+    {
+        $filters = $request->only(['start_date', 'end_date']);
+        $ratings = $this->supportService->getAdvisorRatings($filters);
+
+        return response()->json([
+            'success' => true,
+            'data' => $ratings,
+        ]);
+    }
+
+    /**
      * 4.8 ter. Statistiques et parts de résolution réelles.
      *
      * GET /api/admin/support/resolutions/shares

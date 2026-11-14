@@ -6,6 +6,7 @@ use App\Enums\Kyc\KycStatus;
 use App\Enums\Support\AppealStatus;
 use App\Models\Admin\AdminSession;
 use App\Models\Auth\Role;
+use App\Models\Kyc\KycDocument;
 use App\Models\Kyc\KycSubmission;
 use App\Models\Subscription\Subscription;
 use App\Models\Subscription\SubscriptionPrice;
@@ -356,4 +357,113 @@ it('filters refusals by appeal_status, badge, reason and includes linked appeal'
     $reasonItems = collect($resReason->json('data'));
     expect($reasonItems->pluck('id'))->toContain($sub1->id);
     expect($reasonItems->pluck('id'))->not->toContain($sub2->id);
+});
+
+// 6. admin/kyc/queue : calcul dynamique de attempt, required docs et headline
+it('calculates attempt dynamically and does not freeze it to 1', function () {
+    [$operator, $sessionId] = createEnhancementSession('verification');
+
+    $user = User::factory()->create(['name' => 'Multi Attempt User', 'city' => 'Abidjan']);
+
+    // Attempt 1: created 2 days ago, replaced or rejected
+    $sub1 = KycSubmission::create([
+        'user_id' => $user->id,
+        'status' => KycStatus::Pending->value,
+        'profile_category' => 'landlord',
+        'created_at' => now()->subDays(2),
+    ]);
+
+    // Attempt 2: created today
+    $sub2 = KycSubmission::create([
+        'user_id' => $user->id,
+        'status' => KycStatus::Pending->value,
+        'profile_category' => 'landlord',
+        'created_at' => now(),
+    ]);
+
+    $res = $this->withUnencryptedCookie('bango_admin_session', $sessionId)
+        ->getJson('/api/admin/kyc/queue');
+
+    $res->assertStatus(200);
+
+    $items = collect($res->json('items'));
+    $item1 = $items->firstWhere('id', (string) $sub1->id);
+    $item2 = $items->firstWhere('id', (string) $sub2->id);
+
+    expect($item1['attempt'])->toBe(1);
+    expect($item2['attempt'])->toBe(2);
+});
+
+it('calculates required docs dynamically and displays id_valid when all expected docs received even if id_number is empty', function () {
+    [$operator, $sessionId] = createEnhancementSession('verification');
+
+    $userPassport = User::factory()->create(['name' => 'Passport Landlord', 'city' => 'Dakar']);
+    $userCni = User::factory()->create(['name' => 'CNI Landlord', 'city' => 'Abidjan']);
+
+    // Landlord with passport: requires 3 docs (passport, selfie, deed)
+    $subPassport = KycSubmission::create([
+        'user_id' => $userPassport->id,
+        'status' => KycStatus::Pending->value,
+        'profile_category' => 'landlord',
+        'id_type' => 'passport',
+        'id_number' => null, // Empty id_number!
+    ]);
+
+    // Add 3 documents to subPassport
+    foreach (['front', 'selfie', 'deed'] as $kind) {
+        KycDocument::create([
+            'kyc_submission_id' => $subPassport->id,
+            'user_id' => $userPassport->id,
+            'kind' => $kind,
+            'file_path' => "kyc/{$userPassport->id}/{$kind}.jpg",
+            'original_name' => "{$kind}.jpg",
+            'mime_type' => 'image/jpeg',
+            'file_size' => 1024,
+            'status' => 'pending',
+        ]);
+    }
+
+    // Landlord with CNI: requires 4 docs (front, back, selfie, deed)
+    $subCni = KycSubmission::create([
+        'user_id' => $userCni->id,
+        'status' => KycStatus::Pending->value,
+        'profile_category' => 'landlord',
+        'id_type' => 'cni',
+        'id_number' => null, // Empty id_number!
+    ]);
+
+    // Add 4 documents to subCni
+    foreach (['front', 'back', 'selfie', 'deed'] as $kind) {
+        KycDocument::create([
+            'kyc_submission_id' => $subCni->id,
+            'user_id' => $userCni->id,
+            'kind' => $kind,
+            'file_path' => "kyc/{$userCni->id}/{$kind}.jpg",
+            'original_name' => "{$kind}.jpg",
+            'mime_type' => 'image/jpeg',
+            'file_size' => 1024,
+            'status' => 'pending',
+        ]);
+    }
+
+    $res = $this->withUnencryptedCookie('bango_admin_session', $sessionId)
+        ->getJson('/api/admin/kyc/queue');
+
+    $res->assertStatus(200);
+
+    $items = collect($res->json('items'));
+    $itemPassport = $items->firstWhere('id', (string) $subPassport->id);
+    $itemCni = $items->firstWhere('id', (string) $subCni->id);
+
+    // Passport landlord: required = 3, received = 3, headline = id_valid (NOT docs_missing)
+    expect($itemPassport['docs']['required'])->toBe(3);
+    expect($itemPassport['docs']['received'])->toBe(3);
+    expect($itemPassport['headline']['key'])->toBe('id_valid');
+    expect($itemPassport['headline']['ok'])->toBeTrue();
+
+    // CNI landlord: required = 4, received = 4, headline = id_valid (NOT docs_missing despite empty id_number)
+    expect($itemCni['docs']['required'])->toBe(4);
+    expect($itemCni['docs']['received'])->toBe(4);
+    expect($itemCni['headline']['key'])->toBe('id_valid');
+    expect($itemCni['headline']['ok'])->toBeTrue();
 });

@@ -42,7 +42,7 @@ beforeEach(function (): void {
     ]);
 });
 
-test('free or paid visit creates reservation in requested status (BL-07 18h SLA) and notifies landlord', function (): void {
+test('free or paid visit creates reservation in requested status (BL-07 24h SLA) and notifies landlord', function (): void {
     $freeListing = Listing::factory()->published()->create([
         'owner_id' => $this->owner->id,
         'visit_fee' => 0,

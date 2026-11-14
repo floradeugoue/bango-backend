@@ -3,6 +3,7 @@
 namespace App\Models\Square;
 
 use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -57,6 +58,39 @@ class Hashtag extends Model
         }
 
         return $this->followers()->where('users.id', $user->id)->exists();
+    }
+
+    /**
+     * Scope pour filtrer les hashtags ayant au moins une publication visible.
+     */
+    public function scopeWithVisiblePosts(Builder $query): Builder
+    {
+        return $query->where('posts_count', '>', 0)
+            ->where(function (Builder $q) {
+                $q->whereHas('posts', function (Builder $postQuery) {
+                    $postQuery->whereNull('posts.deleted_at')
+                        ->where('posts.is_archived', false);
+                })
+                    ->orWhere(function (Builder $fallbackQ) {
+                        $fallbackQ->where('posts_count', '>', 0)
+                            ->whereDoesntHave('posts');
+                    });
+            });
+    }
+
+    /**
+     * Recalcule le posts_count réel d'un hashtag à partir des publications visibles non supprimées.
+     */
+    public function recalculatePostsCount(): int
+    {
+        $count = $this->posts()
+            ->whereNull('posts.deleted_at')
+            ->where('posts.is_archived', false)
+            ->count();
+
+        $this->update(['posts_count' => $count]);
+
+        return $count;
     }
 
     /**

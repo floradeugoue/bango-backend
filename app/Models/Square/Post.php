@@ -7,6 +7,7 @@ use App\Enums\Square\PostCommentsBy;
 use App\Models\Boost\Campaign;
 use App\Models\Page\Page;
 use App\Models\User;
+use App\Services\Square\HashtagExtractionService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -48,6 +49,25 @@ class Post extends Model
         'views_count',
         'pinned_comment_id',
     ];
+
+    protected static function booted(): void
+    {
+        static::deleting(function (Post $post) {
+            $hashtagIds = $post->hashtags()->pluck('hashtags.id')->all();
+            if (! empty($hashtagIds)) {
+                $post->hashtags()->detach($hashtagIds);
+                Hashtag::whereIn('id', $hashtagIds)
+                    ->where('posts_count', '>', 0)
+                    ->decrement('posts_count');
+            }
+        });
+
+        static::restored(function (Post $post) {
+            if (! empty($post->body)) {
+                app(HashtagExtractionService::class)->syncPostHashtags($post, $post->body);
+            }
+        });
+    }
 
     /**
      * @return array<string, string>

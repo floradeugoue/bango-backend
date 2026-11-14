@@ -16,7 +16,7 @@ class AdminListingVisitController extends Controller
     ) {}
 
     /**
-     * B.9. Suivi global des visites réservées avec état du délai de réponse (SLA 18 heures).
+     * B.9. Suivi global des visites réservées avec état du délai de réponse (SLA 24 heures).
      */
     public function visits(Request $request): JsonResponse
     {
@@ -29,7 +29,7 @@ class AdminListingVisitController extends Controller
             $statusVal = $vr->status instanceof \BackedEnum ? $vr->status->value : (string) $vr->status;
             $isRequested = $statusVal === 'requested';
             $hoursWaiting = $vr->created_at ? (int) $vr->created_at->diffInHours(now()) : 0;
-            $isOverdue = $isRequested && $hoursWaiting >= 18;
+            $isOverdue = $isRequested && $hoursWaiting >= 24;
 
             return [
                 'id' => $vr->id,
@@ -69,6 +69,7 @@ class AdminListingVisitController extends Controller
                 'currency' => $vr->currency,
                 'payment_reference' => $vr->payment_reference,
                 'hours_waiting' => $hoursWaiting,
+                'is_overdue_sla_24h' => $isOverdue,
                 'is_overdue_sla_18h' => $isOverdue,
                 'answered_at' => $vr->answered_at?->toISOString(),
                 'decline_reason' => $vr->decline_reason,

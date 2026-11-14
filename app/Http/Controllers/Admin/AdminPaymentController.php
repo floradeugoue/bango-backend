@@ -144,7 +144,7 @@ class AdminPaymentController extends Controller
         }
 
         // 11. Compteurs d'onglets calculés avant filtre de statut
-        $baseQuery = clone $query;
+        $baseQuery = (clone $query)->reorder();
         $statusCounts = $baseQuery
             ->selectRaw('status, count(*) as count')
             ->groupBy('status')

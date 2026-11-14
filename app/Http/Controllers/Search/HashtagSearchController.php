@@ -24,6 +24,7 @@ class HashtagSearchController extends Controller
         $perPage = min(max((int) $request->input('per_page', 20), 1), 100);
 
         $hashtags = Hashtag::query()
+            ->withVisiblePosts()
             ->when($normalized !== '', function ($q) use ($normalized) {
                 $q->where('normalized_name', 'like', "%{$normalized}%");
             })
@@ -46,6 +47,7 @@ class HashtagSearchController extends Controller
         $perPage = min(max((int) $request->input('per_page', 20), 1), 100);
 
         $hashtags = Hashtag::query()
+            ->withVisiblePosts()
             ->when($normalized !== '', function ($q) use ($normalized) {
                 $q->where('normalized_name', 'like', "%{$normalized}%");
             })

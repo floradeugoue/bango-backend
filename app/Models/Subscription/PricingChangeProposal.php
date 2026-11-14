@@ -2,6 +2,7 @@
 
 namespace App\Models\Subscription;
 
+use App\Models\Legal\LegalDocument;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -24,6 +25,9 @@ class PricingChangeProposal extends Model
         'status',
         'reason',
         'simulation_impact',
+        'legal_document_id',
+        'terms_version',
+        'applied_at',
     ];
 
     /**
@@ -35,6 +39,7 @@ class PricingChangeProposal extends Model
             'new_price_amount' => 'decimal:2',
             'notice_days' => 'integer',
             'effective_date' => 'datetime',
+            'applied_at' => 'datetime',
             'simulation_impact' => 'array',
         ];
     }
@@ -42,6 +47,11 @@ class PricingChangeProposal extends Model
     public function price(): BelongsTo
     {
         return $this->belongsTo(SubscriptionPrice::class, 'price_id');
+    }
+
+    public function legalDocument(): BelongsTo
+    {
+        return $this->belongsTo(LegalDocument::class, 'legal_document_id');
     }
 
     public function proposer(): BelongsTo

@@ -15,6 +15,8 @@ use App\Models\Subscription\Subscription;
 use App\Models\Subscription\SubscriptionPrice;
 use App\Models\Subscription\SubscriptionProduct;
 use App\Models\User;
+use App\Notifications\Subscription\PricingChangeScheduledNotification;
+use App\Services\Legal\LegalDocumentService;
 use DomainException;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
@@ -81,17 +83,44 @@ class AdminSystemSettingsService
 
     /**
      * Programmation d'un changement de prix avec date d'effet différée (noticeDays).
+     * Liée à une version des CGU (décision Marie) et notification immédiate des abonnés concernés.
      */
     public function proposePricingChange(
         int $priceId,
         float $newAmount,
         int $noticeDays,
         ?string $reason,
-        User $operator
+        User $operator,
+        ?int $legalDocumentId = null,
+        ?string $termsVersion = null
     ): PricingChangeProposal {
-        return DB::transaction(function () use ($priceId, $newAmount, $noticeDays, $reason, $operator) {
+        return DB::transaction(function () use ($priceId, $newAmount, $noticeDays, $reason, $operator, $legalDocumentId, $termsVersion) {
             $price = SubscriptionPrice::findOrFail($priceId);
             $effectiveDate = Carbon::now()->addDays($noticeDays);
+
+            // Résolution du document légal et de la version des CGU
+            if ($legalDocumentId) {
+                $legalDoc = LegalDocument::find($legalDocumentId);
+                if ($legalDoc) {
+                    $termsVersion = $termsVersion ?: $legalDoc->version;
+                }
+            } elseif ($termsVersion) {
+                $legalDoc = LegalDocument::where('slug', LegalDocumentService::TERMS_SLUG)
+                    ->where('version', $termsVersion)
+                    ->first();
+                if ($legalDoc) {
+                    $legalDocumentId = $legalDoc->id;
+                }
+            } else {
+                $legalDoc = LegalDocument::where('slug', LegalDocumentService::TERMS_SLUG)
+                    ->orderByDesc('effective_date')
+                    ->orderByDesc('id')
+                    ->first();
+                if ($legalDoc) {
+                    $legalDocumentId = $legalDoc->id;
+                    $termsVersion = $legalDoc->version;
+                }
+            }
 
             $simulation = $this->previewPricingImpact($priceId, $newAmount);
 
@@ -105,7 +134,23 @@ class AdminSystemSettingsService
                 'status' => 'scheduled',
                 'reason' => $reason,
                 'simulation_impact' => $simulation,
+                'legal_document_id' => $legalDocumentId,
+                'terms_version' => $termsVersion,
             ]);
+
+            // Notifier les abonnés concernés dès la programmation avec la date et le nouveau montant
+            $activeSubscriptions = Subscription::where('price_id', $price->id)
+                ->where('state', 'active')
+                ->with('user')
+                ->get();
+
+            $notifiedUserIds = [];
+            foreach ($activeSubscriptions as $subscription) {
+                if ($subscription->user && ! in_array($subscription->user_id, $notifiedUserIds, true)) {
+                    $notifiedUserIds[] = $subscription->user_id;
+                    $subscription->user->notify(new PricingChangeScheduledNotification($proposal, $subscription));
+                }
+            }
 
             AdminAuditLog::logChainedEvent(
                 event: 'pricing.change_scheduled',
@@ -118,11 +163,81 @@ class AdminSystemSettingsService
                     'new_amount' => $newAmount,
                     'notice_days' => $noticeDays,
                     'effective_date' => $effectiveDate->toIso8601String(),
+                    'legal_document_id' => $legalDocumentId,
+                    'terms_version' => $termsVersion,
+                    'notified_subscribers_count' => count($notifiedUserIds),
                 ]
             );
 
-            return $proposal->load(['price.product', 'proposer']);
+            return $proposal->load(['price.product', 'proposer', 'legalDocument']);
         });
+    }
+
+    /**
+     * Tâche quotidienne appliquant les propositions tarifaires arrivées à échéance.
+     * Met à jour le prix au catalogue et rattache la version de CGU requise.
+     * Les abonnés en cours conservent leur tarif initial jusqu'au renouvellement.
+     *
+     * @return array{applied_count: int, proposal_ids: array<int>}
+     */
+    public function applyDuePricingChanges(?Carbon $referenceDate = null): array
+    {
+        $now = $referenceDate ?: Carbon::now();
+        $proposals = PricingChangeProposal::with(['price.product', 'legalDocument'])
+            ->where('status', 'scheduled')
+            ->where('effective_date', '<=', $now)
+            ->get();
+
+        $appliedCount = 0;
+        $appliedIds = [];
+
+        foreach ($proposals as $proposal) {
+            DB::transaction(function () use ($proposal, &$appliedCount, &$appliedIds) {
+                $price = $proposal->price;
+                if ($price) {
+                    $price->update([
+                        'price_amount' => $proposal->new_price_amount,
+                        'legal_document_id' => $proposal->legal_document_id,
+                        'required_terms_version' => $proposal->terms_version,
+                    ]);
+                }
+
+                if ($proposal->legalDocument) {
+                    $proposal->legalDocument->update([
+                        'is_published' => true,
+                        'is_mandatory' => true,
+                        'published_at' => $proposal->legalDocument->published_at ?? Carbon::now(),
+                    ]);
+                }
+
+                $proposal->update([
+                    'status' => 'applied',
+                    'applied_at' => Carbon::now(),
+                ]);
+
+                AdminAuditLog::logChainedEvent(
+                    event: 'pricing.change_applied',
+                    operator: $proposal->proposer ?? User::first(),
+                    targetType: 'PricingChangeProposal',
+                    targetId: (string) $proposal->id,
+                    targetLabel: "Application du changement tarifaire {$price?->product?->name} ({$proposal->new_price_amount} {$price?->currency})",
+                    context: [
+                        'price_id' => $price?->id,
+                        'new_amount' => (float) $proposal->new_price_amount,
+                        'effective_date' => $proposal->effective_date->toIso8601String(),
+                        'terms_version' => $proposal->terms_version,
+                    ]
+                );
+
+                $appliedCount++;
+                $appliedIds[] = $proposal->id;
+            });
+        }
+
+        return [
+            'applied_count' => $appliedCount,
+            'proposal_ids' => $appliedIds,
+        ];
     }
 
     // =========================================================================
@@ -396,13 +511,21 @@ class AdminSystemSettingsService
             ];
         }
 
-        $query = Neighbourhood::with('city:id,name');
+        $query = Neighbourhood::query()
+            ->select('neighbourhoods.*')
+            ->with('city:id,name');
 
         $query->addSelect([
             'listings_count' => Listing::selectRaw('count(*)')
                 ->where(function ($q) {
                     $q->whereColumn('listings.neighbourhood', 'neighbourhoods.name')
                         ->orWhereRaw('LOWER(listings.neighbourhood) = LOWER(neighbourhoods.name)');
+                }),
+            'users_count' => User::selectRaw('count(*)')
+                ->where(function ($q) {
+                    $q->whereColumn('users.neighbourhood_id', 'neighbourhoods.id')
+                        ->orWhereColumn('users.neighbourhood', 'neighbourhoods.name')
+                        ->orWhereRaw('LOWER(users.neighbourhood) = LOWER(neighbourhoods.name)');
                 }),
         ]);
 

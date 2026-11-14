@@ -14,6 +14,7 @@ use App\Http\Resources\Payment\PaymentTransactionResource;
 use App\Models\Payment\PaymentTransaction;
 use App\Models\Subscription\Subscription;
 use App\Models\Subscription\SubscriptionPrice;
+use App\Services\Legal\LegalDocumentService;
 use App\Services\Payment\PaymentEngineService;
 use App\Services\Payment\PaymentGatewayManager;
 use App\Services\Payment\PricingService;
@@ -79,6 +80,12 @@ class SubscriptionRenewalController extends Controller
             ->where('cadence', $subscription->cadence)
             ->first();
 
+        $requiresTermsAcceptance = false;
+        if ($currentActivePrice?->required_terms_version) {
+            $legalService = app(LegalDocumentService::class);
+            $requiresTermsAcceptance = ! $legalService->hasUserAcceptedVersion($user, $currentActivePrice->required_terms_version);
+        }
+
         // Récupérer les options de tarifs disponibles pour ce produit
         $availablePrices = $subscription->product->activePrices()
             ->get()
@@ -122,6 +129,8 @@ class SubscriptionRenewalController extends Controller
                 'is_eligible_for_renewal' => $isEligible,
                 'ineligibility_reason' => $ineligibilityReason,
                 'requires_manual_confirmation' => true,
+                'terms_acceptance_required' => $requiresTermsAcceptance,
+                'required_terms_version' => $currentActivePrice?->required_terms_version,
             ],
             message: 'Informations de renouvellement récupérées avec succès.'
         );
@@ -170,6 +179,19 @@ class SubscriptionRenewalController extends Controller
                 message: "Le tarif pour la cadence '{$requestedCadence}' n'est pas disponible actuellement.",
                 status: 422
             );
+        }
+
+        if ($price->required_terms_version) {
+            $legalService = app(LegalDocumentService::class);
+            if (! $legalService->hasUserAcceptedVersion($user, $price->required_terms_version)) {
+                return response()->json([
+                    'message' => "Vous devez accepter la version {$price->required_terms_version} des conditions générales d'utilisation pour renouveler votre abonnement à ce tarif.",
+                    'error' => 'TERMS_ACCEPTANCE_REQUIRED',
+                    'required_version' => $price->required_terms_version,
+                    'accepted_version' => $user->accepted_terms_version,
+                    'document_slug' => LegalDocumentService::TERMS_SLUG,
+                ], 403);
+            }
         }
 
         // Calcul du devis certifié serveur
@@ -258,6 +280,19 @@ class SubscriptionRenewalController extends Controller
                 message: 'Le tarif applicable au renouvellement est introuvable ou inactif.',
                 status: 422
             );
+        }
+
+        if ($price->required_terms_version) {
+            $legalService = app(LegalDocumentService::class);
+            if (! $legalService->hasUserAcceptedVersion($user, $price->required_terms_version)) {
+                return response()->json([
+                    'message' => "Vous devez accepter la version {$price->required_terms_version} des conditions générales d'utilisation pour renouveler votre abonnement à ce tarif.",
+                    'error' => 'TERMS_ACCEPTANCE_REQUIRED',
+                    'required_version' => $price->required_terms_version,
+                    'accepted_version' => $user->accepted_terms_version,
+                    'document_slug' => LegalDocumentService::TERMS_SLUG,
+                ], 403);
+            }
         }
 
         // 1. Protection contre les paiements concurrents :

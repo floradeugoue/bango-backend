@@ -45,6 +45,7 @@ use App\Http\Controllers\Admin\Shell\AdminWorkspaceController;
 use App\Http\Controllers\Admin\Stats\AdminStrategicStatsController;
 use App\Http\Controllers\Admin\SubscriptionCatalogController;
 use App\Http\Controllers\Admin\SubscriptionManagementController;
+use App\Http\Controllers\Admin\Support\AdminAppFeedbackController;
 use App\Http\Controllers\Admin\Support\AdminSupportHelpCenterController;
 use App\Http\Controllers\Admin\Support\AdminSupportTemplateController;
 use App\Http\Controllers\Admin\Support\AdminSupportTicketOperationsController;
@@ -679,22 +680,29 @@ Route::middleware(['admin.session'])->group(function () {
     };
 
     Route::prefix('sounds')->name('sounds.')->middleware('admin.permission:moderation:view')->group($soundCatalogRoutes);
-    Route::prefix('sounds-catalog')->name('sounds-catalog.')->middleware('admin.permission:moderation:view')->group($soundCatalogRoutes);
 
     // ------------------------------------------------------------------
     // MODULE 8 : PAGES PROFESSIONNELLES & CERTIFICATIONS (Module 12 PG)
     // ------------------------------------------------------------------
     Route::prefix('pages')->name('pages.')->middleware('admin.permission:verification:view')->group(function () {
+        // Lister les pages professionnelles avec recherche, filtres et pagination
+        Route::get('/', [PageCertificationAdminController::class, 'indexPages'])->name('index');
         // Lister les dossiers de certification d'entreprises en attente d'instruction
         Route::get('/certifications', [PageCertificationAdminController::class, 'index'])->name('certifications.index');
+        // Télécharger une pièce justificative d'un dossier de certification sous session administrative
+        Route::get('/certifications/{certification}/documents/{key}', [PageCertificationAdminController::class, 'downloadDocument'])->name('certifications.documents.download');
         // Valider ou rejeter la certification d'une page professionnelle
         Route::post('/certifications/{certification}/decide', [PageCertificationAdminController::class, 'decide'])->middleware('admin.permission:verification:action')->name('certifications.decide');
         // Suspendre la certification d'une page professionnelle
         Route::post('/{page}/suspend-certification', [PageCertificationAdminController::class, 'suspendCertification'])->middleware('admin.permission:verification:action')->name('suspend_certification');
+        // Rétablir la certification d'une page professionnelle
+        Route::post('/{page}/restore-certification', [PageCertificationAdminController::class, 'restoreCertification'])->middleware('admin.permission:verification:action')->name('restore_certification');
         // Suspendre l'ensemble des activités d'une page professionnelle
         Route::post('/{page}/suspend', [PageCertificationAdminController::class, 'suspendPage'])->middleware('admin.permission:verification:action')->name('suspend');
         // Réactiver une page professionnelle suspendue
         Route::post('/{page}/unsuspend', [PageCertificationAdminController::class, 'unsuspendPage'])->middleware('admin.permission:verification:action')->name('unsuspend');
+        // Consulter la fiche complète détaillée d'une page professionnelle
+        Route::get('/{page}', [PageCertificationAdminController::class, 'showPage'])->name('show');
     });
 
     // ------------------------------------------------------------------
@@ -741,6 +749,11 @@ Route::middleware(['admin.session'])->group(function () {
         Route::get('/resolutions/shares', [AdminSupportTicketOperationsController::class, 'resolutionsShares'])
             ->middleware('admin.permission:support:view')
             ->name('resolutions.shares');
+
+        // Évaluations et notes moyennes des conseillers du support
+        Route::get('/advisors/ratings', [AdminSupportTicketOperationsController::class, 'advisorRatings'])
+            ->middleware('admin.permission:support:view')
+            ->name('advisors.ratings');
 
         // Export CSV des tickets (4.12)
         Route::post('/exports', [AdminSupportTicketOperationsController::class, 'export'])
@@ -813,7 +826,17 @@ Route::middleware(['admin.session'])->group(function () {
                 ->middleware('admin.permission:support:action')
                 ->name('reply');
         });
+
+        // Retours et avis des utilisateurs sur l'application (Comment ça se passe pour toi ?)
+        Route::get('/app-feedback', [AdminAppFeedbackController::class, 'index'])
+            ->middleware('admin.permission:support:view')
+            ->name('app_feedback.index');
     });
+
+    // Avis sur l'application (accessible directement sous /admin/app-feedback)
+    Route::get('/app-feedback', [AdminAppFeedbackController::class, 'index'])
+        ->middleware('admin.permission:support:view')
+        ->name('app_feedback');
 
     // ------------------------------------------------------------------
     // MODULE 9.1 : GESTION 360° DES COMPTES & SANCTIONS (Étape 5)
@@ -1032,7 +1055,7 @@ Route::middleware(['admin.session'])->group(function () {
             ->middleware('admin.permission:listings:view')
             ->name('map');
 
-        // Suivi global des visites réservées et SLA 18h (B.9)
+        // Suivi global des visites réservées et SLA 24h (B.9)
         Route::get('/visits', [AdminListingVisitController::class, 'index'])
             ->middleware('admin.permission:listings:view')
             ->name('visits.index');

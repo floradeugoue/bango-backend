@@ -13,10 +13,12 @@ use App\Http\Resources\Page\PageResource;
 use App\Http\Resources\Reel\ReelResource;
 use App\Http\Resources\Square\PostResource;
 use App\Http\Resources\Story\StoryHighlightResource;
+use App\Models\Message\Conversation;
 use App\Models\Page\Page;
 use App\Models\User;
 use App\Notifications\Social\SocialNotification;
 use App\Services\Page\PageService;
+use App\Services\Story\HighlightService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -163,8 +165,8 @@ class PageController extends Controller
      */
     public function highlights(Request $request, Page $page): AnonymousResourceCollection
     {
-        $viewer = $request->user() ?: new \App\Models\User;
-        $highlights = app(\App\Services\Story\HighlightService::class)->getHighlights($viewer, null, (int) $page->id);
+        $viewer = $request->user() ?: new User;
+        $highlights = app(HighlightService::class)->getHighlights($viewer, null, (int) $page->id);
 
         return StoryHighlightResource::collection($highlights);
     }
@@ -279,6 +281,58 @@ class PageController extends Controller
         return response()->json([
             'message' => 'Attribution de la boîte de réception mise à jour.',
             'data' => new PageResource($page->fresh(['owner', 'activeMembers.user', 'inboxAssignee'])),
+        ]);
+    }
+
+    /**
+     * Attribue une conversation spécifique de la boîte de réception à un collaborateur.
+     * POST /api/pages/{page}/conversations/{conversation}/assign
+     */
+    public function assignConversation(Request $request, Page $page, Conversation $conversation): JsonResponse
+    {
+        Gate::authorize('accessInbox', $page);
+
+        if ((int) $conversation->page_id !== (int) $page->id) {
+            abort(404, 'Cette conversation n\'appartient pas à cette page.');
+        }
+
+        $rawMemberId = $request->input('member_id') ?? $request->input('user_id');
+        $assignedUser = null;
+
+        if ($rawMemberId !== null && $rawMemberId !== '') {
+            $pageMember = $page->members()->where('id', $rawMemberId)->first();
+            if ($pageMember) {
+                $assignedUser = User::find($pageMember->user_id);
+            } else {
+                $user = User::find($rawMemberId);
+                if ($user && ($page->hasMember($user) || $page->isOwner($user))) {
+                    $assignedUser = $user;
+                }
+            }
+
+            if (! $assignedUser) {
+                return response()->json([
+                    'message' => 'L\'utilisateur assigné doit être un membre accepté ou le propriétaire de la page.',
+                ], 422);
+            }
+        }
+
+        $conversation->assigned_to_id = $assignedUser?->id;
+        $meta = $conversation->metadata ?? [];
+        $meta['assigned_to'] = $assignedUser ? [
+            'id' => (int) $assignedUser->id,
+            'user_id' => (int) $assignedUser->id,
+            'member_id' => (int) $assignedUser->id,
+            'name' => $assignedUser->display_name ?: $assignedUser->name,
+            'handle' => $assignedUser->handle,
+        ] : null;
+        $meta['assigned_to_id'] = $assignedUser?->id;
+        $conversation->metadata = $meta;
+        $conversation->save();
+
+        return response()->json([
+            'message' => $assignedUser ? 'Conversation assignée avec succès.' : 'Attribution de la conversation retirée.',
+            'data' => new ConversationResource($conversation->fresh(['members.user', 'assignedTo', 'page', 'creator', 'latestMessage.sender'])),
         ]);
     }
 

@@ -242,6 +242,10 @@ class PricingService
      */
     public function calculateGatewayFee(string $baseAmount, string $gateway): string
     {
+        if (in_array(strtolower($gateway), ['wallet', 'credit'], true)) {
+            return '0.00';
+        }
+
         $config = config("payment.gateways.{$gateway}");
 
         if (! is_array($config)) {

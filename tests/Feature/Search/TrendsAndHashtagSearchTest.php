@@ -3,7 +3,10 @@
 use App\Models\Profile\UserBlock;
 use App\Models\Reel\Sound;
 use App\Models\Square\Hashtag;
+use App\Models\Square\Post;
 use App\Models\User;
+use App\Services\Square\HashtagExtractionService;
+use App\Services\Square\PostManagementService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Laravel\Passport\Passport;
@@ -218,4 +221,123 @@ it('exclut des createurs emergents les utilisateurs bloques par le viewer', func
 
     $creators = $response->json('data.emerging_creators');
     expect($creators)->toBeEmpty();
+});
+
+it('ne suggere aucun hashtag ayant 0 publication lors de la recherche avec prefixe # ou sans terme', function () {
+    $author = User::factory()->create(['status' => 'active']);
+    $viewer = User::factory()->create(['status' => 'active']);
+    Passport::actingAs($viewer);
+
+    // Hashtag avec 0 publication (vide)
+    $emptyHashtag = Hashtag::create(['name' => 'EmptyTag', 'normalized_name' => 'emptytag', 'posts_count' => 0]);
+
+    // Hashtag avec 1 publication active
+    $activePost = Post::factory()->create([
+        'user_id' => $author->id,
+        'body' => 'Superbe villa à louer #ActiveTag',
+        'is_archived' => false,
+    ]);
+    app(HashtagExtractionService::class)->syncPostHashtags($activePost, $activePost->body);
+
+    // 1. Recherche avec #
+    $resWithHash = getJson('/api/search/hashtags?q=%23');
+    $resWithHash->assertStatus(200);
+    $tagsWithHash = collect($resWithHash->json('data'));
+
+    expect($tagsWithHash->pluck('name'))->toContain('ActiveTag');
+    expect($tagsWithHash->pluck('name'))->not->toContain('EmptyTag');
+
+    // 2. Recherche sans paramètre ou chaîne vide
+    $resEmpty = getJson('/api/search/hashtags');
+    $resEmpty->assertStatus(200);
+    $tagsEmpty = collect($resEmpty->json('data'));
+
+    expect($tagsEmpty->pluck('name'))->toContain('ActiveTag');
+    expect($tagsEmpty->pluck('name'))->not->toContain('EmptyTag');
+
+    // 3. Trending
+    $resTrending = getJson('/api/search/hashtags/trending');
+    $resTrending->assertStatus(200);
+    $tagsTrending = collect($resTrending->json('data'));
+
+    expect($tagsTrending->pluck('name'))->toContain('ActiveTag');
+    expect($tagsTrending->pluck('name'))->not->toContain('EmptyTag');
+});
+
+it('met a jour posts_count a la suppression d un post et cesse de suggerer le hashtag des que toutes ses publications sont supprimees', function () {
+    $author = User::factory()->create(['status' => 'active']);
+    $viewer = User::factory()->create(['status' => 'active']);
+    Passport::actingAs($viewer);
+
+    // Créer un post avec #Soleil
+    $post = Post::factory()->create([
+        'user_id' => $author->id,
+        'body' => 'Belle journée sous le #Soleil',
+        'is_archived' => false,
+    ]);
+    app(HashtagExtractionService::class)->syncPostHashtags($post, $post->body);
+
+    $hashtag = Hashtag::where('normalized_name', 'soleil')->firstOrFail();
+    expect($hashtag->posts_count)->toBe(1);
+
+    // Avant suppression : suggéré
+    $resBefore = getJson('/api/search/hashtags?q=soleil');
+    $resBefore->assertStatus(200);
+    expect(collect($resBefore->json('data'))->pluck('name'))->toContain('Soleil');
+
+    // Suppression via PostManagementService
+    app(PostManagementService::class)->delete($post);
+
+    $hashtag->refresh();
+    expect($hashtag->posts_count)->toBe(0);
+
+    // Après suppression : N'EST PLUS SUGGÉRÉ (aucun hashtag à 0 publication)
+    $resAfter = getJson('/api/search/hashtags?q=soleil');
+    $resAfter->assertStatus(200);
+    expect(collect($resAfter->json('data'))->pluck('name'))->not->toContain('Soleil');
+
+    // N'apparaît pas non plus dans la liste générale
+    $resAll = getJson('/api/search/hashtags?q=%23');
+    expect(collect($resAll->json('data'))->pluck('name'))->not->toContain('Soleil');
+});
+
+it('met a jour posts_count via le hook deleting du modele Post lors d une suppression directe', function () {
+    $author = User::factory()->create(['status' => 'active']);
+
+    $post = Post::factory()->create([
+        'user_id' => $author->id,
+        'body' => 'Direct delete #DirectTag',
+        'is_archived' => false,
+    ]);
+    app(HashtagExtractionService::class)->syncPostHashtags($post, $post->body);
+
+    $hashtag = Hashtag::where('normalized_name', 'directtag')->firstOrFail();
+    expect($hashtag->posts_count)->toBe(1);
+
+    // Suppression directe sans passer par le service
+    $post->delete();
+
+    $hashtag->refresh();
+    expect($hashtag->posts_count)->toBe(0);
+});
+
+it('ne suggere pas les hashtags dont les seules publications sont archivees', function () {
+    $author = User::factory()->create(['status' => 'active']);
+    $viewer = User::factory()->create(['status' => 'active']);
+    Passport::actingAs($viewer);
+
+    $post = Post::factory()->create([
+        'user_id' => $author->id,
+        'body' => 'Post archivé #ArchivedTag',
+        'is_archived' => false,
+    ]);
+    app(HashtagExtractionService::class)->syncPostHashtags($post, $post->body);
+
+    // Archiver le post
+    $post->update(['is_archived' => true]);
+
+    // La recherche ne doit pas suggérer le hashtag dont le post est archivé
+    $res = getJson('/api/search/hashtags?q=archivedtag');
+    $res->assertStatus(200);
+    expect(collect($res->json('data'))->pluck('name'))->not->toContain('ArchivedTag');
 });

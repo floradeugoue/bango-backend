@@ -87,4 +87,3 @@ class AdminPreferenceController extends Controller
         ]);
     }
 }
-

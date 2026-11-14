@@ -60,12 +60,12 @@ class PageCertification extends Model
 
     public function page(): BelongsTo
     {
-        return $this->belongsTo(Page::class);
+        return $this->belongsTo(Page::class)->withTrashed();
     }
 
     public function submitter(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'submitted_by_id');
+        return $this->belongsTo(User::class, 'submitted_by_id')->withTrashed();
     }
 
     public function paymentTransaction(): BelongsTo

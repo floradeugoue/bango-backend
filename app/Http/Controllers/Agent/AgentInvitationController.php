@@ -44,7 +44,8 @@ class AgentInvitationController extends Controller
 
         $accepted = $this->delegationService->acceptInvitation(
             $delegation,
-            $request->user()
+            $request->user(),
+            (bool) ($request->boolean('all') || $request->boolean('batch'))
         );
 
         return (new DelegationResource($accepted))->response();
@@ -61,7 +62,8 @@ class AgentInvitationController extends Controller
 
         $declined = $this->delegationService->rejectInvitation(
             $delegation,
-            $request->user()
+            $request->user(),
+            (bool) ($request->boolean('all') || $request->boolean('batch'))
         );
 
         return (new DelegationResource($declined))->response();

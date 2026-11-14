@@ -13,7 +13,8 @@ class AgentAcceptedNotification extends Notification implements ShouldQueue
     use Queueable;
 
     public function __construct(
-        public Delegation $delegation
+        public Delegation $delegation,
+        public int $propertiesCount = 1
     ) {}
 
     /**
@@ -26,8 +27,19 @@ class AgentAcceptedNotification extends Notification implements ShouldQueue
 
     public function toMail(object $notifiable): MailMessage
     {
-        $agentName = $this->delegation->agent->name ?? 'L\'agent';
-        $listingTitle = $this->delegation->listing->title ?? 'votre bien';
+        $agent = $this->delegation->relationLoaded('agent') ? $this->delegation->agent : $this->delegation->agent()->first();
+        $agentName = $agent?->display_name ?: ($agent?->name ?? 'L\'agent');
+        $count = max(1, $this->propertiesCount);
+
+        if ($count > 1) {
+            return (new MailMessage)
+                ->subject("Mandats acceptés ({$count} biens)")
+                ->greeting("Bonjour {$notifiable->name},")
+                ->line("{$agentName} a accepté votre mandat de gestion pour {$count} de vos biens.")
+                ->action('Voir mes délégations', url('/landlord/delegations'));
+        }
+
+        $listingTitle = $this->delegation->listing?->title ?? 'votre bien';
 
         return (new MailMessage)
             ->subject("Mandat accepté : {$listingTitle}")
@@ -42,16 +54,24 @@ class AgentAcceptedNotification extends Notification implements ShouldQueue
     public function toArray(object $notifiable): array
     {
         $locale = $notifiable->locale ?? 'fr';
+        $agent = $this->delegation->relationLoaded('agent') ? $this->delegation->agent : $this->delegation->agent()->first();
+        $agentName = $agent?->display_name ?: ($agent?->name ?? 'Agent');
+        $count = max(1, $this->propertiesCount);
 
         return [
             'type' => 'agent_accepted',
             'delegation_id' => $this->delegation->id,
             'listing_id' => $this->delegation->listing_id,
             'agent_id' => $this->delegation->agent_id,
-            'agent_name' => $this->delegation->agent->display_name ?: ($this->delegation->agent->name ?? 'Agent'),
-            'listing_title' => $this->delegation->listing->title ?? 'Bien',
+            'agent_name' => $agentName,
+            'properties_count' => $count,
+            'listing_title' => $count > 1
+                ? "{$count} biens"
+                : ($this->delegation->listing?->title ?? 'Bien'),
             'title' => trans('notifications.agent_accepted.title', [], $locale),
-            'message' => trans('notifications.agent_accepted.body', [], $locale),
+            'message' => $count > 1
+                ? "{$agentName} a accepté de gérer {$count} de vos biens."
+                : trans('notifications.agent_accepted.body', [], $locale),
         ];
     }
 }

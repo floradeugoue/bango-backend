@@ -13,18 +13,36 @@ use App\Models\Subscription\Subscription;
 use App\Models\Subscription\SubscriptionProduct;
 use App\Models\User;
 use App\Services\Page\PageCertificationService;
+use App\Services\Payment\Gateways\MonetbilGateway;
 use App\Services\Payment\PaymentEngineService;
 use App\Services\Subscription\SubscriptionService;
 use Database\Seeders\SubscriptionCatalogSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Passport\Passport;
 
 uses(RefreshDatabase::class);
 
 beforeEach(function (): void {
+    MonetbilGateway::resetFakes();
+    config([
+        'payment.default_gateway' => 'monetbil',
+        'payment.gateways.monetbil.enabled' => true,
+        'payment.gateways.monetbil.service_key' => 'mock_service_key_123',
+        'payment.gateways.monetbil.service_secret' => 'mock_service_secret_456',
+        'payment.gateways.monetbil.api_base_url' => 'https://api.monetbil.com',
+    ]);
+    Http::fake([
+        'https://api.monetbil.com/payment/v1/placePayment' => Http::response([
+            'status' => 'REQUEST_ACCEPTED',
+            'paymentId' => 'mb_cert_pay_123',
+            'channel_ussd' => '#150*50#',
+        ], 200),
+    ]);
+
     Artisan::call('passport:client', ['--personal' => true, '--name' => 'Test', '--no-interaction' => true]);
     $this->seed(SubscriptionCatalogSeeder::class);
     Storage::fake('local');
@@ -310,4 +328,223 @@ test('la certification fonctionne comme un abonnement avec cadence mensuelle ou 
     $freshPage = $this->page->fresh();
     expect($freshPage->certification_status)->toBe(PageCertificationStatus::Lapsed)
         ->and($freshPage->isCertified())->toBeFalse();
+});
+
+test('POST /api/admin/pages/{page}/restore-certification rétablit la certification en approved avec motif dans l\'historique', function () {
+    Passport::actingAs($this->admin);
+
+    $cert = PageCertification::factory()->create([
+        'page_id' => $this->page->id,
+        'submitted_by_id' => $this->owner->id,
+        'status' => PageCertificationStatus::Suspended,
+    ]);
+    $this->page->update(['certification_status' => PageCertificationStatus::Suspended]);
+
+    $response = $this->postJson("/api/admin/pages/{$this->page->id}/restore-certification", [
+        'motif' => 'Vérification complémentaire validée avec succès',
+    ]);
+
+    $response->assertOk()
+        ->assertJsonPath('page.certification_status', 'approved');
+
+    expect($this->page->fresh()->certification_status)->toBe(PageCertificationStatus::Approved)
+        ->and($this->page->fresh()->isCertified())->toBeTrue();
+
+    $refreshedCert = $cert->fresh();
+    expect($refreshedCert->status)->toBe(PageCertificationStatus::Approved);
+    $history = $refreshedCert->history;
+    $lastHistory = end($history);
+    expect($lastHistory['action'])->toBe('restored')
+        ->and($lastHistory['reason'])->toBe('Vérification complémentaire validée avec succès');
+});
+
+test('GET /api/admin/pages/certifications rend page { id, name, handle, avatar_url }, submitter { id, name } et les download_url admin', function () {
+    Passport::actingAs($this->admin);
+
+    $encryptedContent = Crypt::encrypt('CONTENU_PDF_TEST');
+    Storage::disk('local')->put("page_certifications/{$this->page->id}/rccm_test.pdf", $encryptedContent);
+
+    PageCertification::factory()->create([
+        'page_id' => $this->page->id,
+        'submitted_by_id' => $this->owner->id,
+        'status' => PageCertificationStatus::Pending,
+        'documents' => [
+            'rccm' => [
+                'original_name' => 'rccm_officiel.pdf',
+                'mime_type' => 'application/pdf',
+                'file_size' => 1024,
+                'file_path' => "page_certifications/{$this->page->id}/rccm_test.pdf",
+            ],
+        ],
+    ]);
+
+    $response = $this->getJson('/api/admin/pages/certifications');
+
+    $response->assertOk()
+        ->assertJsonStructure([
+            'data' => [
+                '*' => [
+                    'id',
+                    'page_id',
+                    'page' => ['id', 'name', 'handle', 'avatar_url'],
+                    'submitter' => ['id', 'name'],
+                    'documents' => [
+                        'rccm' => ['original_name', 'mime_type', 'file_size', 'download_url'],
+                    ],
+                ],
+            ],
+        ]);
+
+    $firstItem = $response->json('data.0');
+    expect($firstItem['page']['id'])->toBe($this->page->id)
+        ->and($firstItem['page']['name'])->toBe('Société Camerounaise de Transport')
+        ->and($firstItem['submitter']['id'])->toBe($this->owner->id)
+        ->and($firstItem['submitter']['name'])->toBe('Claire Propriétaire')
+        ->and($firstItem['documents']['rccm']['download_url'])->toContain('/admin/pages/certifications/');
+});
+
+test('GET /api/admin/pages/certifications/{certification}/documents/{key} télécharge la pièce sous session administrative', function () {
+    Passport::actingAs($this->admin);
+
+    $rawContent = 'FICHIER_DECISION_ADMIN_SECRET';
+    $encrypted = Crypt::encrypt($rawContent);
+    $path = "page_certifications/{$this->page->id}/piece_admin.pdf";
+    Storage::disk('local')->put($path, $encrypted);
+
+    $cert = PageCertification::factory()->create([
+        'page_id' => $this->page->id,
+        'submitted_by_id' => $this->owner->id,
+        'status' => PageCertificationStatus::Pending,
+        'documents' => [
+            'piece_admin' => [
+                'original_name' => 'justificatif_officiel.pdf',
+                'mime_type' => 'application/pdf',
+                'file_size' => strlen($rawContent),
+                'file_path' => $path,
+            ],
+        ],
+    ]);
+
+    $response = $this->get("/api/admin/pages/certifications/{$cert->id}/documents/piece_admin");
+
+    $response->assertOk()
+        ->assertHeader('Content-Type', 'application/pdf');
+
+    expect($response->streamedContent())->toBe($rawContent);
+});
+
+test('POST /api/admin/pages/certifications/{certification}/decide refuse proprement avec un 422 si la page est supprimée', function () {
+    Passport::actingAs($this->admin);
+
+    $cert = PageCertification::factory()->create([
+        'page_id' => $this->page->id,
+        'submitted_by_id' => $this->owner->id,
+        'status' => PageCertificationStatus::Pending,
+    ]);
+
+    // Suppression de la page (SoftDelete)
+    $this->page->delete();
+    expect($this->page->trashed())->toBeTrue();
+    expect(Page::find($this->page->id))->toBeNull();
+
+    $response = $this->postJson("/api/admin/pages/certifications/{$cert->id}/decide", [
+        'decision' => 'approve',
+    ]);
+
+    $response->assertStatus(422)
+        ->assertJsonValidationErrors(['certification']);
+});
+
+test('POST /api/pages/{page}/certification/payment lance la demande Mobile Money, rattache la transaction au dossier, et active payment_transaction_id au webhook', function () {
+    Passport::actingAs($this->owner);
+
+    $cert = PageCertification::factory()->create([
+        'page_id' => $this->page->id,
+        'submitted_by_id' => $this->owner->id,
+        'status' => PageCertificationStatus::Pending,
+    ]);
+
+    expect($cert->payment_transaction_id)->toBeNull();
+
+    // 1. Appel de la route unique de paiement de certification
+    $response = $this->postJson("/api/pages/{$this->page->id}/certification/payment", [
+        'provider' => 'orange',
+        'phone_number' => '+237699001122',
+        'idempotency_key' => 'idemp_cert_full_flow',
+    ]);
+
+    $response->assertCreated()
+        ->assertJsonPath('data.service_type', 'certification')
+        ->assertJsonPath('data.status', 'processing')
+        ->assertJsonPath('prompt.ussd', '#150*50#')
+        ->assertJsonPath('prompt.ussd_code', '#150*50#');
+
+    $txId = $response->json('data.id');
+    $tx = PaymentTransaction::find($txId);
+
+    expect($tx)->not->toBeNull()
+        ->and($tx->payable_type)->toBe(PageCertification::class)
+        ->and($tx->payable_id)->toBe((string) $cert->id)
+        ->and($tx->external_reference)->toBe('mb_cert_pay_123');
+
+    // Le dossier n'a pas encore payment_transaction_id tant que le webhook n'a pas confirmé
+    expect($cert->fresh()->payment_transaction_id)->toBeNull();
+
+    // 2. Simulation de la confirmation par le webhook Monetbil
+    app(PaymentEngineService::class)->confirmAndFulfill($tx, 'mb_cert_pay_123');
+
+    // 3. Après confirmation du webhook, payment_transaction_id est renseigné sur le dossier
+    $refreshedCert = $cert->fresh();
+    expect($refreshedCert->payment_transaction_id)->toBe($tx->id);
+
+    // 4. Consultation du dossier : is_paid est à true
+    $showResponse = $this->getJson("/api/pages/{$this->page->id}/certification");
+    $showResponse->assertOk()
+        ->assertJsonPath('data.is_paid', true)
+        ->assertJsonPath('data.payment_transaction_id', $tx->id);
+
+    // 5. L'administrateur peut maintenant approuver le dossier payé
+    Passport::actingAs($this->admin);
+    $decideResponse = $this->postJson("/api/admin/pages/certifications/{$cert->id}/decide", [
+        'decision' => 'approve',
+    ]);
+
+    $decideResponse->assertOk()
+        ->assertJsonPath('data.status', 'approved');
+
+    expect($this->page->fresh()->certification_status)->toBe(PageCertificationStatus::Approved);
+});
+
+test('POST /api/payments/initiate avec service_type=certification rattache également la transaction au dossier', function () {
+    Passport::actingAs($this->owner);
+
+    $cert = PageCertification::factory()->create([
+        'page_id' => $this->page->id,
+        'submitted_by_id' => $this->owner->id,
+        'status' => PageCertificationStatus::Pending,
+    ]);
+
+    $response = $this->postJson('/api/payments/initiate', [
+        'service_type' => 'certification',
+        'page_id' => $this->page->id,
+        'phone' => '699001122',
+        'operator' => 'orange',
+        'idempotency_key' => 'idemp_payments_initiate_cert',
+    ]);
+
+    $response->assertCreated()
+        ->assertJsonPath('data.service_type', 'certification')
+        ->assertJsonPath('data.status', 'processing');
+
+    $txId = $response->json('data.id');
+    $tx = PaymentTransaction::find($txId);
+
+    expect($tx)->not->toBeNull()
+        ->and($tx->payable_type)->toBe(PageCertification::class)
+        ->and($tx->payable_id)->toBe((string) $cert->id);
+
+    // Confirmation webhook
+    app(PaymentEngineService::class)->confirmAndFulfill($tx, 'mb_cert_pay_123');
+
+    expect($cert->fresh()->payment_transaction_id)->toBe($tx->id);
 });

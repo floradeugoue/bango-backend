@@ -24,9 +24,10 @@ class TermsAcceptanceController extends Controller
         $locale = $request->input('locale', LegalDocumentService::DEFAULT_LOCALE);
 
         $mandatoryVersion = $this->legalDocumentService->getMandatoryTermsVersion();
+        $targetVersion = $providedVersion ?: $mandatoryVersion;
 
         // Si le client a envoyé explicitement une version obsolète différente de la version obligatoire
-        if ($providedVersion !== null && $providedVersion !== $mandatoryVersion) {
+        if ($providedVersion !== null && version_compare($providedVersion, $mandatoryVersion, '<')) {
             return response()->json([
                 'message' => 'Une nouvelle version des conditions générales d\'utilisation est requise.',
                 'error' => 'OUTDATED_TERMS_VERSION',
@@ -39,7 +40,7 @@ class TermsAcceptanceController extends Controller
         $acceptance = $this->legalDocumentService->recordAcceptance(
             user: $user,
             documentSlug: $documentSlug,
-            version: $mandatoryVersion,
+            version: $targetVersion,
             locale: $locale,
             ip: $request->ip(),
             userAgent: $request->userAgent()

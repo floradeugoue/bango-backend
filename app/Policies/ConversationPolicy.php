@@ -118,6 +118,14 @@ class ConversationPolicy
      */
     public function handleRequest(User $user, Conversation $conversation): bool
     {
+        if ($conversation->type === ConversationType::Page || $conversation->page_id) {
+            /** @var Page|null $page */
+            $page = $conversation->relationLoaded('page') ? $conversation->page : Page::find($conversation->page_id);
+            if ($page && $page->canUserAccessInbox($user)) {
+                return (int) $conversation->created_by_id !== (int) $user->id;
+            }
+        }
+
         // Seul le destinataire membre de la conversation (et non l'initiateur de la demande) peut accepter ou rejeter
         return $conversation->isMember($user->id) && (int) $conversation->created_by_id !== (int) $user->id;
     }

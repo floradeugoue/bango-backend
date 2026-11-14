@@ -6,6 +6,7 @@ use App\Enums\Page\PageRole;
 use App\Models\Page\PageCertification;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\Route;
 
 /**
  * @mixin PageCertification
@@ -18,16 +19,25 @@ class PageCertificationResource extends JsonResource
     public function toArray(Request $request): array
     {
         $viewer = $request->user();
-        $isOwnerOrAdmin = $viewer && ($viewer->isAdmin() || $this->page->memberRole($viewer) === PageRole::Owner);
+        $isAdminRequest = ($viewer && ($viewer->isAdmin() || $viewer->isInternalOperator()))
+            || $request->is('admin/*')
+            || $request->is('api/admin/*');
+
+        $page = $this->page;
+        $isOwnerOrAdmin = $isAdminRequest || ($viewer && $page && $page->memberRole($viewer) === PageRole::Owner);
 
         $documentsMetadata = [];
         if ($isOwnerOrAdmin && is_array($this->documents)) {
+            $routeName = ($isAdminRequest && Route::has('api.admin.pages.certifications.documents.download'))
+                ? 'api.admin.pages.certifications.documents.download'
+                : 'api.pages.certifications.documents.download';
+
             foreach ($this->documents as $key => $doc) {
                 $documentsMetadata[$key] = [
                     'original_name' => $doc['original_name'] ?? 'document.pdf',
                     'mime_type' => $doc['mime_type'] ?? 'application/pdf',
                     'file_size' => $doc['file_size'] ?? 0,
-                    'download_url' => route('api.pages.certifications.documents.download', [
+                    'download_url' => route($routeName, [
                         'certification' => $this->id,
                         'key' => $key,
                     ]),
@@ -38,6 +48,16 @@ class PageCertificationResource extends JsonResource
         return [
             'id' => (string) $this->id,
             'page_id' => (int) $this->page_id,
+            'page' => $page ? [
+                'id' => (int) $page->id,
+                'name' => $page->name,
+                'handle' => $page->handle,
+                'avatar_url' => $page->avatar_url,
+            ] : null,
+            'submitter' => $this->submitter ? [
+                'id' => (int) $this->submitter->id,
+                'name' => $this->submitter->name,
+            ] : null,
             'status' => $this->status->value,
             'status_label' => $this->status->label(),
             'rccm_number' => $isOwnerOrAdmin ? $this->rccm_number : null,
@@ -52,7 +72,7 @@ class PageCertificationResource extends JsonResource
             'supplement_request_reason' => $this->supplement_request_reason,
             'payment_transaction_id' => $isOwnerOrAdmin ? $this->payment_transaction_id : null,
             'is_paid' => $this->payment_transaction_id !== null,
-            'renews_at' => $this->page->activeSubscription?->current_period_end?->toIso8601String(),
+            'renews_at' => $page?->activeSubscription?->current_period_end?->toIso8601String(),
             'submitted_at' => $this->submitted_at?->toIso8601String(),
             'decided_at' => $this->decided_at?->toIso8601String(),
             'history' => $isOwnerOrAdmin ? ($this->history ?? []) : [],

@@ -36,8 +36,23 @@ class AdminKycQueueController extends Controller
 
         $submissions = $this->kycService->getQueue($filters, $perPage);
 
+        $userIds = collect($submissions->items())
+            ->pluck('user_id')
+            ->filter()
+            ->unique()
+            ->values();
+
+        // Récupération groupée de l'historique des soumissions pour calculer la tentative sans requête N+1
+        $userSubmissionHistories = $userIds->isNotEmpty()
+            ? KycSubmission::whereIn('user_id', $userIds)
+                ->select(['id', 'user_id', 'created_at'])
+                ->orderBy('created_at', 'asc')
+                ->get()
+                ->groupBy('user_id')
+            : collect();
+
         // Transformation conforme au contrat TypeScript KycRow + compatibilité existante
-        $items = collect($submissions->items())->map(function (KycSubmission $sub) {
+        $items = collect($submissions->items())->map(function (KycSubmission $sub) use ($userSubmissionHistories) {
             $user = $sub->user;
 
             $requestedBadge = $sub->metadata['requested_badge'] ?? $sub->profile_category;
@@ -63,14 +78,27 @@ class AdminKycQueueController extends Controller
                 default => 'pending',
             };
 
-            $requiredDocs = match ($sub->profile_category) {
-                'page' => 4,
-                'agent' => 4,
-                'landlord', 'bailleur' => 4,
-                default => 2,
-            };
+            $requiredDocs = $this->calculateRequiredDocs($sub);
             $receivedDocs = $sub->documents->count();
-            $headlineOk = ($receivedDocs >= $requiredDocs) && ! empty($sub->id_number);
+            $headlineOk = ($receivedDocs >= $requiredDocs);
+
+            // Calcul dynamique du numéro de tentative pour l'utilisateur
+            $userHistory = $userSubmissionHistories->get($sub->user_id);
+            if ($userHistory && $userHistory->isNotEmpty()) {
+                $idx = $userHistory->search(fn ($item) => (string) $item->id === (string) $sub->id);
+                if ($idx !== false) {
+                    $attempt = $idx + 1;
+                } else {
+                    $attempt = $userHistory->filter(fn ($item) => $item->created_at <= $sub->created_at)->count();
+                }
+            } else {
+                $attempt = 1;
+            }
+
+            if (isset($sub->metadata['attempt']) && is_numeric($sub->metadata['attempt'])) {
+                $attempt = (int) $sub->metadata['attempt'];
+            }
+            $attempt = max(1, (int) $attempt);
 
             return [
                 'id' => (string) $sub->id,
@@ -91,7 +119,7 @@ class AdminKycQueueController extends Controller
                 'city' => $user?->city,
                 'country' => $user?->country_code,
                 'submittedAt' => $sub->created_at->toISOString(),
-                'attempt' => 1,
+                'attempt' => $attempt,
                 'docs' => [
                     'received' => $receivedDocs,
                     'required' => $requiredDocs,
@@ -545,5 +573,32 @@ class AdminKycQueueController extends Controller
         return Str::isUuid($idOrRef)
             ? KycSubmission::where(fn ($q) => $q->where('id', $idOrRef)->orWhere('reference', $idOrRef))->firstOrFail()
             : KycSubmission::where('reference', $idOrRef)->firstOrFail();
+    }
+
+    /**
+     * Calcule le nombre de pièces requises dynamiquement selon le profil et les données fournies.
+     */
+    public function calculateRequiredDocs(KycSubmission $sub): int
+    {
+        if (isset($sub->metadata['required_docs_count']) && is_numeric($sub->metadata['required_docs_count'])) {
+            return (int) $sub->metadata['required_docs_count'];
+        }
+
+        if (isset($sub->metadata['required_documents']) && is_array($sub->metadata['required_documents'])) {
+            return count($sub->metadata['required_documents']);
+        }
+
+        $idType = strtolower((string) ($sub->id_type ?? $sub->metadata['id_type'] ?? ''));
+        $isPassport = $idType === 'passport';
+
+        $category = strtolower((string) ($sub->profile_category ?? 'default'));
+
+        return match ($category) {
+            'page' => 4,
+            'double' => $isPassport ? 4 : 5,
+            'agent' => $isPassport ? 3 : 4,
+            'landlord', 'bailleur' => $isPassport ? 3 : 4,
+            default => 2,
+        };
     }
 }

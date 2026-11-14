@@ -14,6 +14,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class PageCertificationController extends Controller
@@ -106,26 +107,79 @@ class PageCertificationController extends Controller
 
     /**
      * Initie le règlement des frais d'examen de certification via PAY.
+     * Lance la demande Mobile Money et rattache la transaction au dossier.
      */
     public function initiatePayment(Request $request, Page $page): JsonResponse
     {
         Gate::authorize('submitCertification', $page);
 
         $request->validate([
-            'provider' => ['required', 'string', 'in:orange,mtn,moov,wave,cash'],
-            'phone_number' => ['required', 'string', 'max:20'],
+            'provider' => ['nullable', 'string', 'in:orange,mtn,moov,wave,cash'],
+            'operator' => ['nullable', 'string', 'in:orange,mtn,moov,wave,cash'],
+            'phone_number' => ['nullable', 'string', 'max:25'],
+            'phone' => ['nullable', 'string', 'max:25'],
             'price_id' => ['nullable', 'integer', 'exists:subscription_prices,id'],
             'gateway' => ['nullable', 'string'],
             'idempotency_key' => ['nullable', 'string', 'max:100'],
+            'key' => ['nullable', 'string', 'max:100'],
+            'country' => ['nullable', 'string', 'max:5'],
+            'country_code' => ['nullable', 'string', 'max:5'],
         ]);
 
-        $transaction = $this->certificationService->initiatePayment(
+        $operator = $request->input('operator') ?? $request->input('provider');
+        $phone = $request->input('phone') ?? $request->input('phone_number');
+
+        if (! $operator) {
+            throw ValidationException::withMessages([
+                'provider' => ['L\'opérateur ou fournisseur de paiement (provider/operator) est obligatoire.'],
+            ]);
+        }
+
+        if (! $phone) {
+            throw ValidationException::withMessages([
+                'phone_number' => ['Le numéro de téléphone (phone_number/phone) est obligatoire.'],
+            ]);
+        }
+
+        $payload = array_merge($request->all(), [
+            'provider' => $operator,
+            'operator' => $operator,
+            'phone_number' => $phone,
+            'phone' => $phone,
+        ]);
+
+        $result = $this->certificationService->initiatePayment(
             page: $page,
             user: $request->user(),
-            paymentData: $request->all()
+            paymentData: $payload
         );
 
+        $transaction = $result['transaction'];
+        $initiateResult = $result['initiate_result'] ?? null;
+        $timeoutSeconds = (int) config('payment.timeout_seconds', 120);
+
+        if ($initiateResult && ! $initiateResult->isSuccessful) {
+            return response()->json([
+                'success' => false,
+                'code' => $initiateResult->errorCode ?? 'GATEWAY_ERROR',
+                'message' => $initiateResult->errorMessage ?? 'Échec lors de l\'initialisation chez l\'opérateur.',
+                'data' => (new PaymentTransactionResource($transaction))->resolve(),
+            ], 422);
+        }
+
         return (new PaymentTransactionResource($transaction))
+            ->additional([
+                'success' => true,
+                'message' => 'Demande de paiement envoyée sur le mobile.',
+                'prompt' => [
+                    'ussd' => $initiateResult?->ussdPrompt,
+                    'ussd_code' => $initiateResult?->ussdPrompt,
+                    'message' => $initiateResult?->ussdPrompt,
+                    'timeout_seconds' => $timeoutSeconds,
+                    'expires_at' => $transaction->created_at ? $transaction->created_at->addSeconds($timeoutSeconds)->toIso8601String() : now()->addSeconds($timeoutSeconds)->toIso8601String(),
+                    'instruction' => 'Veuillez valider l\'opération sur votre téléphone en saisissant votre code secret Mobile Money.',
+                ],
+            ])
             ->response()
             ->setStatusCode(201);
     }

@@ -43,6 +43,8 @@ class Report extends Model
 
     protected $appends = [
         'target',
+        'target_type',
+        'available_actions',
     ];
 
     /**
@@ -167,7 +169,7 @@ class Report extends Model
         $meta = is_string($value) ? json_decode($value, true) : (is_array($value) ? $value : []);
 
         $target = $this->target;
-        if (($target['type'] ?? null) === 'account' && ! empty($target['display_name'])) {
+        if (in_array($target['type'] ?? null, ['account', 'page'], true) && ! empty($target['display_name'])) {
             $meta['target_label'] = $target['display_name'];
         } elseif (empty($meta['target_label']) && ! empty($target['excerpt'])) {
             $meta['target_label'] = $target['excerpt'];
@@ -317,6 +319,50 @@ class Report extends Model
             'excerpt' => $excerpt,
             'thumbnail_url' => $thumbnailUrl,
             'label' => $contentLabel, // Compatibilité
+            'target_type' => $shortType,
+            'available_actions' => $this->available_actions,
         ];
+    }
+
+    /**
+     * Type court et normalisé de la cible (ex: 'page', 'user', 'post', 'reel', 'listing', 'comment', 'message').
+     */
+    public function getTargetTypeAttribute(): string
+    {
+        return static::resolveShortType($this->reportable_type);
+    }
+
+    /**
+     * Actions de modération proposées et admissibles pour cette cible.
+     *
+     * @return array<int, string>
+     */
+    public function getAvailableActionsAttribute(): array
+    {
+        return match ($this->target_type) {
+            'page' => [
+                'warn_page',
+                'suspend_page',
+                'unsuspend_page',
+                'keep_online',
+                'request_correction',
+            ],
+            'user' => [
+                'warn_author',
+                'suspend_author',
+                'restrict_author',
+                'keep_online',
+                'request_correction',
+            ],
+            default => [
+                'keep_online',
+                'hide',
+                'remove',
+                'warn_author',
+                'suspend_author',
+                'restrict_author',
+                'request_correction',
+            ],
+        };
     }
 }

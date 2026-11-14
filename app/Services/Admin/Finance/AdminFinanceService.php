@@ -145,7 +145,7 @@ class AdminFinanceService
         }
 
         // Compteurs d'onglets calculés sur la base filtrée hors statut
-        $baseQuery = clone $query;
+        $baseQuery = (clone $query)->reorder();
         $statusCounts = $baseQuery
             ->selectRaw('status, count(*) as count')
             ->groupBy('status')
@@ -491,12 +491,7 @@ class AdminFinanceService
                 'cancel_reason' => 'Compte utilisateur supprimé',
             ]);
 
-        $query = Subscription::with([
-            'user:id,name,display_name,email,phone,handle,avatar_url,city,badge',
-            'product:id,code,name',
-            'price:id,cadence,price_amount,currency',
-        ])
-            ->orderByDesc('created_at');
+        $query = Subscription::query();
 
         if (! empty($filters['badge_type'])) {
             $query->where('badge_type', $filters['badge_type']);
@@ -529,8 +524,8 @@ class AdminFinanceService
             });
         }
 
-        // Compteurs d'onglets et calcul du MRR avant filtre d'état
-        $baseQuery = clone $query;
+        // Compteurs d'onglets et calcul du MRR avant filtre d'état (requête propre sans eager loading ni tri)
+        $baseQuery = (clone $query)->reorder();
         $stateCounts = $baseQuery
             ->selectRaw('state, count(*) as count')
             ->groupBy('state')
@@ -562,8 +557,16 @@ class AdminFinanceService
 
         $boundedPerPage = min(100, max(1, $perPage));
 
+        $paginator = $query->with([
+            'user:id,name,display_name,email,phone,handle,avatar_url,city,badge',
+            'product:id,code,name',
+            'price:id,cadence,price_amount,currency',
+        ])
+            ->orderByDesc('created_at')
+            ->paginate($boundedPerPage);
+
         return [
-            'paginator' => $query->paginate($boundedPerPage),
+            'paginator' => $paginator,
             'counts' => $counts,
             'mrr' => round($mrr, 2),
         ];

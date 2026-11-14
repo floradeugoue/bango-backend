@@ -521,7 +521,7 @@ it('returns administrative map data excluding invalid coordinates', function () 
         ->and($ids)->not->toContain($lWithoutCoords->id);
 });
 
-it('tracks visits and flags overdue SLA over 18 hours', function () {
+it('tracks visits and flags overdue SLA over 24 hours', function () {
     [$solange, $sessionId] = createListingControlSession('verification');
 
     $owner = User::factory()->create();
@@ -536,7 +536,7 @@ it('tracks visits and flags overdue SLA over 18 hours', function () {
         'status' => 'open',
     ]);
 
-    // Overdue visit (created 20h ago without owner answer)
+    // Overdue visit (created 25h ago without owner answer)
     $overdueVisit = VisitReservation::create([
         'listing_id' => $listing->id,
         'slot_id' => $slot->id,
@@ -546,7 +546,7 @@ it('tracks visits and flags overdue SLA over 18 hours', function () {
         'fee' => 5000,
         'currency' => 'XOF',
     ]);
-    VisitReservation::where('id', $overdueVisit->id)->update(['created_at' => now()->subHours(20)]);
+    VisitReservation::where('id', $overdueVisit->id)->update(['created_at' => now()->subHours(25)]);
 
     $response = $this->withUnencryptedCookie('bango_admin_session', $sessionId)
         ->getJson('/api/admin/listings/visits?overdue_sla=1');
@@ -554,6 +554,7 @@ it('tracks visits and flags overdue SLA over 18 hours', function () {
     $response->assertStatus(200)
         ->assertJsonPath('success', true)
         ->assertJsonPath('data.0.id', $overdueVisit->id)
+        ->assertJsonPath('data.0.is_overdue_sla_24h', true)
         ->assertJsonPath('data.0.is_overdue_sla_18h', true);
 });
 

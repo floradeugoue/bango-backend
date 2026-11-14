@@ -6,6 +6,18 @@ return [
         'title' => 'Nouveau j\'aime',
         'body' => ':user a aimé votre publication.',
     ],
+    'story_like' => [
+        'title' => 'Nouveau j\'aime',
+        'body' => ':user a aimé votre story.',
+    ],
+    'story_question_answer' => [
+        'title' => 'Réponse à votre question',
+        'body' => ':user a répondu à votre question : ":snippet"',
+    ],
+    'countdown_remind' => [
+        'title' => 'Rappel d\'événement',
+        'body' => 'Rappel activé pour le compte à rebours.',
+    ],
     'comment' => [
         'title' => 'Nouveau commentaire',
         'body' => ':user a commenté votre publication : ":snippet"',
