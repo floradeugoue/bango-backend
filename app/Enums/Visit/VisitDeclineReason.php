@@ -14,7 +14,7 @@ enum VisitDeclineReason: string
     {
         return match ($this) {
             self::Unavailable => 'Bailleur indisponible',
-            self::NoAnswer => 'Délai de réponse de 18 h dépassé',
+            self::NoAnswer => 'Délai de réponse de 24 h dépassé',
             self::SlotTaken => 'Créneau déjà réservé',
             self::PriceDisagreement => 'Désaccord sur les conditions',
             self::Other => 'Autre motif',

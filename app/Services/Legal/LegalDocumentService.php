@@ -164,4 +164,33 @@ class LegalDocumentService
             ->where('version', $mandatoryVersion)
             ->exists();
     }
+
+    /**
+     * Vérifie si l'utilisateur a accepté une version spécifique des CGU (ou d'un document légal).
+     */
+    public function hasUserAcceptedVersion(User $user, ?string $version, string $documentSlug = self::TERMS_SLUG): bool
+    {
+        if (empty($version)) {
+            return true;
+        }
+
+        if ($user->accepted_terms_version !== null && $user->terms_accepted_at !== null) {
+            if ($user->accepted_terms_version === $version || version_compare($user->accepted_terms_version, $version, '>=')) {
+                return true;
+            }
+        }
+
+        $acceptedVersions = TermsAcceptance::query()
+            ->where('user_id', $user->id)
+            ->where('document_slug', $documentSlug)
+            ->pluck('version');
+
+        foreach ($acceptedVersions as $acceptedVersion) {
+            if ($acceptedVersion === $version || version_compare((string) $acceptedVersion, (string) $version, '>=')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }

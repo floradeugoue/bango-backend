@@ -72,6 +72,11 @@ class Story extends Model
         return $this->hasMany(StoryLike::class);
     }
 
+    public function stickerAnswers(): HasMany
+    {
+        return $this->hasMany(StoryStickerAnswer::class, 'story_id');
+    }
+
     public function slides(): HasMany
     {
         return $this->hasMany(StorySlide::class)->orderBy('order', 'asc');

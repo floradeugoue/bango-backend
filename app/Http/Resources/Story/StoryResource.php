@@ -40,6 +40,8 @@ class StoryResource extends JsonResource
         $authorHandle = $page ? $page->handle : $this->user->handle;
         $authorAvatar = $page ? $page->logo_url : $this->user->avatar_url;
         $authorVerified = $page ? $page->isCertified() : (bool) $this->user->is_verified;
+        $authorBadge = $page ? ($page->isCertified() ? 'page_certified' : 'none') : ($this->user?->badge ?? 'none');
+        $userBadge = $this->user?->badge ?? 'none';
 
         return [
             'id' => (string) $this->id,
@@ -50,6 +52,7 @@ class StoryResource extends JsonResource
                 'handle' => $page->handle,
                 'logo_url' => $page->logo_url,
                 'is_certified' => $page->isCertified(),
+                'badge' => 'page_certified',
             ] : null,
             'author' => [
                 'id' => $authorId,
@@ -60,7 +63,18 @@ class StoryResource extends JsonResource
                 'is_verified' => $authorVerified,
                 'certified' => $authorVerified,
                 'is_certified' => $authorVerified,
+                'badge' => $authorBadge,
             ],
+            'user' => $this->user ? [
+                'id' => (int) $this->user->id,
+                'name' => $this->user->name,
+                'handle' => $this->user->handle,
+                'display_name' => $this->user->display_name ?: $this->user->name,
+                'avatar_url' => $this->user->avatar_url,
+                'is_verified' => (bool) $this->user->is_verified,
+                'badge' => $userBadge,
+            ] : null,
+            'author_badge' => $authorBadge,
             'audience' => $this->audience->value,
             'allow_replies' => (bool) $this->allow_replies,
             'allow_archive' => (bool) $this->allow_archive,

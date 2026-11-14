@@ -36,8 +36,7 @@ class AdminSupportOperationsService
     {
         $perPage = min(max($perPage, 1), 100);
 
-        $query = SupportTicket::with(['user:id,name,display_name,email,phone,handle,avatar_url', 'assignedAgent:id,name,email', 'resolvedBy:id,name,email'])
-            ->withCount('messages');
+        $query = SupportTicket::query();
 
         // Filtre par priorité
         if (! empty($filters['priority'])) {
@@ -89,9 +88,9 @@ class AdminSupportOperationsService
                 });
         }
 
-        // Compteurs d'onglets calculés avant filtre de statut
-        $baseQuery = clone $query;
-        $statusCounts = $baseQuery
+        // Compteurs d'onglets calculés avant filtre de statut (requête propre sans withCount, relations ni tri)
+        $statusCounts = (clone $query)
+            ->reorder()
             ->selectRaw('status, count(*) as count')
             ->groupBy('status')
             ->pluck('count', 'status')
@@ -106,6 +105,10 @@ class AdminSupportOperationsService
                 : explode(',', (string) $filters['status']);
             $query->whereIn('status', array_map('trim', $statuses));
         }
+
+        // Relations et sous-requêtes de décompte appliquées uniquement à la liste paginée
+        $query->with(['user:id,name,display_name,email,phone,handle,avatar_url', 'assignedAgent:id,name,email', 'resolvedBy:id,name,email'])
+            ->withCount('messages');
 
         // Tri sur liste blanche
         $sort = $filters['sort'] ?? 'created_at';
@@ -496,13 +499,22 @@ class AdminSupportOperationsService
     }
 
     /**
-     * 4.8. Opérateurs disponibles pour assignation de tickets.
+     * 4.8. Opérateurs disponibles pour assignation de tickets avec statistiques de notation.
      *
      * @return Collection<int, User>
      */
     public function getAssignees(): Collection
     {
-        return User::where('status', 'active')
+        $advisorRatings = SupportTicket::query()
+            ->whereNotNull('assigned_to')
+            ->whereNotNull('rating')
+            ->reorder()
+            ->selectRaw('assigned_to, AVG(rating) as avg_rating, COUNT(rating) as count_ratings')
+            ->groupBy('assigned_to')
+            ->get()
+            ->keyBy('assigned_to');
+
+        $assignees = User::where('status', 'active')
             ->whereHas('role', function (Builder $q) {
                 $q->whereIn('slug', ['support', 'admin', 'direction']);
             })
@@ -510,6 +522,92 @@ class AdminSupportOperationsService
             ->with('role:id,name,slug')
             ->orderBy('name')
             ->get();
+
+        foreach ($assignees as $assignee) {
+            $stats = $advisorRatings->get($assignee->id);
+            $avg = $stats ? round((float) $stats->avg_rating, 2) : null;
+            $count = $stats ? (int) $stats->count_ratings : 0;
+
+            $assignee->average_rating = $avg;
+            $assignee->rating_average = $avg;
+            $assignee->ratings_count = $count;
+        }
+
+        return $assignees;
+    }
+
+    /**
+     * 4.8 bis A. Statistiques détaillées des avis et moyennes des conseillers du support.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return array<string, mixed>
+     */
+    public function getAdvisorRatings(array $filters = []): array
+    {
+        $query = SupportTicket::query()->whereNotNull('rating');
+
+        if (! empty($filters['start_date'])) {
+            $query->where('rated_at', '>=', Carbon::parse($filters['start_date'])->startOfDay());
+        }
+        if (! empty($filters['end_date'])) {
+            $query->where('rated_at', '<=', Carbon::parse($filters['end_date'])->endOfDay());
+        }
+
+        $totalRatings = (clone $query)->count();
+        $globalAverage = $totalRatings > 0 ? round((float) (clone $query)->avg('rating'), 2) : 0.0;
+
+        // Répartition par note (1 à 5 étoiles)
+        $starsDistribution = (clone $query)
+            ->reorder()
+            ->selectRaw('rating, count(*) as count')
+            ->groupBy('rating')
+            ->pluck('count', 'rating')
+            ->toArray();
+
+        $stars = [
+            '1' => (int) ($starsDistribution[1] ?? 0),
+            '2' => (int) ($starsDistribution[2] ?? 0),
+            '3' => (int) ($starsDistribution[3] ?? 0),
+            '4' => (int) ($starsDistribution[4] ?? 0),
+            '5' => (int) ($starsDistribution[5] ?? 0),
+        ];
+
+        // Notes par conseiller assigné
+        $advisorsStats = (clone $query)
+            ->whereNotNull('assigned_to')
+            ->reorder()
+            ->selectRaw('assigned_to, AVG(rating) as avg_rating, COUNT(rating) as count_ratings')
+            ->groupBy('assigned_to')
+            ->get();
+
+        $advisorUserIds = $advisorsStats->pluck('assigned_to')->all();
+        $advisorUsers = User::whereIn('id', $advisorUserIds)
+            ->select(['id', 'name', 'display_name', 'email', 'avatar_url'])
+            ->get()
+            ->keyBy('id');
+
+        $advisors = $advisorsStats->map(function ($row) use ($advisorUsers) {
+            $user = $advisorUsers->get($row->assigned_to);
+            $avg = round((float) $row->avg_rating, 2);
+
+            return [
+                'id' => (int) $row->assigned_to,
+                'advisor_id' => (int) $row->assigned_to,
+                'name' => $user?->display_name ?: ($user?->name ?? "Conseiller #{$row->assigned_to}"),
+                'email' => $user?->email,
+                'avatar_url' => $user?->avatar_url,
+                'average_rating' => $avg,
+                'rating_average' => $avg,
+                'ratings_count' => (int) $row->count_ratings,
+            ];
+        })->sortByDesc('average_rating')->values()->all();
+
+        return [
+            'global_average' => $globalAverage,
+            'total_ratings' => $totalRatings,
+            'stars_distribution' => $stars,
+            'advisors' => $advisors,
+        ];
     }
 
     /**

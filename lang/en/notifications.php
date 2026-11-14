@@ -6,6 +6,18 @@ return [
         'title' => 'New like',
         'body' => ':user liked your post.',
     ],
+    'story_like' => [
+        'title' => 'New like',
+        'body' => ':user liked your story.',
+    ],
+    'story_question_answer' => [
+        'title' => 'Answer to your question',
+        'body' => ':user answered your question: ":snippet"',
+    ],
+    'countdown_remind' => [
+        'title' => 'Event reminder',
+        'body' => 'Reminder set for the countdown.',
+    ],
     'comment' => [
         'title' => 'New comment',
         'body' => ':user commented on your post: ":snippet"',

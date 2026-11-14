@@ -126,4 +126,3 @@ it('rejects preference values exceeding 16 KB', function () {
     $response->assertStatus(422)
         ->assertJsonValidationErrors(['value']);
 });
-

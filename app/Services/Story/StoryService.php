@@ -2,13 +2,13 @@
 
 namespace App\Services\Story;
 
-use App\Enums\Message\MessageType;
 use App\Enums\Story\StoryAudience;
 use App\Enums\Story\StoryMediaType;
 use App\Enums\Story\StoryReplyType;
 use App\Enums\Story\StoryStatus;
 use App\Enums\Story\StoryStickerType;
 use App\Events\Story\StoryReplyCreated;
+use App\Jobs\Story\SendCountdownReminderJob;
 use App\Models\Reel\Sound;
 use App\Models\Story\Story;
 use App\Models\Story\StoryLike;
@@ -17,16 +17,16 @@ use App\Models\Story\StoryReply;
 use App\Models\Story\StoryReport;
 use App\Models\Story\StorySlide;
 use App\Models\Story\StorySticker;
+use App\Models\Story\StoryStickerAnswer;
 use App\Models\Story\StoryView;
 use App\Models\User;
 use App\Notifications\Social\SocialNotification;
 use App\Services\Media\MediaStorageService;
-use App\Services\Message\MessageService;
-use App\Services\Message\MessageThreadService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -364,8 +364,10 @@ class StoryService
                     'display_name' => $author->display_name ?? $author->name,
                     'avatar_url' => $author->avatar_url,
                     'is_verified' => (bool) $author->is_verified,
+                    'badge' => $author->badge ?? 'none',
                     'is_mine' => $author->id === $user->id,
                 ],
+                'badge' => $author->badge ?? 'none',
                 'stories_count' => $totalStories,
                 'unviewed_count' => $unviewedCount,
                 'has_unviewed' => $unviewedCount > 0,
@@ -798,30 +800,8 @@ class StoryService
         }
 
         // Dispatch de l'événement métier STRICTEMENT APRÈS le commit de la transaction
+        // L'écouteur CreateConversationFromStoryReply se charge de créer la conversation et le message de manière idempotente
         StoryReplyCreated::dispatch($reply);
-
-        // Création du message dans la conversation privée (MS / Point 36)
-        try {
-            $threadService = app(MessageThreadService::class);
-            if ($activePageId) {
-                // Réponse faite au nom d'une page : le fil de discussion est rattaché à cette page
-                $conversation = $threadService->getOrCreatePageConversation($story->user, (int) $activePageId);
-            } else {
-                $conversation = $threadService->getOrCreateDirectConversation($user, $story->user_id);
-            }
-            $messageService = app(MessageService::class);
-            $messageService->sendMessage($conversation, $user, [
-                'type' => MessageType::StoryReply,
-                'body' => $type === StoryReplyType::Text ? $text : $reaction,
-                'metadata' => [
-                    'story_id' => (string) $story->id,
-                    'story_reply_id' => $reply->id,
-                    'preview' => $storyPreviewCard,
-                ],
-            ]);
-        } catch (Throwable $e) {
-            Log::warning('Échec de création du message pour la réponse story : '.$e->getMessage());
-        }
 
         return $reply;
     }
@@ -890,14 +870,34 @@ class StoryService
         $story->update(['likes_count' => $count]);
 
         if ($story->user_id !== $user->id) {
-            try {
-                $targetPageId = $story->page_id ?? null;
-                $story->user->notify(new SocialNotification('like', $user, [
-                    'story_id' => (string) $story->id,
-                    'page_id' => $targetPageId,
-                ]));
-            } catch (Throwable $e) {
-                Log::warning("Notification like story échouée : {$e->getMessage()}");
+            $storyId = (string) $story->id;
+            $actorId = (int) $user->id;
+
+            $alreadyNotified = $story->user->notifications()
+                ->where(function ($q) use ($storyId, $actorId) {
+                    $driver = DB::connection()->getDriverName();
+                    if ($driver === 'pgsql') {
+                        $q->whereRaw("CAST(data AS jsonb)->>'type' IN ('story_like', 'like')")
+                            ->whereRaw("CAST(data AS jsonb)->>'actor_id' = ?", [(string) $actorId])
+                            ->whereRaw("CAST(data AS jsonb)->'metadata'->>'story_id' = ?", [$storyId]);
+                    } else {
+                        $q->whereIn('data->type', ['story_like', 'like'])
+                            ->where('data->actor_id', $actorId)
+                            ->where('data->metadata->story_id', $storyId);
+                    }
+                })
+                ->exists();
+
+            if (! $alreadyNotified) {
+                try {
+                    $targetPageId = $story->page_id ?? null;
+                    $story->user->notify(new SocialNotification('story_like', $user, [
+                        'story_id' => (string) $story->id,
+                        'page_id' => $targetPageId,
+                    ]));
+                } catch (Throwable $e) {
+                    Log::warning("Notification like story échouée : {$e->getMessage()}");
+                }
             }
         }
 
@@ -972,30 +972,56 @@ class StoryService
         $sticker = StorySticker::with(['slide.story'])->findOrFail($stickerId);
         $story = $sticker->slide->story;
 
-        DB::table('story_sticker_answers')->insert([
-            'id' => (string) Str::uuid(),
-            'story_id' => $story->id,
-            'slide_id' => $sticker->story_slide_id ?? $sticker->slide->id,
-            'sticker_id' => $sticker->id,
-            'user_id' => $user->id,
-            'type' => 'countdown_reminder',
-            'answer' => 'remind',
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+        DB::table('story_sticker_answers')->updateOrInsert(
+            [
+                'sticker_id' => $sticker->id,
+                'user_id' => $user->id,
+                'type' => 'countdown_reminder',
+            ],
+            [
+                'id' => (string) Str::uuid(),
+                'story_id' => $story->id,
+                'slide_id' => $sticker->story_slide_id ?? $sticker->slide->id,
+                'answer' => 'remind',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]
+        );
 
-        try {
-            $user->notify(new SocialNotification('countdown_remind', $user, [
-                'story_id' => (string) $story->id,
-                'sticker_id' => (string) $sticker->id,
-            ]));
-        } catch (Throwable $e) {
-            Log::warning("Notification countdown reminder échouée : {$e->getMessage()}");
+        // Programmer l'envoi différé à 'until' sans notification immédiate au moment du toucher
+        $data = $sticker->data ?? [];
+        $untilRaw = $data['until'] ?? $data['end_at'] ?? $data['ends_at'] ?? null;
+
+        if ($untilRaw) {
+            try {
+                $until = Carbon::parse($untilRaw);
+                if ($until->isFuture()) {
+                    SendCountdownReminderJob::dispatch($sticker->id, $user->id)->delay($until);
+                }
+            } catch (Throwable $e) {
+                Log::warning("Impossible de programmer le rappel countdown pour le sticker {$sticker->id} : {$e->getMessage()}");
+            }
         }
 
         return [
             'success' => true,
             'message' => 'Rappel de compte à rebours activé.',
+        ];
+    }
+
+    public function cancelRemindSticker(string $stickerId, User $user): array
+    {
+        StorySticker::findOrFail($stickerId);
+
+        DB::table('story_sticker_answers')
+            ->where('sticker_id', $stickerId)
+            ->where('user_id', $user->id)
+            ->where('type', 'countdown_reminder')
+            ->delete();
+
+        return [
+            'success' => true,
+            'message' => 'Rappel de compte à rebours annulé.',
         ];
     }
 
@@ -1029,18 +1055,82 @@ class StoryService
         return $merged;
     }
 
+    /**
+     * Récupère la liste des réponses aux stickers d'une Story (auteur ou page seulement).
+     */
+    public function getStickerAnswers(string $storyId, User $user, ?string $stickerId = null, int $perPage = 20): LengthAwarePaginator
+    {
+        $story = Story::with(['page.members'])->findOrFail($storyId);
+
+        $activePage = request()?->attributes?->get('acting_page') ?? request()?->attributes?->get('active_page');
+        $activePageId = $activePage?->id;
+
+        $isAuthor = $story->user_id === $user->id;
+        $isPageOwnerOrMember = $story->page_id && (
+            $story->page?->owner_id === $user->id ||
+            $story->page?->members()->where('user_id', $user->id)->exists() ||
+            ($activePageId && (int) $activePageId === (int) $story->page_id)
+        );
+
+        if (! $isAuthor && ! $isPageOwnerOrMember) {
+            abort(403, 'Seul l\'auteur de la Story peut consulter les réponses.');
+        }
+
+        return StoryStickerAnswer::where('story_id', $story->id)
+            ->when($stickerId, fn ($q) => $q->where('sticker_id', $stickerId))
+            ->with([
+                'user:id,name,display_name,handle,avatar_url,is_verified,badge',
+                'page:id,name,handle,logo_url,certification_status',
+                'sticker',
+            ])
+            ->orderByDesc('created_at')
+            ->paginate($perPage);
+    }
+
     public function exportStory(string $id, User $user): array
     {
         $story = $this->getStory($id, $user);
         $firstSlide = $story->slides->first();
 
+        // 1. Vidéo déjà montée / exportée stockée dans les métadonnées
+        $mountedVideoUrl = $story->metadata['export_video_url'] ?? null;
+        if (! empty($mountedVideoUrl)) {
+            return [
+                'story_id' => (string) $story->id,
+                'media_url' => $mountedVideoUrl,
+                'sound' => $firstSlide?->sound_metadata,
+                'export_url' => $mountedVideoUrl,
+                'has_sound' => ! empty($firstSlide?->sound_metadata),
+                'status' => 'ready',
+            ];
+        }
+
+        // 2. Si la story est constituée d'une seule diapositive qui est déjà une vraie vidéo
+        $isVideoSlide = $story->slides->count() === 1
+            && $firstSlide?->media_type === StoryMediaType::Video
+            && ! empty($firstSlide?->media_url)
+            && preg_match('/\.(mp4|mov|webm)$/i', parse_url($firstSlide->media_url, PHP_URL_PATH) ?? '');
+
+        if ($isVideoSlide) {
+            return [
+                'story_id' => (string) $story->id,
+                'media_url' => $firstSlide->media_url,
+                'sound' => $firstSlide->sound_metadata,
+                'export_url' => $firstSlide->media_url,
+                'has_sound' => ! empty($firstSlide->sound_metadata),
+                'status' => 'ready',
+            ];
+        }
+
+        // 3. Tant qu'un montage vidéo avec le son n'a pas été réalisé, status = unavailable plutôt que ready
         return [
             'story_id' => (string) $story->id,
             'media_url' => $firstSlide?->media_url,
             'sound' => $firstSlide?->sound_metadata,
-            'export_url' => $firstSlide?->media_url,
+            'export_url' => null,
             'has_sound' => ! empty($firstSlide?->sound_metadata),
-            'status' => 'ready',
+            'status' => 'unavailable',
+            'message' => 'Le montage vidéo avec musique n\'est pas encore disponible pour cette story.',
         ];
     }
 }

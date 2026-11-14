@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Admin\AdminAuditLog;
 use App\Models\Admin\AdminSession;
 use App\Models\User;
+use App\Services\Admin\Account\AdminAccountOperationsService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -237,27 +238,31 @@ class UserController extends Controller
      *
      * @urlParam user integer required L'ID de l'utilisateur. Example: 1
      */
-    public function unsuspend(Request $request, User $user)
+    public function unsuspend(Request $request, User $user, AdminAccountOperationsService $accountService)
     {
-        $user->update([
-            'status' => 'active',
-            'suspension_reason' => null,
-            'suspended_from' => null,
-            'suspended_until' => null,
-        ]);
-
         $operator = $request->user();
+        $reason = (string) ($request->input('reason') ?: 'Levée manuelle de la suspension');
+
         if ($operator) {
+            $user = $accountService->liftSuspension($user, $operator, $reason);
+
             AdminAuditLog::logChainedEvent(
                 event: 'user.status_unsuspended',
                 operator: $operator,
                 targetType: 'User',
                 targetId: (string) $user->id,
                 targetLabel: "Levée suspension utilisateur #{$user->id} ({$user->name})",
-                context: ['target_user_id' => $user->id, 'email' => $user->email],
+                context: ['target_user_id' => $user->id, 'email' => $user->email, 'reason' => $reason],
                 ip: $request->ip(),
                 userAgent: $request->userAgent()
             );
+        } else {
+            $user->update([
+                'status' => 'active',
+                'suspension_reason' => null,
+                'suspended_from' => null,
+                'suspended_until' => null,
+            ]);
         }
 
         return response()->json(['success' => true, 'status' => 'active']);
@@ -298,22 +303,26 @@ class UserController extends Controller
      *
      * @urlParam user integer required L'ID de l'utilisateur. Example: 1
      */
-    public function unblock(Request $request, User $user)
+    public function unblock(Request $request, User $user, AdminAccountOperationsService $accountService)
     {
-        $user->update(['status' => 'active']);
-
         $operator = $request->user();
+        $reason = (string) ($request->input('reason') ?: 'Déblocage manuel du compte');
+
         if ($operator) {
+            $user = $accountService->liftBlock($user, $operator, $reason);
+
             AdminAuditLog::logChainedEvent(
                 event: 'user.status_unblocked',
                 operator: $operator,
                 targetType: 'User',
                 targetId: (string) $user->id,
                 targetLabel: "Déblocage utilisateur #{$user->id} ({$user->name})",
-                context: ['target_user_id' => $user->id, 'email' => $user->email],
+                context: ['target_user_id' => $user->id, 'email' => $user->email, 'reason' => $reason],
                 ip: $request->ip(),
                 userAgent: $request->userAgent()
             );
+        } else {
+            $user->update(['status' => 'active']);
         }
 
         return response()->json(['success' => true, 'status' => 'active']);

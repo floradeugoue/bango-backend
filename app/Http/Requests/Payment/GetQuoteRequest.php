@@ -27,7 +27,8 @@ class GetQuoteRequest extends FormRequest
             'custom_amount' => ['nullable', 'numeric', 'min:100'],
             'amount' => ['nullable', 'numeric', 'min:100'],
             'duration_days' => ['nullable', 'integer', 'min:1'],
-            'gateway' => ['nullable', 'string', 'in:monetbil'],
+            'gateway' => ['nullable', 'string', 'in:monetbil,wallet,credit'],
+            'channel' => ['nullable', 'string', 'in:mobile_money,credit_wallet,card'],
         ];
     }
 
@@ -51,6 +52,10 @@ class GetQuoteRequest extends FormRequest
 
     public function getGateway(): string
     {
+        if ($this->input('channel') === 'credit_wallet' || in_array($this->input('gateway'), ['wallet', 'credit'], true)) {
+            return 'wallet';
+        }
+
         return (string) $this->input('gateway', config('payment.default_gateway', 'monetbil'));
     }
 

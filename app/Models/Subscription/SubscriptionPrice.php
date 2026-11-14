@@ -2,6 +2,7 @@
 
 namespace App\Models\Subscription;
 
+use App\Models\Legal\LegalDocument;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -13,6 +14,8 @@ class SubscriptionPrice extends Model
 
     protected $fillable = [
         'product_id',
+        'legal_document_id',
+        'required_terms_version',
         'cadence',
         'price_amount',
         'currency',
@@ -37,6 +40,11 @@ class SubscriptionPrice extends Model
     public function product(): BelongsTo
     {
         return $this->belongsTo(SubscriptionProduct::class, 'product_id');
+    }
+
+    public function legalDocument(): BelongsTo
+    {
+        return $this->belongsTo(LegalDocument::class, 'legal_document_id');
     }
 
     public function subscriptions(): HasMany

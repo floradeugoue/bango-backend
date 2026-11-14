@@ -9,6 +9,7 @@ enum PaymentProvider: string
     case Apple = 'apple';
     case Google = 'google';
     case Credit = 'credit';
+    case Wallet = 'wallet';
 
     public function label(): string
     {
@@ -17,7 +18,7 @@ enum PaymentProvider: string
             self::Flutterwave => 'Flutterwave',
             self::Apple => 'Apple In-App Purchase',
             self::Google => 'Google Play Billing',
-            self::Credit => 'Crédit BANGO',
+            self::Credit, self::Wallet => 'Crédit BANGO',
         };
     }
 }

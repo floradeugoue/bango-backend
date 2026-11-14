@@ -142,7 +142,7 @@ class AdminListingControlService
         }
 
         // Compteurs d'onglets avant application du filtre de statut
-        $baseQuery = clone $query;
+        $baseQuery = (clone $query)->reorder();
         $statusCounts = $baseQuery
             ->selectRaw('status, count(*) as count')
             ->groupBy('status')
@@ -935,7 +935,7 @@ class AdminListingControlService
     }
 
     /**
-     * B.9. Suivi global des visites réservées avec état du SLA de réponse (18 heures).
+     * B.9. Suivi global des visites réservées avec état du SLA de réponse (24 heures).
      *
      * @param  array<string, mixed>  $filters
      * @return array{paginator: LengthAwarePaginator, counts: array<string, int>}
@@ -949,9 +949,9 @@ class AdminListingControlService
             $query->where('listing_id', $filters['listing_id']);
         }
 
-        // 2. Filtre dépassement SLA 18h (demandes en attente depuis plus de 18h)
+        // 2. Filtre dépassement SLA 24h (demandes en attente depuis plus de 24h)
         if (! empty($filters['overdue_sla'])) {
-            $slaLimit = now()->subHours(18);
+            $slaLimit = now()->subHours(24);
             $query->where('status', VisitReservationStatus::Requested->value)
                 ->where('created_at', '<', $slaLimit);
         }
@@ -977,7 +977,7 @@ class AdminListingControlService
         }
 
         // Compteurs d'onglets calculés avant filtre de statut
-        $baseQuery = clone $query;
+        $baseQuery = (clone $query)->reorder();
         $statusCounts = $baseQuery
             ->selectRaw('status, count(*) as count')
             ->groupBy('status')

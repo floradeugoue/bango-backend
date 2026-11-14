@@ -23,6 +23,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
 class Page extends Model
@@ -91,6 +92,14 @@ class Page extends Model
         }
 
         return Storage::disk('public')->url($value);
+    }
+
+    /**
+     * Retourne l'URL absolue de l'avatar (logo) de la Page.
+     */
+    public function getAvatarUrlAttribute(): ?string
+    {
+        return $this->logo_url;
     }
 
     /**
@@ -396,7 +405,7 @@ class Page extends Model
     {
         $userId = $user instanceof User ? $user->id : (int) $user;
 
-        return \Illuminate\Support\Facades\DB::table('user_blocks')
+        return DB::table('user_blocks')
             ->where('page_id', $this->id)
             ->where('blocked_id', $userId)
             ->exists();

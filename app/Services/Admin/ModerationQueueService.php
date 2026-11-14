@@ -6,6 +6,7 @@ use App\Enums\Admin\AdminPermission;
 use App\Enums\Boost\CampaignStatus;
 use App\Enums\Boost\CreditTransactionType;
 use App\Enums\Listing\ListingStatus;
+use App\Enums\Page\PageStatus;
 use App\Enums\Support\ReportStatus;
 use App\Models\Admin\AdminAuditLog;
 use App\Models\Auth\Role;
@@ -25,6 +26,7 @@ use App\Models\User;
 use App\Notifications\Support\ModerationDecisionNotification;
 use App\Services\Boost\CampaignService;
 use App\Services\Boost\CreditWalletService;
+use App\Services\Page\PageService;
 use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
@@ -39,8 +41,11 @@ class ModerationQueueService
 {
     public function __construct(
         protected CampaignService $campaignService,
-        protected CreditWalletService $creditWalletService
-    ) {}
+        protected CreditWalletService $creditWalletService,
+        protected ?PageService $pageService = null
+    ) {
+        $this->pageService = $pageService ?? app(PageService::class);
+    }
 
     /**
      * Récupère la file de signalements paginée avec filtres, onglets et compteurs.
@@ -74,6 +79,12 @@ class ModerationQueueService
                     'account',
                     'accounts',
                     'profile',
+                ]);
+            } elseif (in_array($tab, ['pages', 'page'], true)) {
+                $query->whereIn('reportable_type', [
+                    Page::class,
+                    'page',
+                    'pages',
                 ]);
             } else {
                 $class = Report::resolveReportableClass($tab);
@@ -215,6 +226,27 @@ class ModerationQueueService
                                 ->whereIn('reportable_id', $allCommentIds);
                         });
                     }
+
+                    // Pages visées dont le propriétaire correspond à la recherche
+                    $pageIdsByOwner = Page::whereIn('owner_id', $matchingUserIds)->pluck('id');
+                    if ($pageIdsByOwner->isNotEmpty()) {
+                        $q->orWhere(function ($sub) use ($pageIdsByOwner) {
+                            $sub->whereIn('reportable_type', [Page::class, 'page', 'pages'])
+                                ->whereIn('reportable_id', $pageIdsByOwner);
+                        });
+                    }
+                }
+
+                // Recherche directe par nom ou handle de la Page visée
+                $matchingPageIds = Page::query()
+                    ->where('name', 'LIKE', "%{$search}%")
+                    ->orWhere('handle', 'LIKE', "%{$search}%")
+                    ->pluck('id');
+                if ($matchingPageIds->isNotEmpty()) {
+                    $q->orWhere(function ($sub) use ($matchingPageIds) {
+                        $sub->whereIn('reportable_type', [Page::class, 'page', 'pages'])
+                            ->whereIn('reportable_id', $matchingPageIds);
+                    });
                 }
             });
         }
@@ -239,6 +271,7 @@ class ModerationQueueService
         $messageTypes = [Message::class, 'message', 'messages'];
         $commentTypes = [PostComment::class, ReelComment::class, 'post_comment', 'reel_comment', 'comment', 'comments'];
         $accountTypes = [User::class, 'user', 'users', 'account', 'accounts', 'profile'];
+        $pageTypes = [Page::class, 'page', 'pages'];
 
         $counters = [
             'total_pending' => Report::where('status', ReportStatus::Pending->value)->count(),
@@ -252,6 +285,7 @@ class ModerationQueueService
             'messages' => (clone $openQuery)->whereIn('reportable_type', $messageTypes)->count(),
             'comments' => (clone $openQuery)->whereIn('reportable_type', $commentTypes)->count(),
             'accounts' => (clone $openQuery)->whereIn('reportable_type', $accountTypes)->count(),
+            'pages' => (clone $openQuery)->whereIn('reportable_type', $pageTypes)->count(),
             'pending' => Report::where('status', ReportStatus::Pending->value)->count(),
         ];
 
@@ -341,12 +375,125 @@ class ModerationQueueService
             ? ModerationAppeal::whereIn('moderation_decision_id', $decisionIds)->first()
             : null;
 
+        $targetType = Report::resolveShortType($report->reportable_type);
+        $availableActions = $this->getDetailedAvailableActions($report, $content);
+
         return [
             'case' => $report,
             'content' => $content,
             'content_author' => $contentAuthor,
             'boost' => $campaignData,
             'appeal' => $appeal,
+            'target_type' => $targetType,
+            'available_actions' => $availableActions,
+            'actions' => $availableActions,
+        ];
+    }
+
+    /**
+     * Retourne la liste des actions de modération disponibles et contextualisées pour un dossier.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function getDetailedAvailableActions(Report $report, mixed $content = null): array
+    {
+        $shortType = Report::resolveShortType($report->reportable_type);
+
+        if ($shortType === 'page' || ($content instanceof Page)) {
+            $isSuspended = ($content instanceof Page) && $content->status === PageStatus::Suspended;
+
+            return [
+                [
+                    'action' => 'warn_page',
+                    'label' => 'Avertir la page',
+                    'description' => 'Notifier un avertissement officiel au propriétaire sans impacter son compte personnel ni supprimer la page.',
+                ],
+                [
+                    'action' => 'suspend_page',
+                    'label' => 'Suspendre la page',
+                    'description' => 'Suspendre la page professionnelle (pages.status = suspended) sans toucher au compte du propriétaire ni supprimer la page.',
+                    'recommended' => ! $isSuspended,
+                ],
+                [
+                    'action' => 'unsuspend_page',
+                    'label' => 'Lever la suspension',
+                    'description' => 'Rétablir le statut actif de la page professionnelle précédemment suspendue.',
+                    'recommended' => $isSuspended,
+                ],
+                [
+                    'action' => 'keep_online',
+                    'label' => 'Maintenir en ligne / Sans suite',
+                    'description' => 'Classer le dossier sans suite et maintenir la page en ligne.',
+                ],
+                [
+                    'action' => 'request_correction',
+                    'label' => 'Demander une correction',
+                    'description' => 'Demander au propriétaire de mettre sa page en conformité dans un délai imparti.',
+                ],
+            ];
+        }
+
+        if ($shortType === 'user' || ($content instanceof User)) {
+            return [
+                [
+                    'action' => 'warn_author',
+                    'label' => 'Avertir l\'utilisateur',
+                    'description' => 'Émettre un avertissement officiel au compte.',
+                ],
+                [
+                    'action' => 'suspend_author',
+                    'label' => 'Suspendre le compte',
+                    'description' => 'Suspendre temporairement le compte personnel.',
+                ],
+                [
+                    'action' => 'restrict_author',
+                    'label' => 'Restreindre le compte',
+                    'description' => 'Restreindre les interactions du compte sans suspendre sa session.',
+                ],
+                [
+                    'action' => 'keep_online',
+                    'label' => 'Maintenir en ligne / Sans suite',
+                    'description' => 'Classer le signalement sans suite.',
+                ],
+                [
+                    'action' => 'request_correction',
+                    'label' => 'Demander une correction',
+                    'description' => 'Demander une mise en conformité du profil.',
+                ],
+            ];
+        }
+
+        return [
+            [
+                'action' => 'keep_online',
+                'label' => 'Maintenir en ligne',
+                'description' => 'Classer le signalement sans suite et conserver le contenu visible.',
+            ],
+            [
+                'action' => 'hide',
+                'label' => 'Masquer le contenu',
+                'description' => 'Rendre le contenu inaccessible au public.',
+            ],
+            [
+                'action' => 'remove',
+                'label' => 'Supprimer le contenu',
+                'description' => 'Supprimer définitivement le contenu incriminé.',
+            ],
+            [
+                'action' => 'warn_author',
+                'label' => 'Avertir l\'auteur',
+                'description' => 'Envoyer un avertissement officiel à l\'auteur.',
+            ],
+            [
+                'action' => 'suspend_author',
+                'label' => 'Suspendre l\'auteur',
+                'description' => 'Suspendre le compte personnel de l\'auteur.',
+            ],
+            [
+                'action' => 'request_correction',
+                'label' => 'Demander une correction',
+                'description' => 'Demander la modification du contenu sous 24h à 72h.',
+            ],
         ];
     }
 
@@ -362,7 +509,24 @@ class ModerationQueueService
         User $operator,
         array $metadata = []
     ): ModerationDecision {
-        $allowedActions = ['keep_online', 'hide', 'remove', 'warn_author', 'suspend_author', 'restrict_author', 'restriction', 'request_correction'];
+        $allowedActions = [
+            'keep_online',
+            'hide',
+            'remove',
+            'warn_author',
+            'suspend_author',
+            'restrict_author',
+            'restriction',
+            'request_correction',
+            'warn_page',
+            'suspend_page',
+            'unsuspend_page',
+            'lift_suspension',
+            'warn',
+            'suspend',
+            'unsuspend',
+            'lift',
+        ];
         if (! in_array($action, $allowedActions, true)) {
             throw new InvalidArgumentException("Action de modération '{$action}' invalide.");
         }
@@ -379,15 +543,24 @@ class ModerationQueueService
                 throw new InvalidArgumentException("Le dossier {$lockedReport->reference} a déjà été traité.");
             }
 
-            // Validation des actions admissibles selon le type de cible
-            $isTargetUser = in_array(strtolower($lockedReport->reportable_type), ['user', 'app\\models\\user', 'users', 'account'], true);
-            if ($isTargetUser && in_array($action, ['remove', 'hide'], true)) {
-                throw new InvalidArgumentException("L'action '{$action}' n'est pas applicable à un profil utilisateur. Utilisez la suspension d'auteur ou l'avertissement.");
-            }
-
             // 1. Résolution du contenu polymorphique
             $targetClass = Report::resolveReportableClass($lockedReport->reportable_type);
             $content = $targetClass ? $targetClass::find($lockedReport->reportable_id) : null;
+
+            // Validation des actions admissibles selon le type de cible
+            $shortType = Report::resolveShortType($lockedReport->reportable_type);
+            $isTargetUser = in_array(strtolower($lockedReport->reportable_type), ['user', 'app\\models\\user', 'users', 'account'], true);
+            $isTargetPage = in_array($shortType, ['page'], true)
+                || in_array(strtolower($lockedReport->reportable_type), ['page', 'pages', 'app\\models\\page\\page'], true)
+                || ($content instanceof Page);
+
+            if ($isTargetUser && in_array($action, ['remove', 'hide', 'suspend_page', 'unsuspend_page', 'warn_page'], true)) {
+                throw new InvalidArgumentException("L'action '{$action}' n'est pas applicable à un profil utilisateur. Utilisez la suspension d'auteur ou l'avertissement.");
+            }
+
+            if ($isTargetPage && in_array($action, ['remove', 'hide', 'restrict_author', 'restriction'], true)) {
+                throw new InvalidArgumentException("L'action '{$action}' n'est pas applicable à une page professionnelle. Utilisez la suspension de la page ou l'avertissement.");
+            }
 
             $decisionMetadata = array_merge($metadata, [
                 'previous_status' => $lockedReport->status?->value ?? (string) $lockedReport->status,
@@ -400,6 +573,10 @@ class ModerationQueueService
                 switch ($action) {
                     case 'remove':
                     case 'hide':
+                        if ($isTargetPage || ($content instanceof Page)) {
+                            throw new InvalidArgumentException("L'action '{$action}' n'est pas applicable à une page professionnelle. Utilisez la suspension de page ou l'avertissement.");
+                        }
+
                         // 1. Extraire le texte (quote), l'emplacement (where) et la règle
                         $quote = $metadata['quote'] ?? ($content->body ?? $content->description ?? $content->title ?? $content->content ?? null);
                         $where = $metadata['where'] ?? Report::resolveShortType(get_class($content));
@@ -408,7 +585,7 @@ class ModerationQueueService
 
                         // 2. Action sur le contenu
                         if ($action === 'remove') {
-                            if (! ($content instanceof User) && method_exists($content, 'delete')) {
+                            if (! ($content instanceof User) && ! ($content instanceof Page) && method_exists($content, 'delete')) {
                                 $content->delete();
                             }
                         } else {
@@ -457,6 +634,10 @@ class ModerationQueueService
 
                     case 'restrict_author':
                     case 'restriction':
+                        if ($isTargetPage || ($content instanceof Page)) {
+                            throw new InvalidArgumentException("L'action '{$action}' n'est pas applicable à une page professionnelle. Utilisez la suspension de page.");
+                        }
+
                         $durationDays = (int) ($metadata['duration_days'] ?? 7);
                         $restrictedUntil = now()->addDays($durationDays);
                         $author = $this->resolveContentAuthor($content);
@@ -495,8 +676,8 @@ class ModerationQueueService
                             }
                         }
 
-                        // Masquer ou retirer le contenu incriminé
-                        if (! ($content instanceof User)) {
+                        // Masquer ou retirer le contenu incriminé (jamais une page)
+                        if (! ($content instanceof User) && ! ($content instanceof Page)) {
                             if ($content instanceof Listing) {
                                 $content->status = ListingStatus::Draft;
                                 $content->rejection_reason = $justification;
@@ -510,7 +691,25 @@ class ModerationQueueService
                         }
                         break;
 
+                    case 'suspend_page':
+                    case 'suspend':
                     case 'suspend_author':
+                        if ($isTargetPage || ($content instanceof Page)) {
+                            if ($content instanceof Page) {
+                                $this->pageService->suspendPage($content, $operator, $justification);
+                                $decisionMetadata['page_id'] = $content->id;
+                                $decisionMetadata['page_status'] = 'suspended';
+
+                                try {
+                                    $content->owner?->notify(new ModerationDecisionNotification($lockedReport, 'suspend_page', $justification));
+                                } catch (\Throwable $e) {
+                                    Log::warning('Échec notification ModerationDecisionNotification suspend_page : '.$e->getMessage());
+                                }
+                            }
+                            $action = 'suspend_page';
+                            break;
+                        }
+
                         $durationDays = (int) ($metadata['duration_days'] ?? 14);
                         $suspendedUntil = now()->addDays($durationDays);
                         $author = $this->resolveContentAuthor($content);
@@ -546,8 +745,8 @@ class ModerationQueueService
                             }
                         }
 
-                        // Si le contenu n'est pas le compte utilisateur lui-même, on masque ou retire le contenu
-                        if (! ($content instanceof User)) {
+                        // Si le contenu n'est pas le compte utilisateur lui-même, on masque ou retire le contenu (jamais une page)
+                        if (! ($content instanceof User) && ! ($content instanceof Page)) {
                             if ($content instanceof Listing) {
                                 $content->status = ListingStatus::Draft;
                                 $content->rejection_reason = $justification;
@@ -561,7 +760,41 @@ class ModerationQueueService
                         }
                         break;
 
+                    case 'unsuspend_page':
+                    case 'unsuspend':
+                    case 'lift_suspension':
+                    case 'lift':
+                        if ($content instanceof Page) {
+                            $this->pageService->unsuspendPage($content, $operator);
+                            $decisionMetadata['page_id'] = $content->id;
+                            $decisionMetadata['page_status'] = 'active';
+
+                            try {
+                                $content->owner?->notify(new ModerationDecisionNotification($lockedReport, 'unsuspend_page', $justification));
+                            } catch (\Throwable $e) {
+                                Log::warning('Échec notification ModerationDecisionNotification unsuspend_page : '.$e->getMessage());
+                            }
+                        }
+                        $action = 'unsuspend_page';
+                        break;
+
+                    case 'warn_page':
+                    case 'warn':
                     case 'warn_author':
+                        if ($isTargetPage || ($content instanceof Page)) {
+                            $decisionMetadata['warning_sent'] = true;
+                            if ($content instanceof Page) {
+                                $decisionMetadata['page_id'] = $content->id;
+                                try {
+                                    $content->owner?->notify(new ModerationDecisionNotification($lockedReport, 'warn_page', $justification));
+                                } catch (\Throwable $e) {
+                                    Log::warning('Échec notification ModerationDecisionNotification warn_page : '.$e->getMessage());
+                                }
+                            }
+                            $action = 'warn_page';
+                            break;
+                        }
+
                         $author = $this->resolveContentAuthor($content);
                         if ($author) {
                             UserAccountSanction::create([
@@ -594,6 +827,27 @@ class ModerationQueueService
                             $delayHours = 24;
                         }
                         $deadline = now()->addHours($delayHours);
+
+                        if ($isTargetPage || ($content instanceof Page)) {
+                            $decisionMetadata['correction_delay_hours'] = $delayHours;
+                            $decisionMetadata['correction_deadline'] = $deadline->toIso8601String();
+                            $decisionMetadata['correction_requested'] = true;
+
+                            if ($content instanceof Page) {
+                                $decisionMetadata['page_id'] = $content->id;
+                                try {
+                                    $content->owner?->notify(new ModerationDecisionNotification($lockedReport, 'request_correction', $justification, $deadline));
+                                } catch (\Throwable $e) {
+                                    Log::warning('Échec notification demande de correction page : '.$e->getMessage());
+                                }
+                            }
+
+                            $currentReportMeta = is_array($lockedReport->metadata) ? $lockedReport->metadata : [];
+                            $currentReportMeta['correction_deadline'] = $deadline->toIso8601String();
+                            $currentReportMeta['correction_delay_hours'] = $delayHours;
+                            $lockedReport->metadata = $currentReportMeta;
+                            break;
+                        }
 
                         $author = $this->resolveContentAuthor($content);
                         if ($author) {
@@ -979,6 +1233,8 @@ class ModerationQueueService
                     $items = Message::with(['sender:id,name,display_name,handle,avatar_url,city,badge'])->whereIn('id', $uniqueIds)->get()->keyBy('id');
                 } elseif ($class === User::class) {
                     $items = User::select(['id', 'name', 'display_name', 'handle', 'avatar_url', 'city', 'badge', 'bio'])->whereIn('id', $uniqueIds)->get()->keyBy('id');
+                } elseif ($class === Page::class) {
+                    $items = Page::with(['owner:id,name,display_name,handle,avatar_url,city,badge'])->whereIn('id', $uniqueIds)->get()->keyBy('id');
                 } else {
                     $items = $class::whereIn('id', $uniqueIds)->get()->keyBy('id');
                 }

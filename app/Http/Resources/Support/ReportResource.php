@@ -161,6 +161,20 @@ class ReportResource extends JsonResource
         } else {
             // Déduction de suites claires et protectrices selon l'action
             switch ($action) {
+                case 'suspend_page':
+                    $consequences[] = 'Page professionnelle suspendue (retirée de la visibilité publique)';
+                    $consequences[] = 'Compte personnel du propriétaire maintenu sans pénalité';
+                    break;
+
+                case 'unsuspend_page':
+                    $consequences[] = 'Suspension de la page professionnelle levée';
+                    $consequences[] = 'Page de nouveau active et accessible';
+                    break;
+
+                case 'warn_page':
+                    $consequences[] = 'Avertissement officiel notifié au gestionnaire de la page';
+                    break;
+
                 case 'suspend_author':
                     $durationDays = $decisionMeta['suspension_days'] ?? 30;
                     $consequences[] = "Compte auteur et privilèges suspendus {$durationDays} jours";

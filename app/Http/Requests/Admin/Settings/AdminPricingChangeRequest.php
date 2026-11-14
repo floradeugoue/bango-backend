@@ -25,6 +25,8 @@ class AdminPricingChangeRequest extends FormRequest
             'new_price_amount' => ['required', 'numeric', 'min:100', 'max:10000000'],
             'notice_days' => ['nullable', 'integer', 'min:0', 'max:365'],
             'reason' => ['required', 'string', 'min:5', 'max:1000'],
+            'legal_document_id' => ['nullable', 'exists:legal_documents,id'],
+            'terms_version' => ['nullable', 'string', 'max:50'],
         ];
     }
 }

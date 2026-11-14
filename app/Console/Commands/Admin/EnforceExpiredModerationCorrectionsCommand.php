@@ -3,6 +3,7 @@
 namespace App\Console\Commands\Admin;
 
 use App\Enums\Listing\ListingStatus;
+use App\Enums\Page\PageStatus;
 use App\Enums\Reel\ReelStatus;
 use App\Enums\Support\ReportStatus;
 use App\Models\Listing\Listing;
@@ -85,7 +86,7 @@ class EnforceExpiredModerationCorrectionsCommand extends Command
                     $content->status = ReelStatus::Draft;
                     $content->save();
                 } elseif ($content instanceof Page) {
-                    $content->is_hidden = true;
+                    $content->status = PageStatus::Suspended;
                     $content->save();
                 } elseif (method_exists($content, 'delete')) {
                     $content->delete();

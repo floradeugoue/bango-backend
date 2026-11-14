@@ -162,7 +162,7 @@ Schedule::command('stories:expire')
     ->onOneServer();
 
 // --------------------------------------------------------------------------
-// PLANIFICATEUR DES VISITES (Étape 2 — Verrous 15min & Délais 18h)
+// PLANIFICATEUR DES VISITES (Étape 2 — Verrous 15min & Délais 24h)
 // --------------------------------------------------------------------------
 // 6. Expiration des verrous temporaires de 15 minutes toutes les minutes
 Schedule::command('visits:expire-pending')
@@ -229,6 +229,15 @@ Schedule::command('alerts:pause-dormant')
 
 // 13. Clôture automatique quotidienne des tickets support en attente de réponse utilisateur
 Schedule::command('support:auto-close-waiting')
+    ->daily()
+    ->withoutOverlapping()
+    ->onOneServer();
+
+// --------------------------------------------------------------------------
+// PLANIFICATEUR DES CHANGEMENTS DE PRIX PROGRAMMÉS (Catalogue & CGU)
+// --------------------------------------------------------------------------
+// 14. Application quotidienne des propositions de changement de prix à échéance
+Schedule::command('pricing:apply-scheduled')
     ->daily()
     ->withoutOverlapping()
     ->onOneServer();

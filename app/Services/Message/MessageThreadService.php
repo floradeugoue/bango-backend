@@ -555,30 +555,46 @@ class MessageThreadService
     }
 
     /**
-     * Liste paginée des demandes de messages reçues par l'utilisateur (MS-05).
+     * Liste paginée des demandes de messages reçues par l'utilisateur ou la page active (MS-05).
      */
     public function listUserRequests(User $user, int $perPage = 20): LengthAwarePaginator
     {
         $perPage = min(max($perPage, 1), 50);
 
-        return Conversation::query()
-            ->requests()
-            ->forUser($user->id)
-            ->where('created_by_id', '!=', $user->id)
+        $activePage = request()?->attributes?->get('active_page') ?? request()?->attributes?->get('acting_page');
+
+        $query = Conversation::query()->requests();
+
+        if ($activePage) {
+            $query->where('page_id', $activePage->id)
+                ->where('created_by_id', '!=', $user->id)
+                ->whereNotExists(function ($q) use ($activePage): void {
+                    $q->select(DB::raw(1))
+                        ->from('user_blocks')
+                        ->where('user_blocks.page_id', $activePage->id)
+                        ->whereColumn('user_blocks.blocked_id', 'conversations.created_by_id');
+                });
+        } else {
+            $query->forUser($user->id)
+                ->whereNull('page_id')
+                ->where('created_by_id', '!=', $user->id)
+                ->whereNotExists(function ($q) use ($user): void {
+                    $q->select(DB::raw(1))
+                        ->from('user_blocks')
+                        ->where(function ($sub) use ($user): void {
+                            $sub->where('user_blocks.blocker_id', $user->id)
+                                ->whereColumn('user_blocks.blocked_id', 'conversations.created_by_id');
+                        })
+                        ->orWhere(function ($sub) use ($user): void {
+                            $sub->whereColumn('user_blocks.blocker_id', 'conversations.created_by_id')
+                                ->where('user_blocks.blocked_id', $user->id);
+                        });
+                });
+        }
+
+        return $query
             ->whereHas('creator', function (Builder $q): void {
                 $q->where('status', 'active')->whereNull('deleted_at');
-            })
-            ->whereNotExists(function ($q) use ($user): void {
-                $q->select(DB::raw(1))
-                    ->from('user_blocks')
-                    ->where(function ($sub) use ($user): void {
-                        $sub->where('user_blocks.blocker_id', $user->id)
-                            ->whereColumn('user_blocks.blocked_id', 'conversations.created_by_id');
-                    })
-                    ->orWhere(function ($sub) use ($user): void {
-                        $sub->whereColumn('user_blocks.blocker_id', 'conversations.created_by_id')
-                            ->where('user_blocks.blocked_id', $user->id);
-                    });
             })
             ->with([
                 'members.user' => function ($q): void {
@@ -588,6 +604,10 @@ class MessageThreadService
                     $q->select(['id', 'name', 'display_name', 'handle', 'avatar_url']);
                 },
                 'listing',
+                'page',
+                'creator' => function ($q): void {
+                    $q->select(['id', 'name', 'display_name', 'handle', 'avatar_url', 'is_verified', 'account_type']);
+                },
             ])
             ->orderByRaw('COALESCE(last_message_at, created_at) DESC')
             ->paginate($perPage);
@@ -614,7 +634,7 @@ class MessageThreadService
             $conversation->update(['status' => 'active']);
         });
 
-        $conversation->load(['members.user', 'latestMessage.sender', 'listing']);
+        $conversation->load(['members.user', 'latestMessage.sender', 'listing', 'page', 'creator']);
 
         return $conversation;
     }

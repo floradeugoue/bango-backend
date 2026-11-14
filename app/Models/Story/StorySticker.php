@@ -49,4 +49,9 @@ class StorySticker extends Model
     {
         return $this->hasMany(StoryPollVote::class, 'sticker_id');
     }
+
+    public function answers(): HasMany
+    {
+        return $this->hasMany(StoryStickerAnswer::class, 'sticker_id');
+    }
 }

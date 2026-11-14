@@ -88,6 +88,24 @@ return [
             'service_account_credentials' => env('GOOGLE_PLAY_CREDENTIALS_PATH'),
             'fee_percentage' => 0.0, // Commission store gérée par Google
         ],
+
+        'wallet' => [
+            'enabled' => true,
+            'fee_type' => 'fixed',
+            'fee_percentage' => 0.0,
+            'fee_fixed' => 0.0,
+            'min_fee' => 0.0,
+            'max_fee' => 0.0,
+        ],
+
+        'credit' => [
+            'enabled' => true,
+            'fee_type' => 'fixed',
+            'fee_percentage' => 0.0,
+            'fee_fixed' => 0.0,
+            'min_fee' => 0.0,
+            'max_fee' => 0.0,
+        ],
     ],
 
     /*

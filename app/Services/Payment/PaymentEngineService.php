@@ -11,7 +11,6 @@ use App\Enums\Payment\PaymentStatus;
 use App\Exceptions\Payment\IdempotencyConflictException;
 use App\Models\Admin\AdminAuditLog;
 use App\Models\Boost\Campaign;
-use App\Models\Page\PageCertification;
 use App\Models\Payment\PaymentTransaction;
 use App\Models\User;
 use App\Models\Visit\VisitReservation;
@@ -70,10 +69,18 @@ class PaymentEngineService
             }
 
             // Détermination du provider et channel
-            $provider = PaymentProvider::tryFrom($quote->gateway) ?? PaymentProvider::Monetbil;
             $channel = isset($context['channel'])
                 ? (PaymentChannel::tryFrom($context['channel']) ?? PaymentChannel::MobileMoney)
                 : PaymentChannel::MobileMoney;
+
+            $isWallet = $channel === PaymentChannel::CreditWallet || in_array($quote->gateway, ['wallet', 'credit'], true);
+
+            $provider = $isWallet
+                ? PaymentProvider::Wallet
+                : (PaymentProvider::tryFrom($quote->gateway) ?? PaymentProvider::Monetbil);
+
+            $feeAmount = $isWallet ? '0.00' : $quote->feeAmount;
+            $totalAmount = $isWallet ? $quote->amount : $quote->totalAmount;
 
             /** @var PaymentTransaction $transaction */
             $transaction = PaymentTransaction::create([
@@ -86,11 +93,11 @@ class PaymentEngineService
                 'channel' => $channel,
                 'currency' => $quote->currency,
                 'amount' => $quote->amount,
-                'fee_amount' => $quote->feeAmount,
+                'fee_amount' => $feeAmount,
                 'tax_amount' => $quote->taxAmount,
-                'total_amount' => $quote->totalAmount,
+                'total_amount' => $totalAmount,
                 'credit_used' => '0.00',
-                'amount_charged' => $quote->totalAmount,
+                'amount_charged' => $totalAmount,
                 'status' => PaymentStatus::Pending,
                 'idempotency_key' => $idempotencyKey,
                 'metadata' => array_merge($context, [
@@ -237,7 +244,7 @@ class PaymentEngineService
                     }
 
                     // Fulfiller métier pour la certification de Page Pro
-                    if ($lockedTx->service_type === PaymentServiceType::Certification && $lockedTx->payable_type === PageCertification::class && $lockedTx->payable_id) {
+                    if ($lockedTx->service_type === PaymentServiceType::Certification) {
                         app(PageCertificationService::class)->confirmPaymentFromTransaction($lockedTx);
                     }
                 }

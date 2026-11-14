@@ -100,10 +100,14 @@ test('point 45: credit wallet payment on payments initiate end to end', function
     $resSuccess->assertOk();
     expect($resSuccess->json('data.status'))->toBe(PaymentStatus::Confirmed->value);
     expect($resSuccess->json('data.channel'))->toBe(PaymentChannel::CreditWallet->value);
+    expect($resSuccess->json('data.provider'))->toBe('wallet');
+    expect((float) $resSuccess->json('data.fee'))->toBe(0.0);
+    expect((float) $resSuccess->json('data.amount'))->toBe(5000.0);
+    expect((float) $resSuccess->json('data.total_amount'))->toBe(5000.0);
 
     // Wallet debited
     $wallet->refresh();
-    expect($wallet->balance)->toBe(10000 - (int) $resSuccess->json('data.total_amount'));
+    expect($wallet->balance)->toBe(5000);
 
     // User badge active
     $user->refresh();

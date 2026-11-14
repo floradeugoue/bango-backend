@@ -118,6 +118,7 @@ use App\Http\Controllers\Story\StoryController;
 use App\Http\Controllers\Subscription\CatalogController;
 use App\Http\Controllers\Subscription\SubscriptionController;
 use App\Http\Controllers\Subscription\SubscriptionRenewalController;
+use App\Http\Controllers\Support\AppFeedbackController;
 use App\Http\Controllers\Support\HelpArticleController;
 use App\Http\Controllers\Support\HelpArticleFeedbackController;
 use App\Http\Controllers\Support\ModerationAppealController;
@@ -1076,6 +1077,8 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/posts', [PostSearchController::class, 'index'])->name('api.search.posts');
         // Rechercher et explorer des hashtags par préfixe ou volume
         Route::get('/hashtags', [HashtagSearchController::class, 'index'])->name('api.search.hashtags');
+        // Obtenir les hashtags du moment et en tendance (CR-07)
+        Route::get('/hashtags/trending', [HashtagSearchController::class, 'trending'])->name('api.search.hashtags.trending.global');
         // Consulter les détails et publications associées à un hashtag
         Route::get('/hashtags/{name}', [HashtagSearchController::class, 'show'])->name('api.search.hashtags.show');
         // S'abonner aux publications d'un hashtag
@@ -1226,6 +1229,9 @@ Route::middleware('auth:api')->group(function () {
         // Consulter la liste nominative des spectateurs d'une Story (réservé au propriétaire)
         Route::get('/{id}/viewers', [StoryController::class, 'viewers'])->whereUuid('id')->name('api.stories.viewers');
 
+        // Consulter les réponses aux stickers d'une Story (auteur ou page seulement)
+        Route::get('/{id}/answers', [StoryController::class, 'answers'])->whereUuid('id')->name('api.stories.answers');
+
         // Récupérer les diapositives créatives associées à une Story
         Route::get('/{id}/slides', [StoryController::class, 'slides'])->whereUuid('id')->name('api.stories.slides');
 
@@ -1240,10 +1246,14 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/stickers/{stickerId}/answer', [StoryController::class, 'answerSticker'])->whereUuid('stickerId')->name('api.stories.stickers.answer');
         // Activer un rappel pour un événement promu via un sticker compte à rebours
         Route::post('/stickers/{stickerId}/remind', [StoryController::class, 'remindSticker'])->whereUuid('stickerId')->name('api.stories.stickers.remind');
+        // Annuler un rappel pour un événement promu via un sticker compte à rebours
+        Route::delete('/stickers/{stickerId}/remind', [StoryController::class, 'cancelRemindSticker'])->whereUuid('stickerId')->name('api.stories.stickers.remind.cancel');
         // Répondre à un sticker positionné sur une slide spécifique
-        Route::post('/{slideId}/stickers/{stickerId}/answer', [StoryController::class, 'answerSticker'])->whereUuid('slideId')->whereUuid('stickerId');
+        Route::post('/{slideId}/stickers/{stickerId}/answer', [StoryController::class, 'answerSlideSticker'])->whereUuid('slideId')->whereUuid('stickerId')->name('api.stories.slides.stickers.answer');
         // Activer un rappel pour un sticker compte à rebours sur une slide
-        Route::post('/{slideId}/stickers/{stickerId}/remind', [StoryController::class, 'remindSticker'])->whereUuid('slideId')->whereUuid('stickerId');
+        Route::post('/{slideId}/stickers/{stickerId}/remind', [StoryController::class, 'remindSlideSticker'])->whereUuid('slideId')->whereUuid('stickerId')->name('api.stories.slides.stickers.remind');
+        // Annuler un rappel pour un sticker compte à rebours sur une slide
+        Route::delete('/{slideId}/stickers/{stickerId}/remind', [StoryController::class, 'cancelRemindSlideSticker'])->whereUuid('slideId')->whereUuid('stickerId')->name('api.stories.slides.stickers.remind.cancel');
 
         // Export vidéo d'une Story
         Route::match(['get', 'post'], '/{id}/export', [StoryController::class, 'export'])->whereUuid('id')->name('api.stories.export');
@@ -1455,6 +1465,7 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/{page}/inbox', [PageController::class, 'inbox'])->name('api.pages.inbox');
         // Assigner une conversation de la page à un collaborateur spécifique
         Route::post('/{page}/inbox-assignment', [PageController::class, 'assignInbox'])->name('api.pages.inbox_assignment');
+        Route::post('/{page}/conversations/{conversation}/assign', [PageController::class, 'assignConversation'])->name('api.pages.conversations.assign');
         // Basculer la visibilité publique d'une page professionnelle
         Route::post('/{page}/visibility', [PageController::class, 'toggleVisibility'])->name('api.pages.visibility');
         // Suivre une page professionnelle pour recevoir ses actualités
@@ -1563,7 +1574,7 @@ Route::middleware('auth:api')->group(function () {
     });
 
     // Avis sur l'application (« Comment ça se passe pour toi ? »)
-    Route::post('/app-feedback', [\App\Http\Controllers\Support\AppFeedbackController::class, 'store'])->name('api.app-feedback');
+    Route::post('/app-feedback', [AppFeedbackController::class, 'store'])->name('api.app-feedback');
 
     // Consulter les sanctions disciplinaires ou avertissements actifs sur mon compte
     Route::get('/me/sanctions', [SupportTicketController::class, 'mySanctions'])->name('api.me.sanctions');

@@ -9,6 +9,7 @@ use App\Http\Requests\Story\VotePollRequest;
 use App\Http\Resources\Story\StoryReplyResource;
 use App\Http\Resources\Story\StoryResource;
 use App\Http\Resources\Story\StorySlideResource;
+use App\Http\Resources\Story\StoryStickerAnswerResource;
 use App\Http\Resources\Story\StoryViewerResource;
 use App\Services\Story\StoryService;
 use Illuminate\Http\JsonResponse;
@@ -121,6 +122,19 @@ class StoryController extends Controller
         $viewers = $this->storyService->getViewers($id, $request->user(), $perPage);
 
         return StoryViewerResource::collection($viewers);
+    }
+
+    /**
+     * Consulter la liste des réponses aux stickers d'une Story (auteur ou page seulement).
+     */
+    public function answers(string $id, Request $request): AnonymousResourceCollection
+    {
+        $perPage = (int) $request->query('per_page', 20);
+        $stickerId = $request->query('sticker_id');
+
+        $answers = $this->storyService->getStickerAnswers($id, $request->user(), $stickerId, $perPage);
+
+        return StoryStickerAnswerResource::collection($answers);
     }
 
     /**
@@ -261,7 +275,7 @@ class StoryController extends Controller
     }
 
     /**
-     * Répondre à un sticker question.
+     * Répondre à un sticker question (route courte : /stickers/{stickerId}/answer).
      */
     public function answerSticker(string $stickerId, Request $request): JsonResponse
     {
@@ -278,7 +292,15 @@ class StoryController extends Controller
     }
 
     /**
-     * Activer un rappel pour un compte à rebours.
+     * Répondre à un sticker question via la route longue (/{slideId}/stickers/{stickerId}/answer).
+     */
+    public function answerSlideSticker(string $slideId, string $stickerId, Request $request): JsonResponse
+    {
+        return $this->answerSticker($stickerId, $request);
+    }
+
+    /**
+     * Activer un rappel pour un compte à rebours (route courte : /stickers/{stickerId}/remind).
      */
     public function remindSticker(string $stickerId, Request $request): JsonResponse
     {
@@ -288,6 +310,35 @@ class StoryController extends Controller
             'success' => true,
             'data' => $result,
         ]);
+    }
+
+    /**
+     * Activer un rappel pour un compte à rebours via la route longue (/{slideId}/stickers/{stickerId}/remind).
+     */
+    public function remindSlideSticker(string $slideId, string $stickerId, Request $request): JsonResponse
+    {
+        return $this->remindSticker($stickerId, $request);
+    }
+
+    /**
+     * Annuler un rappel pour un compte à rebours (route courte : /stickers/{stickerId}/remind).
+     */
+    public function cancelRemindSticker(string $stickerId, Request $request): JsonResponse
+    {
+        $result = $this->storyService->cancelRemindSticker($stickerId, $request->user());
+
+        return response()->json([
+            'success' => true,
+            'data' => $result,
+        ]);
+    }
+
+    /**
+     * Annuler un rappel pour un compte à rebours via la route longue (/{slideId}/stickers/{stickerId}/remind).
+     */
+    public function cancelRemindSlideSticker(string $slideId, string $stickerId, Request $request): JsonResponse
+    {
+        return $this->cancelRemindSticker($stickerId, $request);
     }
 
     /**

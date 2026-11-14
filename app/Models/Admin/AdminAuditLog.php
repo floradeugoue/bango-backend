@@ -97,20 +97,44 @@ class AdminAuditLog extends Model
             return false;
         }
 
-        $targetStr = $this->target_label ?? ($this->target_type ? "{$this->target_type}:{$this->target_id}" : 'system');
-        $operatorStr = (string) ($this->user_id ?? 'system');
-        $timestamp = $this->created_at ? $this->created_at->toIso8601String() : '';
+        $targetStr = (! empty($this->target_label)) ? $this->target_label : ((! empty($this->target_type)) ? "{$this->target_type}:{$this->target_id}" : 'system');
+        $operatorStr = (! empty($this->user_id)) ? (string) $this->user_id : 'system';
 
-        $expected = static::computeHash(
-            prevHash: $this->prev_hash ?? self::GENESIS_PREV_HASH,
-            id: $this->id,
-            timestamp: $timestamp,
-            action: $this->event,
-            target: $targetStr,
-            operator: $operatorStr
-        );
+        // Formats de date canoniques candidats pour garantir une parfaite compatibilité
+        // entre la sérialisation en base, les fuseaux horaires et les variations ISO-8601 (Zulu vs offset).
+        $timestamps = [];
+        if ($this->created_at) {
+            $timestamps[] = $this->created_at->toIso8601String();
+            $timestamps[] = $this->created_at->copy()->utc()->toIso8601String();
+            $timestamps[] = $this->created_at->copy()->utc()->format('Y-m-d\TH:i:s\Z');
+            $timestamps[] = $this->created_at->format('Y-m-d\TH:i:sP');
+        } else {
+            $timestamps[] = '';
+        }
 
-        return hash_equals($expected, (string) $this->hash);
+        $timestamps = array_values(array_unique(array_filter($timestamps, fn ($t) => $t !== null)));
+        if (empty($timestamps)) {
+            $timestamps = [''];
+        }
+
+        $prevHash = $this->prev_hash ?? self::GENESIS_PREV_HASH;
+
+        foreach ($timestamps as $timestamp) {
+            $expected = static::computeHash(
+                prevHash: $prevHash,
+                id: $this->id,
+                timestamp: $timestamp,
+                action: $this->event,
+                target: $targetStr,
+                operator: $operatorStr
+            );
+
+            if (hash_equals($expected, (string) $this->hash)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -196,9 +220,9 @@ class AdminAuditLog extends Model
                 'code', 'recovery_code', 'cookie', 'bango_admin_session', 'bango_admin_csrf',
             ]));
 
-            $createdAt = Carbon::now();
-            $targetStr = $targetLabel ?? ($targetType ? "{$targetType}:{$targetId}" : 'system');
-            $operatorStr = (string) ($operator?->id ?? 'system');
+            $createdAt = Carbon::now()->startOfSecond();
+            $targetStr = (! empty($targetLabel)) ? $targetLabel : ((! empty($targetType)) ? "{$targetType}:{$targetId}" : 'system');
+            $operatorStr = (! empty($operator?->id)) ? (string) $operator->id : 'system';
 
             $log = new static;
             $log->user_id = $operator?->id;
@@ -212,11 +236,14 @@ class AdminAuditLog extends Model
             $log->prev_hash = $prevHash;
             $log->created_at = $createdAt;
             $log->save();
+            $log->refresh();
+
+            $timestamp = $log->created_at ? $log->created_at->toIso8601String() : $createdAt->toIso8601String();
 
             $log->hash = static::computeHash(
                 prevHash: $prevHash,
                 id: $log->id,
-                timestamp: $createdAt->toIso8601String(),
+                timestamp: $timestamp,
                 action: $event,
                 target: $targetStr,
                 operator: $operatorStr

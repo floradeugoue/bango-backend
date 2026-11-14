@@ -1,12 +1,18 @@
 <?php
 
+use App\Enums\Story\StoryStickerType;
+use App\Jobs\Story\SendCountdownReminderJob;
 use App\Models\Story\Story;
 use App\Models\Story\StoryPollVote;
 use App\Models\Story\StorySlide;
 use App\Models\Story\StorySticker;
 use App\Models\Story\StoryView;
 use App\Models\User;
+use App\Notifications\Social\SocialNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Queue;
 use Laravel\Passport\Passport;
 
 uses(RefreshDatabase::class);
@@ -156,4 +162,171 @@ test('le propriétaire peut consulter les spectateurs et voir les votes de sonda
         ->assertJsonPath('data.0.vote.slide_id', (string) $slide->id)
         ->assertJsonPath('data.0.vote.sticker_id', (string) $sticker->id)
         ->assertJsonPath('data.0.vote.option_index', 1);
+});
+
+test('POST /api/stories/stickers/{id}/remind programme un job différé à until et n envoie rien au moment du toucher', function () {
+    Queue::fake();
+    Notification::fake();
+
+    $story = Story::factory()->create(['user_id' => $this->author->id]);
+    $slide = StorySlide::factory()->create(['story_id' => $story->id]);
+
+    $futureUntil = Carbon::now()->addHours(6)->toIso8601String();
+    $sticker = StorySticker::factory()->create([
+        'story_slide_id' => $slide->id,
+        'type' => StoryStickerType::Countdown,
+        'data' => [
+            'title' => 'Lancement produit Bango',
+            'until' => $futureUntil,
+        ],
+    ]);
+
+    // Activation du rappel
+    $response = $this->postJson("/api/stories/stickers/{$sticker->id}/remind");
+
+    $response->assertOk()
+        ->assertJsonPath('success', true)
+        ->assertJsonPath('data.message', 'Rappel de compte à rebours activé.');
+
+    // 1. Enregistrement en base
+    $this->assertDatabaseHas('story_sticker_answers', [
+        'sticker_id' => $sticker->id,
+        'user_id' => $this->viewer->id,
+        'type' => 'countdown_reminder',
+    ]);
+
+    // 2. AUCUNE notification n'est envoyée immédiatement au moment du toucher
+    Notification::assertNothingSent();
+
+    // 3. Un job différé a été programmé pour l'échéance 'until'
+    Queue::assertPushed(SendCountdownReminderJob::class, function ($job) use ($sticker, $futureUntil) {
+        return $job->stickerId === $sticker->id
+            && $job->userId === $this->viewer->id
+            && $job->delay !== null
+            && $job->delay->toIso8601String() === Carbon::parse($futureUntil)->toIso8601String();
+    });
+});
+
+test('DELETE /api/stories/stickers/{id}/remind annule le rappel et empêche l envoi de la notification', function () {
+    Queue::fake();
+    Notification::fake();
+
+    $story = Story::factory()->create(['user_id' => $this->author->id]);
+    $slide = StorySlide::factory()->create(['story_id' => $story->id]);
+
+    $futureUntil = Carbon::now()->addHours(2)->toIso8601String();
+    $sticker = StorySticker::factory()->create([
+        'story_slide_id' => $slide->id,
+        'type' => StoryStickerType::Countdown,
+        'data' => [
+            'title' => 'Grand concert',
+            'until' => $futureUntil,
+        ],
+    ]);
+
+    // Activer le rappel
+    $this->postJson("/api/stories/stickers/{$sticker->id}/remind")->assertOk();
+
+    $this->assertDatabaseHas('story_sticker_answers', [
+        'sticker_id' => $sticker->id,
+        'user_id' => $this->viewer->id,
+        'type' => 'countdown_reminder',
+    ]);
+
+    // Annuler le rappel
+    $deleteRes = $this->deleteJson("/api/stories/stickers/{$sticker->id}/remind");
+    $deleteRes->assertOk()
+        ->assertJsonPath('success', true)
+        ->assertJsonPath('data.message', 'Rappel de compte à rebours annulé.');
+
+    $this->assertDatabaseMissing('story_sticker_answers', [
+        'sticker_id' => $sticker->id,
+        'user_id' => $this->viewer->id,
+        'type' => 'countdown_reminder',
+    ]);
+
+    // Exécution du job : comme le rappel a été annulé, aucune notification ne doit être envoyée
+    $job = new SendCountdownReminderJob($sticker->id, $this->viewer->id);
+    $job->handle();
+
+    Notification::assertNothingSent();
+});
+
+test('SendCountdownReminderJob envoie la notification countdown_remind si le rappel est toujours actif à l échéance', function () {
+    Queue::fake();
+    Notification::fake();
+
+    $story = Story::factory()->create(['user_id' => $this->author->id]);
+    $slide = StorySlide::factory()->create(['story_id' => $story->id]);
+
+    $sticker = StorySticker::factory()->create([
+        'story_slide_id' => $slide->id,
+        'type' => StoryStickerType::Countdown,
+        'data' => [
+            'title' => 'Vente flash',
+            'until' => Carbon::now()->addHour()->toIso8601String(),
+        ],
+    ]);
+
+    // Activer le rappel
+    $this->postJson("/api/stories/stickers/{$sticker->id}/remind")->assertOk();
+
+    // Exécution du job à échéance
+    $job = new SendCountdownReminderJob($sticker->id, $this->viewer->id);
+    $job->handle();
+
+    Notification::assertSentTo($this->viewer, SocialNotification::class, function ($notification) use ($story, $sticker) {
+        return $notification->type === 'countdown_remind'
+            && $notification->metadata['story_id'] === (string) $story->id
+            && $notification->metadata['sticker_id'] === (string) $sticker->id;
+    });
+});
+
+test('répondre à une question et demander un rappel via les routes longues et courtes fonctionne', function () {
+    $story = Story::factory()->create(['user_id' => $this->author->id]);
+    $slide = StorySlide::factory()->create(['story_id' => $story->id]);
+
+    $questionSticker = StorySticker::create([
+        'story_slide_id' => $slide->id,
+        'type' => 'question',
+        'x' => 0.5,
+        'y' => 0.5,
+        'scale' => 1,
+        'rotation' => 0,
+        'data' => ['question' => 'Quel quartier préférez-vous ?'],
+    ]);
+
+    $countdownSticker = StorySticker::create([
+        'story_slide_id' => $slide->id,
+        'type' => 'countdown',
+        'x' => 0.5,
+        'y' => 0.5,
+        'scale' => 1,
+        'rotation' => 0,
+        'data' => ['title' => 'Lancement officiel', 'end_date' => now()->addDays(5)->toIso8601String()],
+    ]);
+
+    // 1. Long route for question answer
+    $longAnswerRes = $this->postJson("/api/stories/{$slide->id}/stickers/{$questionSticker->id}/answer", [
+        'answer' => 'Bonapriso',
+    ]);
+    $longAnswerRes->assertOk()
+        ->assertJsonPath('success', true);
+
+    // 2. Short route for question answer
+    $shortAnswerRes = $this->postJson("/api/stories/stickers/{$questionSticker->id}/answer", [
+        'answer' => 'Akwa',
+    ]);
+    $shortAnswerRes->assertOk()
+        ->assertJsonPath('success', true);
+
+    // 3. Long route for countdown reminder
+    $longRemindRes = $this->postJson("/api/stories/{$slide->id}/stickers/{$countdownSticker->id}/remind");
+    $longRemindRes->assertOk()
+        ->assertJsonPath('success', true);
+
+    // 4. Short route for countdown reminder
+    $shortRemindRes = $this->postJson("/api/stories/stickers/{$countdownSticker->id}/remind");
+    $shortRemindRes->assertOk()
+        ->assertJsonPath('success', true);
 });

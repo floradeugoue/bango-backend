@@ -9,6 +9,7 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\DB;
 
 class BlockController extends Controller
 {
@@ -85,7 +86,7 @@ class BlockController extends Controller
         $activePage = $request->attributes->get('acting_page') ?? $request->attributes->get('active_page');
         $activePageId = $activePage?->id;
 
-        $query = \Illuminate\Support\Facades\DB::table('user_blocks')
+        $query = DB::table('user_blocks')
             ->where('blocker_id', $user->id)
             ->where('blocked_id', $id);
 

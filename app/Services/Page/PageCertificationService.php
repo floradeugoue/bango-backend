@@ -4,7 +4,10 @@ namespace App\Services\Page;
 
 use App\Enums\Page\PageCertificationStatus;
 use App\Enums\Payment\PaymentChannel;
+use App\Enums\Payment\PaymentEventSource;
+use App\Enums\Payment\PaymentProvider;
 use App\Enums\Payment\PaymentServiceType;
+use App\Enums\Payment\PaymentStatus;
 use App\Models\Admin\AdminAuditLog;
 use App\Models\Page\Page;
 use App\Models\Page\PageCertification;
@@ -14,7 +17,9 @@ use App\Notifications\Page\PageCertificationApprovedNotification;
 use App\Notifications\Page\PageCertificationRejectedNotification;
 use App\Notifications\Page\PageCertificationSubmittedNotification;
 use App\Notifications\Page\PageCertificationSupplementRequestedNotification;
+use App\Services\Payment\GatewayInitiateResult;
 use App\Services\Payment\PaymentEngineService;
+use App\Services\Payment\PaymentGatewayManager;
 use App\Services\Payment\PricingService;
 use App\Services\Subscription\SubscriptionService;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -38,8 +43,11 @@ class PageCertificationService
 
     public function __construct(
         protected PaymentEngineService $paymentEngineService,
-        protected PricingService $pricingService
-    ) {}
+        protected PricingService $pricingService,
+        protected ?PaymentGatewayManager $gatewayManager = null
+    ) {
+        $this->gatewayManager = $gatewayManager ?? app(PaymentGatewayManager::class);
+    }
 
     /**
      * Soumet un dossier de certification entreprise avec téléversement sécurisé non-public.
@@ -123,10 +131,12 @@ class PageCertificationService
 
     /**
      * Initie le paiement des frais de certification via le module PAY existant.
+     * Rattache la transaction au dossier et lance la demande Mobile Money auprès de la passerelle.
      *
      * @param  array<string, mixed>  $paymentData
+     * @return array{transaction: PaymentTransaction, initiate_result: ?GatewayInitiateResult}
      */
-    public function initiatePayment(Page $page, User $user, array $paymentData): PaymentTransaction
+    public function initiatePayment(Page $page, User $user, array $paymentData): array
     {
         if (! $page->isOwner($user) && ! $user->isAdmin()) {
             throw new AuthorizationException('Seul le propriétaire de la page peut initier le paiement des frais de certification.');
@@ -146,22 +156,28 @@ class PageCertificationService
             gateway: $paymentData['gateway'] ?? 'monetbil'
         );
 
-        $idempotencyKey = $paymentData['idempotency_key'] ?? ('cert_pay_'.$certification->id.'_'.Str::random(8));
+        $idempotencyKey = $paymentData['idempotency_key'] ?? $paymentData['key'] ?? ('cert_pay_'.$certification->id.'_'.Str::random(8));
+
+        $phone = $paymentData['phone_number'] ?? $paymentData['phone'] ?? $user->phone;
+        $operator = $paymentData['provider'] ?? $paymentData['operator'] ?? null;
+        $country = $paymentData['country'] ?? $paymentData['country_code'] ?? null;
 
         $transaction = $this->paymentEngineService->createOrRetrieveTransaction(
             user: $user,
             quote: $quote,
             idempotencyKey: $idempotencyKey,
             context: [
-                'phone' => $paymentData['phone_number'] ?? null,
-                'operator' => $paymentData['provider'] ?? null,
-                'provider' => $paymentData['provider'] ?? null,
+                'phone' => $phone,
+                'operator' => $operator,
+                'provider' => $operator,
                 'channel' => PaymentChannel::MobileMoney->value,
                 'page_id' => $page->id,
                 'certification_id' => $certification->id,
+                'country' => $country,
             ]
         );
 
+        // Rattachement immédiat de la transaction au dossier de certification
         $transaction->update([
             'payable_type' => PageCertification::class,
             'payable_id' => $certification->id,
@@ -169,7 +185,76 @@ class PageCertificationService
             'product_id' => $quote->product?->id,
         ]);
 
-        return $transaction;
+        // Si la transaction a déjà été confirmée (rejeu idempotent)
+        if ($transaction->status === PaymentStatus::Confirmed) {
+            return [
+                'transaction' => $transaction,
+                'initiate_result' => null,
+            ];
+        }
+
+        // Si la transaction est déjà en cours de traitement (USSD déjà émis)
+        if ($transaction->status === PaymentStatus::Processing) {
+            return [
+                'transaction' => $transaction,
+                'initiate_result' => null,
+            ];
+        }
+
+        // Lancement de la demande Mobile Money auprès de la passerelle
+        $attempt = $transaction->createAttempt(
+            provider: PaymentProvider::Monetbil,
+            channel: PaymentChannel::MobileMoney,
+            externalReference: null,
+            metadata: [
+                'phone' => $phone,
+                'operator' => $operator,
+                'country' => $country,
+            ]
+        );
+
+        $initiateResult = null;
+        try {
+            $gateway = $this->gatewayManager->driver($paymentData['gateway'] ?? 'monetbil');
+            $initiateResult = $gateway->initiatePayment($transaction, [
+                'phone' => $phone,
+                'operator' => $operator,
+                'country' => $country,
+            ]);
+
+            if ($initiateResult->isSuccessful) {
+                $attempt->markSuccessful(
+                    externalReference: $initiateResult->gatewayReference,
+                    metadata: ['ussd_prompt' => $initiateResult->ussdPrompt]
+                );
+
+                if ($initiateResult->gatewayReference) {
+                    $transaction->external_reference = $initiateResult->gatewayReference;
+                    $transaction->save();
+                }
+                $transaction->transitionTo(
+                    targetStatus: PaymentStatus::Processing,
+                    source: PaymentEventSource::Gateway,
+                    reason: 'Demande USSD acceptée par Monetbil',
+                    payload: ['paymentId' => $initiateResult->gatewayReference]
+                );
+            } else {
+                $attempt->markFailed(
+                    errorCode: $initiateResult->errorCode ?? 'GATEWAY_ERROR',
+                    errorMessage: $initiateResult->errorMessage ?? 'Échec lors de l\'initialisation chez l\'opérateur.'
+                );
+            }
+        } catch (\Throwable $e) {
+            $attempt->markFailed(
+                errorCode: 'GATEWAY_ERROR',
+                errorMessage: $e->getMessage()
+            );
+        }
+
+        return [
+            'transaction' => $transaction->fresh(),
+            'initiate_result' => $initiateResult,
+        ];
     }
 
     /**
@@ -180,12 +265,36 @@ class PageCertificationService
     {
         DB::transaction(function () use ($transaction) {
             /** @var PageCertification|null $certification */
-            $certification = PageCertification::where('id', $transaction->payable_id)
-                ->lockForUpdate()
-                ->first();
+            $certification = null;
+
+            if ($transaction->payable_type === PageCertification::class && $transaction->payable_id) {
+                $certification = PageCertification::where('id', $transaction->payable_id)
+                    ->lockForUpdate()
+                    ->first();
+            }
+
+            if (! $certification && isset($transaction->context['certification_id'])) {
+                $certification = PageCertification::where('id', $transaction->context['certification_id'])
+                    ->lockForUpdate()
+                    ->first();
+            }
+
+            if (! $certification && isset($transaction->context['page_id'])) {
+                $certification = PageCertification::where('page_id', $transaction->context['page_id'])
+                    ->lockForUpdate()
+                    ->latest('created_at')
+                    ->first();
+            }
 
             if (! $certification) {
                 return;
+            }
+
+            // S'assurer que le payable de la transaction pointe bien vers ce dossier
+            if ($transaction->payable_id !== $certification->id) {
+                $transaction->payable_type = PageCertification::class;
+                $transaction->payable_id = (string) $certification->id;
+                $transaction->save();
             }
 
             if ($certification->payment_transaction_id === $transaction->id) {
@@ -308,16 +417,23 @@ class PageCertificationService
             /** @var PageCertification $lockedCert */
             $lockedCert = PageCertification::where('id', $certification->id)->lockForUpdate()->firstOrFail();
 
+            $page = $lockedCert->page()->withTrashed()->first();
+            if (! $page || $page->trashed()) {
+                throw ValidationException::withMessages([
+                    'certification' => ['Impossible de statuer sur la certification d\'une page supprimée.'],
+                ]);
+            }
+
             $lockedCert->status = PageCertificationStatus::Approved;
             $lockedCert->decided_at = now();
             $lockedCert->decided_by_id = $admin->id;
             $lockedCert->recordHistory('approved', $admin->id, 'Dossier de certification validé et certifié');
             $lockedCert->save();
 
-            $lockedCert->page->certification_status = PageCertificationStatus::Approved;
-            $lockedCert->page->save();
+            $page->certification_status = PageCertificationStatus::Approved;
+            $page->save();
 
-            $lockedCert->page->owner->notify(new PageCertificationApprovedNotification($lockedCert));
+            $page->owner?->notify(new PageCertificationApprovedNotification($lockedCert));
 
             return $lockedCert->fresh(['page', 'reviewer']);
         });
@@ -332,6 +448,13 @@ class PageCertificationService
             /** @var PageCertification $lockedCert */
             $lockedCert = PageCertification::where('id', $certification->id)->lockForUpdate()->firstOrFail();
 
+            $page = $lockedCert->page()->withTrashed()->first();
+            if (! $page || $page->trashed()) {
+                throw ValidationException::withMessages([
+                    'certification' => ['Impossible de statuer sur la certification d\'une page supprimée.'],
+                ]);
+            }
+
             $lockedCert->status = PageCertificationStatus::Rejected;
             $lockedCert->rejection_reason = $reason;
             $lockedCert->decided_at = now();
@@ -339,10 +462,10 @@ class PageCertificationService
             $lockedCert->recordHistory('rejected', $admin->id, $reason);
             $lockedCert->save();
 
-            $lockedCert->page->certification_status = PageCertificationStatus::Rejected;
-            $lockedCert->page->save();
+            $page->certification_status = PageCertificationStatus::Rejected;
+            $page->save();
 
-            $lockedCert->page->owner->notify(new PageCertificationRejectedNotification($lockedCert));
+            $page->owner?->notify(new PageCertificationRejectedNotification($lockedCert));
 
             return $lockedCert->fresh(['page', 'reviewer']);
         });
@@ -357,6 +480,13 @@ class PageCertificationService
             /** @var PageCertification $lockedCert */
             $lockedCert = PageCertification::where('id', $certification->id)->lockForUpdate()->firstOrFail();
 
+            $page = $lockedCert->page()->withTrashed()->first();
+            if (! $page || $page->trashed()) {
+                throw ValidationException::withMessages([
+                    'certification' => ['Impossible de statuer sur la certification d\'une page supprimée.'],
+                ]);
+            }
+
             $lockedCert->status = PageCertificationStatus::SupplementRequested;
             $lockedCert->supplement_request_reason = $reason;
             $lockedCert->decided_at = now();
@@ -364,10 +494,10 @@ class PageCertificationService
             $lockedCert->recordHistory('supplement_requested', $admin->id, $reason);
             $lockedCert->save();
 
-            $lockedCert->page->certification_status = PageCertificationStatus::SupplementRequested;
-            $lockedCert->page->save();
+            $page->certification_status = PageCertificationStatus::SupplementRequested;
+            $page->save();
 
-            $lockedCert->page->owner->notify(new PageCertificationSupplementRequestedNotification($lockedCert));
+            $page->owner?->notify(new PageCertificationSupplementRequestedNotification($lockedCert));
 
             return $lockedCert->fresh(['page', 'reviewer']);
         });
@@ -391,6 +521,55 @@ class PageCertificationService
                 $latestCert->recordHistory('suspended', $admin->id, $reason);
                 $latestCert->save();
             }
+
+            AdminAuditLog::logChainedEvent(
+                event: 'page_certification.suspended',
+                operator: $admin,
+                targetType: 'Page',
+                targetId: (string) $lockedPage->id,
+                targetLabel: "Suspension de la certification de la page {$lockedPage->name} (#{$lockedPage->id})",
+                context: [
+                    'page_id' => $lockedPage->id,
+                    'reason' => $reason,
+                ],
+                ip: request()?->ip(),
+                userAgent: request()?->userAgent()
+            );
+        });
+    }
+
+    /**
+     * Rétablissement de la certification suspendue.
+     */
+    public function adminRestoreCertification(Page $page, User $admin, string $reason): void
+    {
+        DB::transaction(function () use ($page, $admin, $reason) {
+            /** @var Page $lockedPage */
+            $lockedPage = Page::where('id', $page->id)->lockForUpdate()->firstOrFail();
+            $lockedPage->certification_status = PageCertificationStatus::Approved;
+            $lockedPage->save();
+
+            /** @var PageCertification|null $latestCert */
+            $latestCert = $lockedPage->certifications()->lockForUpdate()->first();
+            if ($latestCert) {
+                $latestCert->status = PageCertificationStatus::Approved;
+                $latestCert->recordHistory('restored', $admin->id, $reason);
+                $latestCert->save();
+            }
+
+            AdminAuditLog::logChainedEvent(
+                event: 'page_certification.restored',
+                operator: $admin,
+                targetType: 'Page',
+                targetId: (string) $lockedPage->id,
+                targetLabel: "Rétablissement de la certification de la page {$lockedPage->name} (#{$lockedPage->id})",
+                context: [
+                    'page_id' => $lockedPage->id,
+                    'reason' => $reason,
+                ],
+                ip: request()?->ip(),
+                userAgent: request()?->userAgent()
+            );
         });
     }
 

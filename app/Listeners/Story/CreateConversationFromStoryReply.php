@@ -42,7 +42,11 @@ class CreateConversationFromStoryReply implements ShouldQueue
 
         // Vérifier si un message existe déjà avec cet identifiant client idempotent
         $clientMessageId = 'story_reply_'.$reply->id;
-        $existingMessage = Message::query()->where('client_message_id', $clientMessageId)->first();
+
+        $existingMessage = Message::query()
+            ->where('client_message_id', $clientMessageId)
+            ->first();
+
         if ($existingMessage) {
             $reply->update([
                 'future_conversation_id' => (string) $existingMessage->conversation_id,
@@ -71,16 +75,20 @@ class CreateConversationFromStoryReply implements ShouldQueue
                 return;
             }
 
-            // Récupérer ou créer la conversation directe entre le répondant et l'auteur de la story
-            $conversation = $this->threadService->getOrCreateDirectConversation(
-                user: $respondent,
-                peerId: $author->id,
-                listingId: null,
-                metadata: [
-                    'source' => 'story_reply',
-                    'story_id' => (string) $freshReply->story_id,
-                ]
-            );
+            // Récupérer ou créer la conversation directe entre le répondant et l'auteur de la story (ou page)
+            if ($freshReply->page_id) {
+                $conversation = $this->threadService->getOrCreatePageConversation($author, (int) $freshReply->page_id);
+            } else {
+                $conversation = $this->threadService->getOrCreateDirectConversation(
+                    user: $respondent,
+                    peerId: $author->id,
+                    listingId: null,
+                    metadata: [
+                        'source' => 'story_reply',
+                        'story_id' => (string) $freshReply->story_id,
+                    ]
+                );
+            }
 
             // Snapshot immuable de la Story issu des métadonnées déjà figées
             $storySnapshot = $freshReply->metadata ?? [];
@@ -95,14 +103,16 @@ class CreateConversationFromStoryReply implements ShouldQueue
                 'client_message_id' => $clientMessageId,
                 'metadata' => [
                     'story_id' => (string) $freshReply->story_id,
+                    'story_reply_id' => $freshReply->id,
                     'story_slide_id' => $freshReply->story_slide_id ? (string) $freshReply->story_slide_id : null,
                     'reaction' => $freshReply->reaction,
                     'reply_type' => $freshReply->type->value,
                     'story_preview_card' => $storySnapshot,
+                    'preview' => $storySnapshot,
                 ],
             ]);
 
-            // Mise à jour de la réponse Story
+            // Liaison bi-directionnelle avec la réponse Story pour traçabilité parfaite
             $freshReply->update([
                 'future_conversation_id' => (string) $conversation->id,
                 'future_message_id' => (string) $message->id,

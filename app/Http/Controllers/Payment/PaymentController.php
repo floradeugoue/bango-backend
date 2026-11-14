@@ -8,6 +8,7 @@ use App\Enums\Payment\PaymentEventSource;
 use App\Enums\Payment\PaymentProvider;
 use App\Enums\Payment\PaymentServiceType;
 use App\Enums\Payment\PaymentStatus;
+use App\Enums\Visit\VisitReservationStatus;
 use App\Exceptions\Payment\IdempotencyConflictException;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Payment\Concerns\FormatsPaymentResponses;
@@ -15,9 +16,13 @@ use App\Http\Requests\Payment\GetQuoteRequest;
 use App\Http\Requests\Payment\InitiatePaymentRequest;
 use App\Http\Resources\Payment\PaymentTransactionResource;
 use App\Models\Boost\CreditTransaction;
+use App\Models\Page\Page;
+use App\Models\Page\PageCertification;
 use App\Models\Payment\PaymentTransaction;
 use App\Models\Subscription\SubscriptionPrice;
 use App\Models\Subscription\SubscriptionProduct;
+use App\Models\Visit\VisitReservation;
+use App\Services\Legal\LegalDocumentService;
 use App\Services\Payment\PaymentEngineService;
 use App\Services\Payment\PaymentGatewayManager;
 use App\Services\Payment\PricingService;
@@ -82,6 +87,19 @@ class PaymentController extends Controller
                     status: 404,
                     details: ['price_id' => $priceId]
                 );
+            }
+
+            if ($user && $price->required_terms_version) {
+                $legalService = app(LegalDocumentService::class);
+                if (! $legalService->hasUserAcceptedVersion($user, $price->required_terms_version)) {
+                    return response()->json([
+                        'message' => "Vous devez accepter la version {$price->required_terms_version} des conditions générales d'utilisation pour souscrire à ce tarif.",
+                        'error' => 'TERMS_ACCEPTANCE_REQUIRED',
+                        'required_version' => $price->required_terms_version,
+                        'accepted_version' => $user->accepted_terms_version,
+                        'document_slug' => LegalDocumentService::TERMS_SLUG,
+                    ], 403);
+                }
             }
 
             // Vérifier si l'utilisateur a déjà un abonnement actif pour ce badge
@@ -200,6 +218,19 @@ class PaymentController extends Controller
                 );
             }
 
+            if ($price->required_terms_version) {
+                $legalService = app(LegalDocumentService::class);
+                if (! $legalService->hasUserAcceptedVersion($user, $price->required_terms_version)) {
+                    return response()->json([
+                        'message' => "Vous devez accepter la version {$price->required_terms_version} des conditions générales d'utilisation pour souscrire à ce tarif.",
+                        'error' => 'TERMS_ACCEPTANCE_REQUIRED',
+                        'required_version' => $price->required_terms_version,
+                        'accepted_version' => $user->accepted_terms_version,
+                        'document_slug' => LegalDocumentService::TERMS_SLUG,
+                    ], 403);
+                }
+            }
+
             // Vérifier si l'utilisateur possède déjà cet abonnement actif
             if ($price->product && $price->product->badge_type) {
                 $existing = $user->subscriptions()
@@ -247,11 +278,17 @@ class PaymentController extends Controller
             }
         }
 
+        $isWalletPayment = $request->getChannel() === PaymentChannel::CreditWallet
+            || in_array($request->input('gateway'), ['wallet', 'credit'], true);
+
+        $gateway = $isWalletPayment ? 'wallet' : ($request->input('gateway') ?? config('payment.default_gateway', 'monetbil'));
+
         // 2. Calcul du devis certifié côté serveur (source de vérité immuable)
         $quote = $this->pricingService->calculateQuote(
             serviceType: $serviceType,
             priceId: $request->input('price_id'),
-            customAmount: $proratedBaseAmount ?? $request->getCustomAmount()
+            customAmount: $proratedBaseAmount ?? $request->getCustomAmount(),
+            gateway: $gateway
         );
 
         // 3. Vérification de cohérence avec un devis préalable (si transmis par le frontend)
@@ -297,6 +334,27 @@ class PaymentController extends Controller
             $transactionContext['custom_period_end'] = $customPeriodEnd->toISOString();
         }
 
+        if ($serviceType === PaymentServiceType::Certification) {
+            $pageId = $request->input('page_id');
+            $certId = $request->input('certification_id');
+            if ($pageId) {
+                $transactionContext['page_id'] = $pageId;
+                $page = Page::find($pageId);
+                if ($page) {
+                    $cert = $page->latestCertification;
+                    if ($cert) {
+                        $transactionContext['certification_id'] = $cert->id;
+                    }
+                }
+            } elseif ($certId) {
+                $cert = PageCertification::find($certId);
+                if ($cert) {
+                    $transactionContext['certification_id'] = $cert->id;
+                    $transactionContext['page_id'] = $cert->page_id;
+                }
+            }
+        }
+
         try {
             $transaction = $this->paymentEngineService->createOrRetrieveTransaction(
                 user: $user,
@@ -304,6 +362,15 @@ class PaymentController extends Controller
                 idempotencyKey: $request->getIdempotencyKey(),
                 context: $transactionContext
             );
+
+            if ($serviceType === PaymentServiceType::Certification && isset($transactionContext['certification_id'])) {
+                $transaction->update([
+                    'payable_type' => PageCertification::class,
+                    'payable_id' => $transactionContext['certification_id'],
+                    'price_id' => $quote->price?->id,
+                    'product_id' => $quote->product?->id,
+                ]);
+            }
         } catch (IdempotencyConflictException $e) {
             return $this->paymentError(
                 code: 'IDEMPOTENCY_CONFLICT',
@@ -343,9 +410,9 @@ class PaymentController extends Controller
         }
 
         // 4b. Traitement direct si paiement par portefeuille de crédits BANGO
-        if ($request->getChannel() === PaymentChannel::CreditWallet) {
+        if ($request->getChannel() === PaymentChannel::CreditWallet || $isWalletPayment) {
             $wallet = $user->creditWallet()->lockForUpdate()->first();
-            $requiredAmount = (int) $quote->totalAmount;
+            $requiredAmount = (int) round((float) $transaction->amount);
 
             if (! $wallet || ! $wallet->canAfford($requiredAmount)) {
                 return $this->paymentError(
@@ -376,7 +443,7 @@ class PaymentController extends Controller
             ]);
 
             $attempt = $transaction->createAttempt(
-                provider: PaymentProvider::Credit,
+                provider: PaymentProvider::Wallet,
                 channel: PaymentChannel::CreditWallet,
                 externalReference: 'WALLET-'.Str::upper(Str::random(10)),
                 metadata: [
@@ -386,6 +453,11 @@ class PaymentController extends Controller
             );
             $attempt->markSuccessful($attempt->external_reference, ['debited' => $requiredAmount]);
 
+            $transaction->provider = PaymentProvider::Wallet;
+            $transaction->channel = PaymentChannel::CreditWallet;
+            $transaction->fee_amount = '0.00';
+            $transaction->total_amount = $transaction->amount;
+            $transaction->amount_charged = $transaction->amount;
             $transaction->credit_used = $requiredAmount;
             $transaction->external_reference = $attempt->external_reference;
             $transaction->transitionTo(
@@ -481,10 +553,10 @@ class PaymentController extends Controller
         );
 
         // Libération de la ressource réservée (visite ou abonnement)
-        if ($transaction->service_type === PaymentServiceType::Visit && $transaction->payable_type === \App\Models\Visit\VisitReservation::class && $transaction->payable_id) {
-            $reservation = \App\Models\Visit\VisitReservation::find($transaction->payable_id);
-            if ($reservation && $reservation->status === \App\Enums\Visit\VisitReservationStatus::PendingPayment) {
-                $reservation->status = \App\Enums\Visit\VisitReservationStatus::Expired;
+        if ($transaction->service_type === PaymentServiceType::Visit && $transaction->payable_type === VisitReservation::class && $transaction->payable_id) {
+            $reservation = VisitReservation::find($transaction->payable_id);
+            if ($reservation && $reservation->status === VisitReservationStatus::PendingPayment) {
+                $reservation->status = VisitReservationStatus::Expired;
                 $reservation->lock_expires_at = null;
                 $reservation->cancellation_reason = $failureReason;
                 $reservation->save();

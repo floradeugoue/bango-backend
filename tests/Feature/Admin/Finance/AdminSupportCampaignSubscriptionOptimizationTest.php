@@ -20,6 +20,7 @@ use Database\Seeders\RoleSeeder;
 use Database\Seeders\SubscriptionCatalogSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Laravel\Passport\Passport;
 
 uses(RefreshDatabase::class);
@@ -245,4 +246,48 @@ test('admin moderation stats returns appeal and overturn rates', function () {
         'appeal_rate_percentage',
         'overturn_rate_percentage',
     ]);
+});
+
+test('status counter queries do not include order by or non-grouped columns in group by', function () {
+    $executedQueries = [];
+    DB::listen(function ($query) use (&$executedQueries) {
+        $executedQueries[] = $query->sql;
+    });
+
+    // 1. Campaigns
+    $this->withUnencryptedCookie('bango_admin_session', $this->sessionId)
+        ->getJson('/api/admin/campaigns')
+        ->assertOk();
+
+    // 2. Support tickets
+    $this->withUnencryptedCookie('bango_admin_session', $this->sessionId)
+        ->getJson('/api/admin/support/tickets')
+        ->assertOk();
+
+    // 3. Subscriptions
+    $this->withUnencryptedCookie('bango_admin_session', $this->sessionId)
+        ->getJson('/api/admin/payments/subscriptions')
+        ->assertOk();
+
+    $groupByQueries = array_filter($executedQueries, function (string $sql) {
+        $lower = strtolower($sql);
+
+        return str_contains($lower, 'group by') && (
+            str_contains($lower, 'status') || str_contains($lower, 'state')
+        );
+    });
+
+    expect($groupByQueries)->not->toBeEmpty();
+
+    foreach ($groupByQueries as $sql) {
+        $lower = strtolower($sql);
+        // Ensure no ORDER BY exists on groupBy count queries
+        expect($lower)->not->toContain('order by');
+
+        // On support_tickets count queries, ensure support_tickets.id / messages_count subqueries are not present
+        if (str_contains($lower, 'support_tickets')) {
+            expect($lower)->not->toContain('messages_count');
+            expect($lower)->not->toContain('support_ticket_messages');
+        }
+    }
 });

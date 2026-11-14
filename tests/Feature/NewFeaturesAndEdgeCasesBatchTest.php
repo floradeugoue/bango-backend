@@ -2,7 +2,6 @@
 
 use App\Enums\Page\PageMemberStatus;
 use App\Enums\Page\PageRole;
-use App\Enums\Payment\PaymentAttemptStatus;
 use App\Enums\Payment\PaymentServiceType;
 use App\Enums\Payment\PaymentStatus;
 use App\Enums\Support\TicketCategory;
@@ -14,7 +13,6 @@ use App\Models\Listing\ListingAlert;
 use App\Models\Message\Conversation;
 use App\Models\Page\Page;
 use App\Models\Page\PageMember;
-use App\Models\Payment\PaymentAttempt;
 use App\Models\Payment\PaymentTransaction;
 use App\Models\Support\AppFeedback;
 use App\Models\Support\SupportTicket;
@@ -24,6 +22,7 @@ use App\Models\Visit\VisitSlot;
 use App\Services\Payment\Contracts\PaymentGatewayInterface;
 use App\Services\Payment\DTO\GatewayInitiateResult;
 use App\Services\Payment\PaymentGatewayManager;
+use App\Services\Payment\PricingService;
 use Database\Seeders\SubscriptionCatalogSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
@@ -101,7 +100,7 @@ test('point 2: echec immediat monetbil passe la transaction en failed et libere 
         'lock_expires_at' => now()->addMinutes(15),
     ]);
 
-    $quote = app(\App\Services\Payment\PricingService::class)->calculateQuote(
+    $quote = app(PricingService::class)->calculateQuote(
         serviceType: PaymentServiceType::Visit,
         customAmount: 5000
     );

@@ -59,17 +59,9 @@ class AdminSoundService
      */
     public function getSound(string $id): Sound
     {
-        $sound = Sound::with(['user', 'reels' => fn ($q) => $q->latest()->limit(10)])
+        return Sound::with(['user', 'reels' => fn ($q) => $q->latest()->limit(10)])
             ->withCount('reels')
-            ->find($id);
-
-        if (! $sound) {
-            throw ValidationException::withMessages([
-                'id' => ['Son introuvable dans le catalogue.'],
-            ]);
-        }
-
-        return $sound;
+            ->findOrFail($id);
     }
 
     /**

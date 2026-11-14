@@ -64,7 +64,9 @@ class AdminSystemSettingsController extends Controller
             newAmount: (float) $request->input('new_price_amount'),
             noticeDays: (int) ($request->input('notice_days') ?? 30),
             reason: $request->input('reason'),
-            operator: $request->user()
+            operator: $request->user(),
+            legalDocumentId: $request->filled('legal_document_id') ? (int) $request->input('legal_document_id') : null,
+            termsVersion: $request->input('terms_version')
         );
 
         return response()->json([

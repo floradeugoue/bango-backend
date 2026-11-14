@@ -23,6 +23,7 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
@@ -227,7 +228,7 @@ class DelegationService
     /**
      * Acceptation d'un mandat par l'agent invité.
      */
-    public function acceptInvitation(Delegation $delegation, User $agent): Delegation
+    public function acceptInvitation(Delegation $delegation, User $agent, bool $acceptAllBatch = false): Delegation
     {
         if ($delegation->agent_id !== $agent->id) {
             throw new AuthorizationException('Cette invitation ne vous est pas destinée.');
@@ -246,11 +247,15 @@ class DelegationService
             abort(409, 'Impossible d\'accepter l\'invitation tant que votre contre-proposition de partage des frais de visite est en attente de réponse du bailleur.');
         }
 
-        return DB::transaction(function () use ($delegation, $agent, $visitShare) {
+        return DB::transaction(function () use ($delegation, $agent, $visitShare, $acceptAllBatch) {
             /** @var Delegation $locked */
             $locked = Delegation::where('id', $delegation->id)->lockForUpdate()->firstOrFail();
 
             if ($locked->status !== DelegationStatus::Pending) {
+                if ($locked->status === DelegationStatus::Active && $locked->answered_at && $locked->answered_at->diffInSeconds(now()) < 60) {
+                    return $locked->load(['bailleur', 'agent', 'listing']);
+                }
+
                 throw ValidationException::withMessages([
                     'delegation' => ["Cette invitation n'est plus en attente (statut actuel : {$locked->status->value})."],
                 ]);
@@ -304,10 +309,56 @@ class DelegationService
                 }
             }
 
-            try {
-                $locked->bailleur->notify(new AgentAcceptedNotification($locked));
-            } catch (\Throwable $e) {
-                Log::warning("Échec notification acceptation mandat: {$e->getMessage()}");
+            // Fenêtre de regroupement d'invitation (même bailleur, même agent, créneau horaire proche)
+            $batchWindowStart = $locked->invited_at ? $locked->invited_at->copy()->subMinutes(10) : now()->subMinutes(10);
+            $batchWindowEnd = $locked->invited_at ? $locked->invited_at->copy()->addMinutes(10) : now()->addMinutes(10);
+
+            if ($acceptAllBatch) {
+                $siblingDelegations = Delegation::where('bailleur_id', $locked->bailleur_id)
+                    ->where('agent_id', $agent->id)
+                    ->where('id', '!=', $locked->id)
+                    ->where('status', DelegationStatus::Pending)
+                    ->whereBetween('invited_at', [$batchWindowStart, $batchWindowEnd])
+                    ->lockForUpdate()
+                    ->get();
+
+                foreach ($siblingDelegations as $sibling) {
+                    $sibling->status = DelegationStatus::Active;
+                    $sibling->answered_at = now();
+                    $sibling->expires_at = null;
+                    $sibling->save();
+
+                    if ($sibling->listing && ! $sibling->listing->agent_id) {
+                        $sibling->listing->agent_id = $agent->id;
+                        $sibling->listing->save();
+                    }
+                }
+            }
+
+            $batchCount = Delegation::where('bailleur_id', $locked->bailleur_id)
+                ->where('agent_id', $locked->agent_id)
+                ->whereBetween('invited_at', [$batchWindowStart, $batchWindowEnd])
+                ->count();
+            $batchCount = max(1, $batchCount);
+
+            // Dé-duplication des notifications : une seule notification par lot d'invitations
+            $cacheKey = "notif_delegation_accepted_{$locked->bailleur_id}_{$locked->agent_id}";
+            $alreadyNotified = ! Cache::add($cacheKey, true, now()->addMinutes(2));
+
+            if (! $alreadyNotified && $locked->bailleur->notifications()
+                ->where('type', AgentAcceptedNotification::class)
+                ->where('data->agent_id', $locked->agent_id)
+                ->where('created_at', '>=', now()->subMinutes(2))
+                ->exists()) {
+                $alreadyNotified = true;
+            }
+
+            if (! $alreadyNotified) {
+                try {
+                    $locked->bailleur->notify(new AgentAcceptedNotification($locked, $batchCount));
+                } catch (\Throwable $e) {
+                    Log::warning("Échec notification acceptation mandat: {$e->getMessage()}");
+                }
             }
 
             return $locked->load(['bailleur', 'agent', 'listing']);
@@ -317,17 +368,21 @@ class DelegationService
     /**
      * Refus d'un mandat par l'agent invité.
      */
-    public function rejectInvitation(Delegation $delegation, User $agent): Delegation
+    public function rejectInvitation(Delegation $delegation, User $agent, bool $rejectAllBatch = false): Delegation
     {
         if ($delegation->agent_id !== $agent->id) {
             throw new AuthorizationException('Cette invitation ne vous est pas destinée.');
         }
 
-        return DB::transaction(function () use ($delegation) {
+        return DB::transaction(function () use ($delegation, $agent, $rejectAllBatch) {
             /** @var Delegation $locked */
             $locked = Delegation::where('id', $delegation->id)->lockForUpdate()->firstOrFail();
 
             if ($locked->status !== DelegationStatus::Pending) {
+                if ($locked->status === DelegationStatus::Declined && $locked->answered_at && $locked->answered_at->diffInSeconds(now()) < 60) {
+                    return $locked->load(['bailleur', 'agent', 'listing']);
+                }
+
                 throw ValidationException::withMessages([
                     'delegation' => ["Cette invitation n'est plus en attente (statut actuel : {$locked->status->value})."],
                 ]);
@@ -337,10 +392,47 @@ class DelegationService
             $locked->answered_at = now();
             $locked->save();
 
-            try {
-                $locked->bailleur->notify(new AgentDeclinedNotification($locked));
-            } catch (\Throwable $e) {
-                Log::warning("Échec notification refus mandat: {$e->getMessage()}");
+            // Fenêtre de regroupement d'invitation (même bailleur, même agent, créneau horaire proche)
+            $batchWindowStart = $locked->invited_at ? $locked->invited_at->copy()->subMinutes(10) : now()->subMinutes(10);
+            $batchWindowEnd = $locked->invited_at ? $locked->invited_at->copy()->addMinutes(10) : now()->addMinutes(10);
+
+            if ($rejectAllBatch) {
+                Delegation::where('bailleur_id', $locked->bailleur_id)
+                    ->where('agent_id', $agent->id)
+                    ->where('id', '!=', $locked->id)
+                    ->where('status', DelegationStatus::Pending)
+                    ->whereBetween('invited_at', [$batchWindowStart, $batchWindowEnd])
+                    ->lockForUpdate()
+                    ->update([
+                        'status' => DelegationStatus::Declined,
+                        'answered_at' => now(),
+                    ]);
+            }
+
+            $batchCount = Delegation::where('bailleur_id', $locked->bailleur_id)
+                ->where('agent_id', $locked->agent_id)
+                ->whereBetween('invited_at', [$batchWindowStart, $batchWindowEnd])
+                ->count();
+            $batchCount = max(1, $batchCount);
+
+            // Dé-duplication des notifications : une seule notification par lot d'invitations
+            $cacheKey = "notif_delegation_declined_{$locked->bailleur_id}_{$locked->agent_id}";
+            $alreadyNotified = ! Cache::add($cacheKey, true, now()->addMinutes(2));
+
+            if (! $alreadyNotified && $locked->bailleur->notifications()
+                ->where('type', AgentDeclinedNotification::class)
+                ->where('data->agent_id', $locked->agent_id)
+                ->where('created_at', '>=', now()->subMinutes(2))
+                ->exists()) {
+                $alreadyNotified = true;
+            }
+
+            if (! $alreadyNotified) {
+                try {
+                    $locked->bailleur->notify(new AgentDeclinedNotification($locked, $batchCount));
+                } catch (\Throwable $e) {
+                    Log::warning("Échec notification refus mandat: {$e->getMessage()}");
+                }
             }
 
             return $locked->load(['bailleur', 'agent', 'listing']);

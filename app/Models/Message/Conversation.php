@@ -49,6 +49,7 @@ class Conversation extends Model
         'type',
         'status',
         'page_id',
+        'assigned_to_id',
         'title',
         'avatar_url',
         'listing_id',
@@ -85,6 +86,14 @@ class Conversation extends Model
     public function page(): BelongsTo
     {
         return $this->belongsTo(Page::class, 'page_id');
+    }
+
+    /**
+     * @return BelongsTo<User, $this>
+     */
+    public function assignedTo(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'assigned_to_id');
     }
 
     /**

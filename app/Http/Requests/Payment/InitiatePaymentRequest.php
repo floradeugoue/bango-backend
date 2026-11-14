@@ -31,11 +31,26 @@ class InitiatePaymentRequest extends FormRequest
             'operator' => ['nullable', 'string', 'max:64'],
             'idempotency_key' => ['sometimes', 'string', 'max:128'],
             'key' => ['sometimes', 'string', 'max:128'],
-            'channel' => ['nullable', 'string', 'in:mobile_money,credit_wallet,card'],
+            'channel' => ['nullable', 'string', 'in:mobile_money,credit_wallet,card,credit,wallet'],
+            'gateway' => ['nullable', 'string', 'in:monetbil,wallet,credit'],
+            'payment_method' => ['nullable', 'string'],
             'align_with' => ['nullable', 'string', 'in:landlord,agent'],
             'country' => ['nullable', 'string', 'max:5'],
             'country_code' => ['nullable', 'string', 'max:5'],
+            'page_id' => ['nullable'],
+            'certification_id' => ['nullable'],
         ];
+    }
+
+    protected function prepareForValidation(): void
+    {
+        if (
+            in_array($this->input('channel'), ['credit', 'wallet'], true)
+            || in_array($this->input('payment_method'), ['credit', 'wallet', 'credit_wallet'], true)
+            || in_array($this->input('gateway'), ['credit', 'wallet'], true)
+        ) {
+            $this->merge(['channel' => 'credit_wallet']);
+        }
     }
 
     public function withValidator($validator): void

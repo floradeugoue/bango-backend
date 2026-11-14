@@ -19,6 +19,7 @@ use App\Models\Support\SupportTicketMessage;
 use App\Models\Support\UserAccountSanction;
 use App\Models\Support\UserAnonymizationRequest;
 use App\Models\User;
+use App\Notifications\Support\ModerationDecisionNotification;
 use DomainException;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
@@ -665,6 +666,47 @@ class AdminAccountOperationsService
                     'lifted_by_id' => $operator->id,
                     'lift_reason' => $reason,
                 ]);
+
+            // Notification de la personne concernée
+            $lockedUser->notify(new ModerationDecisionNotification(
+                report: null,
+                action: 'unsuspend_author',
+                justification: $reason
+            ));
+
+            return $lockedUser->fresh(['sanctions']);
+        });
+    }
+
+    /**
+     * Levée du blocage d'un compte avec traçabilité et notification.
+     */
+    public function liftBlock(User $user, User $operator, string $reason): User
+    {
+        return DB::transaction(function () use ($user, $operator, $reason) {
+            $lockedUser = User::where('id', $user->id)->lockForUpdate()->firstOrFail();
+
+            $lockedUser->status = 'active';
+            $lockedUser->suspended_until = null;
+            $lockedUser->suspension_reason = null;
+            $lockedUser->save();
+
+            // Clôture de toute sanction active
+            UserAccountSanction::where('user_id', $lockedUser->id)
+                ->where('is_active', true)
+                ->update([
+                    'is_active' => false,
+                    'lifted_at' => Carbon::now(),
+                    'lifted_by_id' => $operator->id,
+                    'lift_reason' => $reason,
+                ]);
+
+            // Notification de la personne concernée
+            $lockedUser->notify(new ModerationDecisionNotification(
+                report: null,
+                action: 'unblock_author',
+                justification: $reason
+            ));
 
             return $lockedUser->fresh(['sanctions']);
         });

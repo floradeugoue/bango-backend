@@ -2,6 +2,8 @@
 
 namespace App\Services\Payment;
 
+use App\Enums\Payment\PaymentChannel;
+use App\Enums\Payment\PaymentProvider;
 use App\Enums\Payment\PaymentServiceType;
 use App\Enums\Payment\PaymentStatus;
 use App\Enums\Visit\VisitReservationStatus;
@@ -44,8 +46,14 @@ class ReceiptPdfService
             : ($transaction->user?->name ?? 'Client BANGO');
         $clientEmail = $transaction->user?->email ?? 'N/A';
         $serviceLabel = $this->getServiceLabel($transaction);
-        $channel = $transaction->channel?->value ?? 'Mobile Money';
-        $provider = $transaction->provider?->value ?? 'Monetbil';
+
+        $isWallet = $transaction->channel === PaymentChannel::CreditWallet
+            || $transaction->provider === PaymentProvider::Wallet
+            || $transaction->provider?->value === 'wallet'
+            || $transaction->provider?->value === 'credit';
+
+        $channel = $isWallet ? 'Portefeuille Crédit BANGO' : ($transaction->channel?->value ?? 'Mobile Money');
+        $provider = $isWallet ? 'wallet' : ($transaction->provider?->value ?? 'Monetbil');
         $externalRef = $transaction->external_reference ?? 'N/A';
         $signature = strtoupper(substr(hash('sha256', "BANGO:{$ref}:{$transaction->total_amount}:{$transaction->user_id}"), 0, 24));
 
@@ -70,8 +78,8 @@ class ReceiptPdfService
             'DETAILS DE LA PRESTATION',
             '------------------------------------------------------------------------',
             "Type de service      : {$serviceLabel}",
-            "Canal de paiement    : {$channel} ({$provider})",
-            "Reference operateur  : {$externalRef}",
+            $isWallet ? "Canal de paiement    : {$channel}" : "Canal de paiement    : {$channel} ({$provider})",
+            $isWallet ? "Reference debit      : {$externalRef}" : "Reference operateur  : {$externalRef}",
         ];
 
         // Pour les abonnements, mention de la période couverte

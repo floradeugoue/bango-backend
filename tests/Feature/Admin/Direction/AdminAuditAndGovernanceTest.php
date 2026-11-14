@@ -399,3 +399,51 @@ it('previews, generates sealed export, and verifies its cryptographic seal', fun
             ],
         ]);
 });
+
+it('verifies audit log hashes consistently across Zulu UTC and ISO8601 timestamp formats', function () {
+    [$operator, $sessionId, $csrfToken] = createDirectionSession();
+
+    $log = AdminAuditLog::logChainedEvent('security.timestamp_test', $operator, 'User', (string) $operator->id, 'Operator Test');
+
+    expect($log->verifyHash())->toBeTrue();
+
+    // Verify global chain verify endpoint reports valid
+    $response = $this->withUnencryptedCookie('bango_admin_session', $sessionId)
+        ->withHeader('X-CSRF-TOKEN', $csrfToken)
+        ->getJson('/api/admin/audit/verify');
+
+    $response->assertStatus(200)
+        ->assertJson([
+            'success' => true,
+            'data' => [
+                'is_valid' => true,
+                'broken_at_id' => null,
+            ],
+        ]);
+});
+
+it('re-seals the audit chain using artisan admin:audit:reseal command', function () {
+    [$operator, $sessionId, $csrfToken] = createDirectionSession();
+
+    $log1 = AdminAuditLog::logChainedEvent('action.first', $operator, 'Test', '1', 'Item 1');
+    $log2 = AdminAuditLog::logChainedEvent('action.second', $operator, 'Test', '2', 'Item 2');
+
+    // Simulate database tampering or unsealed legacy entries by corrupting hash on log1
+    \DB::table('admin_audit_logs')->where('id', $log1->id)->update([
+        'hash' => 'corrupted_hash_for_testing',
+    ]);
+
+    // Chain is now invalid
+    $brokenVerify = AdminAuditLog::verifyChain();
+    expect($brokenVerify['is_valid'])->toBeFalse();
+    expect($brokenVerify['broken_at_id'])->toBe($log1->id);
+
+    // Run artisan reseal
+    $this->artisan('admin:audit:reseal', ['--force' => true])
+        ->assertSuccessful();
+
+    // Chain is now valid again
+    $fixedVerify = AdminAuditLog::verifyChain();
+    expect($fixedVerify['is_valid'])->toBeTrue();
+    expect($fixedVerify['broken_at_id'])->toBeNull();
+});
