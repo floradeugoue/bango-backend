@@ -108,6 +108,19 @@ class PostMedia extends Model
     }
 
     /**
+     * Alias ou accesseur pour thumbnail_path / thumbnail_url retournant l'image de couverture.
+     */
+    public function getThumbnailUrlAttribute(): ?string
+    {
+        return $this->poster_url;
+    }
+
+    public function getThumbnailPathAttribute(): ?string
+    {
+        return $this->attributes['poster_url'] ?? null;
+    }
+
+    /**
      * Publication parente.
      */
     public function post(): BelongsTo

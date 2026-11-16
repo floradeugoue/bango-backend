@@ -381,11 +381,31 @@ class AdminKycQueueController extends Controller
             'next' => $next,
         ];
 
+        $kind = $sub->metadata['kind'] ?? 'new';
+
+        if (isset($sub->metadata['attempt']) && is_numeric($sub->metadata['attempt'])) {
+            $attempt = (int) $sub->metadata['attempt'];
+        } else {
+            $userHistory = KycSubmission::where('user_id', $sub->user_id)
+                ->orderBy('created_at', 'asc')
+                ->orderBy('id', 'asc')
+                ->get();
+            $idx = $userHistory->search(fn ($item) => (string) $item->id === (string) $sub->id);
+            if ($idx !== false) {
+                $attempt = $idx + 1;
+            } else {
+                $attempt = $userHistory->filter(fn ($item) => $item->created_at <= $sub->created_at)->count();
+            }
+        }
+        $attempt = max(1, (int) $attempt);
+
         return response()->json([
             'success' => true,
             'data' => [
                 'id' => $sub->id,
                 'reference' => $sub->reference,
+                'kind' => $kind,
+                'attempt' => $attempt,
                 'account' => [
                     'id' => $user ? (string) $user->id : null,
                     'name' => $user?->name ?? $sub->full_name,

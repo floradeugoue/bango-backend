@@ -16,7 +16,7 @@ return [
     ],
     'countdown_remind' => [
         'title' => 'Rappel d\'événement',
-        'body' => 'Rappel activé pour le compte à rebours.',
+        'body' => 'C\'est l\'heure : le compte à rebours que tu suivais est terminé.',
     ],
     'comment' => [
         'title' => 'Nouveau commentaire',

@@ -53,14 +53,14 @@ test('SocialNotification generates translated title and body for story_like, sto
     $notifRemindFr = new SocialNotification('countdown_remind', $authorFr, ['story_id' => 'story-123']);
     $dataRemindFr = $notifRemindFr->toArray($authorFr);
     expect($dataRemindFr['title'])->toBe('Rappel d\'événement')
-        ->and($dataRemindFr['message'])->toBe('Rappel activé pour le compte à rebours.')
+        ->and($dataRemindFr['message'])->toBe('C\'est l\'heure : le compte à rebours que tu suivais est terminé.')
         ->and($dataRemindFr['title'])->not->toContain('notifications.');
 
     // 6. Countdown Remind EN
     $notifRemindEn = new SocialNotification('countdown_remind', $authorEn, ['story_id' => 'story-123']);
     $dataRemindEn = $notifRemindEn->toArray($authorEn);
     expect($dataRemindEn['title'])->toBe('Event reminder')
-        ->and($dataRemindEn['message'])->toBe('Reminder set for the countdown.')
+        ->and($dataRemindEn['message'])->toBe('It\'s time: the countdown you were following has ended.')
         ->and($dataRemindEn['title'])->not->toContain('notifications.');
 });
 

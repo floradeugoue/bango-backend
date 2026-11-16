@@ -18,6 +18,7 @@ use App\Models\Listing\ListingSave;
 use App\Models\Listing\ListingShare;
 use App\Models\User;
 use App\Models\Visit\VisitSlot;
+use App\Rules\ListingCurrencyRule;
 use App\Services\Admin\AdminListingControlService;
 use App\Services\Media\MediaStorageService;
 use App\Services\Subscription\BadgeResolutionService;
@@ -254,8 +255,10 @@ class ListingService
             if (isset($data['price'])) {
                 $listing->price = (float) $data['price'];
             }
-            if (isset($data['currency'])) {
-                $listing->currency = (string) $data['currency'];
+            if (! empty($data['currency'])) {
+                $listing->currency = strtoupper(trim((string) $data['currency']));
+            } elseif (empty($listing->currency)) {
+                $listing->currency = ListingCurrencyRule::deduceForUser($user, $data['city'] ?? null);
             }
             if (array_key_exists('period', $data)) {
                 $listing->period = $data['period'];
@@ -419,7 +422,11 @@ class ListingService
             $listing->kind = $kind ?? ListingKind::Flat;
 
             $listing->price = (float) ($data['price'] ?? 0);
-            $listing->currency = (string) ($data['currency'] ?? 'XAF');
+            $currency = ! empty($data['currency']) ? strtoupper(trim((string) $data['currency'])) : null;
+            if (! $currency) {
+                $currency = ListingCurrencyRule::deduceForUser($user, $data['city'] ?? null);
+            }
+            $listing->currency = $currency;
             $listing->period = ($listing->mode === ListingMode::Sale) ? null : 'month';
 
             $listing->deposit_months = (int) ($data['deposit_months'] ?? 0);
@@ -536,7 +543,7 @@ class ListingService
             throw new AuthorizationException("Vous n'êtes pas autorisé à modifier cette annonce (capacité 'edit' requise).");
         }
 
-        $priceFields = ['price', 'deposit_months', 'advance_months', 'visit_fee', 'charges', 'negotiable'];
+        $priceFields = ['price', 'currency', 'deposit_months', 'advance_months', 'visit_fee', 'charges', 'negotiable'];
         $isOwner = ($actor->id === $listing->owner_id) || $actor->isAdmin();
 
         if (! $isOwner) {
@@ -560,6 +567,9 @@ class ListingService
             }
             if ($isOwner && isset($patch['price'])) {
                 $listing->price = (float) $patch['price'];
+            }
+            if ($isOwner && ! empty($patch['currency'])) {
+                $listing->currency = strtoupper(trim((string) $patch['currency']));
             }
             if ($isOwner && isset($patch['deposit_months'])) {
                 $listing->deposit_months = (int) $patch['deposit_months'];

@@ -65,4 +65,9 @@ class StorySlide extends Model
     {
         return $this->belongsTo(Sound::class);
     }
+
+    public function likes(): HasMany
+    {
+        return $this->hasMany(StoryLike::class, 'slide_id');
+    }
 }

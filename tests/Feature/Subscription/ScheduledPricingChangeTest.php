@@ -326,3 +326,60 @@ test('renewal and subscription at new price are blocked until terms version is a
     $allowedSubscribe->assertOk()
         ->assertJsonPath('success', true);
 });
+
+test('pricing change proposal fails validation if neither legal_document_id nor terms_version is provided', function () {
+    $response = $this->withUnencryptedCookie('bango_admin_session', $this->sessionId)
+        ->withHeader('X-CSRF-TOKEN', $this->csrfToken)
+        ->postJson('/api/admin/settings/pricing/changes', [
+            'price_id' => $this->price->id,
+            'new_price_amount' => 15000,
+            'notice_days' => 30,
+            'reason' => 'Tentative de changement sans nouvelle version des CGU.',
+        ]);
+
+    $response->assertStatus(422)
+        ->assertJsonValidationErrors(['legal_document_id', 'terms_version']);
+});
+
+test('pricing change proposal fails validation if legal_document_id does not point to terms-of-service', function () {
+    $privacyDoc = LegalDocument::create([
+        'slug' => 'privacy-policy',
+        'version' => '1.5.0',
+        'locale' => 'fr',
+        'title' => 'Politique de confidentialité v1.5.0',
+        'content_markdown' => 'Données personnelles',
+        'effective_date' => now(),
+        'is_published' => true,
+        'is_mandatory' => true,
+    ]);
+
+    $response = $this->withUnencryptedCookie('bango_admin_session', $this->sessionId)
+        ->withHeader('X-CSRF-TOKEN', $this->csrfToken)
+        ->postJson('/api/admin/settings/pricing/changes', [
+            'price_id' => $this->price->id,
+            'new_price_amount' => 15000,
+            'notice_days' => 30,
+            'reason' => 'Changement avec mauvais document légal.',
+            'legal_document_id' => $privacyDoc->id,
+        ]);
+
+    $response->assertStatus(422)
+        ->assertJsonValidationErrors(['legal_document_id']);
+});
+
+test('pricing change proposal succeeds when using terms_version pointing to terms-of-service', function () {
+    $response = $this->withUnencryptedCookie('bango_admin_session', $this->sessionId)
+        ->withHeader('X-CSRF-TOKEN', $this->csrfToken)
+        ->postJson('/api/admin/settings/pricing/changes', [
+            'price_id' => $this->price->id,
+            'new_price_amount' => 15000,
+            'notice_days' => 30,
+            'reason' => 'Changement tarifaire avec terms_version valide.',
+            'terms_version' => '2.0.0',
+        ]);
+
+    $response->assertStatus(201)
+        ->assertJsonPath('success', true)
+        ->assertJsonPath('data.legal_document_id', $this->termsV2->id)
+        ->assertJsonPath('data.terms_version', '2.0.0');
+});

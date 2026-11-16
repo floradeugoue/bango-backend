@@ -24,7 +24,7 @@ class UploadListingMediaRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'file' => ['required', 'file'],
+            'file' => ['required', 'file', 'max:256000'],
             'type' => ['required', 'in:image,video'],
             'room' => ['nullable', 'in:living,bedroom,kitchen,shower,outside'],
             'duration' => ['nullable', 'integer', 'min:1', 'max:600'],
@@ -37,6 +37,22 @@ class UploadListingMediaRequest extends FormRequest
             'video_chapters' => ['nullable', 'array'],
             'video_chapters.*.room' => ['required', 'string', 'in:entry,living,kitchen,shower,outside'],
             'video_chapters.*.at_ms' => ['required', 'integer', 'min:0'],
+        ];
+    }
+
+    /**
+     * Get custom error messages for validator errors.
+     *
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'file.required' => 'Le fichier média est requis.',
+            'file.file' => 'Le fichier envoyé est invalide ou dépasse la taille maximale autorisée.',
+            'file.max' => 'Le fichier dépasse la taille maximale autorisée (250 Mo).',
+            'type.required' => 'Le type de média (image ou video) est requis.',
+            'type.in' => 'Le type de média doit être image ou video.',
         ];
     }
 

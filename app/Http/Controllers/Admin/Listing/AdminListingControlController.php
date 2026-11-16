@@ -114,6 +114,7 @@ class AdminListingControlController extends Controller
             'success' => true,
             'data' => [
                 'id' => $listing->id,
+                'reference' => $listing->reference,
                 'title' => $listing->title,
                 'description' => $listing->description,
                 'mode' => $listing->mode?->value ?? $listing->mode,

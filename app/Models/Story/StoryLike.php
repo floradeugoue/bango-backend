@@ -14,6 +14,7 @@ class StoryLike extends Model
 
     protected $fillable = [
         'story_id',
+        'slide_id',
         'user_id',
         'page_id',
     ];
@@ -21,6 +22,11 @@ class StoryLike extends Model
     public function story(): BelongsTo
     {
         return $this->belongsTo(Story::class);
+    }
+
+    public function slide(): BelongsTo
+    {
+        return $this->belongsTo(StorySlide::class, 'slide_id');
     }
 
     public function user(): BelongsTo

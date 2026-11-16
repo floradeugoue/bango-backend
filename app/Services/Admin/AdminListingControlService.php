@@ -47,8 +47,7 @@ class AdminListingControlService
      */
     public function getListings(array $filters = [], int $perPage = 20): array
     {
-        $query = Listing::with(['owner', 'agent', 'page', 'photos', 'campaigns'])
-            ->withCount(['conversations']);
+        $query = Listing::query();
 
         // Filtrage selon les pays autorisés dans la session de l'opérateur (Point 20)
         $adminSession = request()?->attributes?->get('admin_session');
@@ -142,9 +141,11 @@ class AdminListingControlService
         }
 
         // Compteurs d'onglets avant application du filtre de statut
-        $baseQuery = (clone $query)->reorder();
-        $statusCounts = $baseQuery
-            ->selectRaw('status, count(*) as count')
+        $statusCounts = (clone $query)
+            ->reorder()
+            ->toBase()
+            ->select('status')
+            ->selectRaw('count(*) as count')
             ->groupBy('status')
             ->pluck('count', 'status')
             ->toArray();
@@ -171,7 +172,9 @@ class AdminListingControlService
             default => $query->orderBy('created_at', $dir),
         };
 
-        $paginator = $query->paginate($perPage);
+        $paginator = $query->with(['owner', 'agent', 'page', 'photos', 'campaigns'])
+            ->withCount(['conversations'])
+            ->paginate($perPage);
 
         return [
             'paginator' => $paginator,
@@ -942,7 +945,7 @@ class AdminListingControlService
      */
     public function getVisits(array $filters = [], int $perPage = 20): array
     {
-        $query = VisitReservation::with(['listing', 'slot', 'prospect', 'owner', 'agent', 'paymentTransaction']);
+        $query = VisitReservation::query();
 
         // 1. Filtre par annonce
         if (! empty($filters['listing_id'])) {
@@ -977,9 +980,11 @@ class AdminListingControlService
         }
 
         // Compteurs d'onglets calculés avant filtre de statut
-        $baseQuery = (clone $query)->reorder();
-        $statusCounts = $baseQuery
-            ->selectRaw('status, count(*) as count')
+        $statusCounts = (clone $query)
+            ->reorder()
+            ->toBase()
+            ->select('status')
+            ->selectRaw('count(*) as count')
             ->groupBy('status')
             ->pluck('count', 'status')
             ->toArray();
@@ -996,7 +1001,8 @@ class AdminListingControlService
 
         $query->orderByDesc('created_at');
 
-        $paginator = $query->paginate($perPage);
+        $paginator = $query->with(['listing', 'slot', 'prospect', 'owner', 'agent', 'paymentTransaction'])
+            ->paginate($perPage);
 
         return [
             'paginator' => $paginator,

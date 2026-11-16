@@ -2,7 +2,9 @@
 
 namespace App\Http\Resources\Story;
 
+use App\Models\Story\StoryLike;
 use App\Models\Story\StorySlide;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -16,6 +18,20 @@ class StorySlideResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        /** @var User|null $user */
+        $user = $request->user();
+        $isLiked = false;
+
+        if ($user) {
+            $isLiked = $this->relationLoaded('likes')
+                ? $this->likes->contains('user_id', $user->id)
+                : StoryLike::where('slide_id', $this->id)->where('user_id', $user->id)->exists();
+        }
+
+        $likesCount = $this->relationLoaded('likes')
+            ? $this->likes->count()
+            : StoryLike::where('slide_id', $this->id)->count();
+
         return [
             'id' => (string) $this->id,
             'story_id' => (string) $this->story_id,
@@ -31,6 +47,8 @@ class StorySlideResource extends JsonResource
             'drawings' => $this->metadata['drawings'] ?? null,
             'framing' => $this->metadata['framing'] ?? null,
             'stickers' => StoryStickerResource::collection($this->whenLoaded('stickers')),
+            'is_liked' => $isLiked,
+            'likes_count' => $likesCount,
             'metadata' => $this->metadata,
             'created_at' => $this->created_at?->toIso8601String(),
         ];

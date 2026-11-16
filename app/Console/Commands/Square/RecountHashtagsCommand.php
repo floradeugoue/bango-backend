@@ -45,4 +45,3 @@ class RecountHashtagsCommand extends Command
         return Command::SUCCESS;
     }
 }
-

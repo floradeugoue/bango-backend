@@ -345,12 +345,21 @@ class DelegationService
             $cacheKey = "notif_delegation_accepted_{$locked->bailleur_id}_{$locked->agent_id}";
             $alreadyNotified = ! Cache::add($cacheKey, true, now()->addMinutes(2));
 
-            if (! $alreadyNotified && $locked->bailleur->notifications()
-                ->where('type', AgentAcceptedNotification::class)
-                ->where('data->agent_id', $locked->agent_id)
-                ->where('created_at', '>=', now()->subMinutes(2))
-                ->exists()) {
-                $alreadyNotified = true;
+            if (! $alreadyNotified) {
+                $driver = DB::connection()->getDriverName();
+                $exists = $locked->bailleur->notifications()
+                    ->where('type', AgentAcceptedNotification::class)
+                    ->when(
+                        $driver === 'pgsql',
+                        fn ($q) => $q->whereRaw("CAST(data AS jsonb)->>'agent_id' = ?", [(string) $locked->agent_id]),
+                        fn ($q) => $q->where('data->agent_id', $locked->agent_id)
+                    )
+                    ->where('created_at', '>=', now()->subMinutes(2))
+                    ->exists();
+
+                if ($exists) {
+                    $alreadyNotified = true;
+                }
             }
 
             if (! $alreadyNotified) {
@@ -419,12 +428,21 @@ class DelegationService
             $cacheKey = "notif_delegation_declined_{$locked->bailleur_id}_{$locked->agent_id}";
             $alreadyNotified = ! Cache::add($cacheKey, true, now()->addMinutes(2));
 
-            if (! $alreadyNotified && $locked->bailleur->notifications()
-                ->where('type', AgentDeclinedNotification::class)
-                ->where('data->agent_id', $locked->agent_id)
-                ->where('created_at', '>=', now()->subMinutes(2))
-                ->exists()) {
-                $alreadyNotified = true;
+            if (! $alreadyNotified) {
+                $driver = DB::connection()->getDriverName();
+                $exists = $locked->bailleur->notifications()
+                    ->where('type', AgentDeclinedNotification::class)
+                    ->when(
+                        $driver === 'pgsql',
+                        fn ($q) => $q->whereRaw("CAST(data AS jsonb)->>'agent_id' = ?", [(string) $locked->agent_id]),
+                        fn ($q) => $q->where('data->agent_id', $locked->agent_id)
+                    )
+                    ->where('created_at', '>=', now()->subMinutes(2))
+                    ->exists();
+
+                if ($exists) {
+                    $alreadyNotified = true;
+                }
             }
 
             if (! $alreadyNotified) {

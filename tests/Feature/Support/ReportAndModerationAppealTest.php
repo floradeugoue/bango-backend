@@ -458,3 +458,64 @@ test('POST /api/moderation/appeals empêche les recours en doublon pour une mêm
     $response->assertStatus(422)
         ->assertJsonPath('message', 'Un recours pour cette sanction est déjà en cours d\'instruction.');
 });
+
+test('GET /api/reports/mine retourne la couverture (poster_url) pour une publication vidéo, ou null si inexistante', function () {
+    Passport::actingAs($this->reporter);
+
+    // 1. Publication vidéo AVEC image de couverture (poster_url)
+    $postWithPoster = Post::factory()->create([
+        'user_id' => $this->targetUser->id,
+        'body' => 'Publication vidéo avec couverture',
+    ]);
+
+    PostMedia::create([
+        'post_id' => $postWithPoster->id,
+        'media_url' => 'https://storage.bango.app/square/videos/293/media_with_cover.mp4',
+        'poster_url' => 'https://storage.bango.app/square/videos/293/cover_thumb.jpg',
+        'media_type' => PostMediaKind::Video,
+        'mime_type' => 'video/mp4',
+        'display_order' => 0,
+    ]);
+
+    $report1 = Report::create([
+        'reporter_id' => $this->reporter->id,
+        'reportable_type' => Post::class,
+        'reportable_id' => (string) $postWithPoster->id,
+        'reason' => ReportReason::InappropriateContent,
+        'status' => ReportStatus::Pending,
+    ]);
+
+    // 2. Publication vidéo SANS image de couverture (ne doit PAS renvoyer le .mp4)
+    $postWithoutPoster = Post::factory()->create([
+        'user_id' => $this->targetUser->id,
+        'body' => 'Publication vidéo sans image de couverture',
+    ]);
+
+    PostMedia::create([
+        'post_id' => $postWithoutPoster->id,
+        'media_url' => 'https://storage.bango.app/square/videos/293/media_no_cover.mp4',
+        'poster_url' => null,
+        'media_type' => PostMediaKind::Video,
+        'mime_type' => 'video/mp4',
+        'display_order' => 0,
+    ]);
+
+    $report2 = Report::create([
+        'reporter_id' => $this->reporter->id,
+        'reportable_type' => Post::class,
+        'reportable_id' => (string) $postWithoutPoster->id,
+        'reason' => ReportReason::InappropriateContent,
+        'status' => ReportStatus::Pending,
+    ]);
+
+    $response = $this->getJson('/api/reports/mine');
+
+    $response->assertOk();
+    $items = collect($response->json('data'));
+
+    $item1 = $items->firstWhere('id', $report1->id);
+    expect($item1['target']['thumbnail_url'])->toBe('https://storage.bango.app/square/videos/293/cover_thumb.jpg');
+
+    $item2 = $items->firstWhere('id', $report2->id);
+    expect($item2['target']['thumbnail_url'])->toBeNull();
+});
