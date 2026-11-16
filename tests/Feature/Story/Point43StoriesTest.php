@@ -178,5 +178,5 @@ test('point 43: like, unlike, settings, stickers interactions and export', funct
     // Export endpoint
     $exportRes = $this->actingAs($author, 'api')->getJson("/api/stories/{$story->id}/export");
     $exportRes->assertOk();
-    expect($exportRes->json('data.status'))->toBe('ready');
+    expect($exportRes->json('data.status'))->toBe('unavailable');
 });

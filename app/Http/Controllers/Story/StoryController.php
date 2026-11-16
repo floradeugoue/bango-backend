@@ -216,11 +216,12 @@ class StoryController extends Controller
     }
 
     /**
-     * Liker une Story.
+     * Liker une Story ou une diapositive spécifique.
      */
     public function like(string $id, Request $request): JsonResponse
     {
-        $result = $this->storyService->likeStory($id, $request->user());
+        $slideId = $request->input('slide_id') ?? $request->query('slide_id');
+        $result = $this->storyService->likeStory($id, $request->user(), $slideId);
 
         return response()->json([
             'success' => true,
@@ -229,11 +230,12 @@ class StoryController extends Controller
     }
 
     /**
-     * Retirer le like d'une Story.
+     * Retirer le like d'une Story ou d'une diapositive spécifique.
      */
     public function unlike(string $id, Request $request): JsonResponse
     {
-        $result = $this->storyService->unlikeStory($id, $request->user());
+        $slideId = $request->input('slide_id') ?? $request->query('slide_id');
+        $result = $this->storyService->unlikeStory($id, $request->user(), $slideId);
 
         return response()->json([
             'success' => true,

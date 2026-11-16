@@ -13,6 +13,7 @@ use App\Http\Middleware\EnsureTermsAccepted;
 use App\Http\Middleware\ResolveOptionalApiUser;
 use App\Http\Middleware\SetPageContext;
 use App\Http\Middleware\UpdateUserLastSeen;
+use App\Http\Middleware\ValidateUploadLimits;
 use App\Services\System\IncidentTrackerService;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
@@ -20,6 +21,7 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Exceptions\PostTooLargeException;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
@@ -36,6 +38,8 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->prepend(ValidateUploadLimits::class);
+
         $middleware->encryptCookies(except: [
             'bango_admin_session',
             'bango_admin_csrf',
@@ -81,6 +85,32 @@ return Application::configure(basePath: dirname(__DIR__))
                 'meta' => (object) [],
                 'errors' => $e->errors(),
             ], 422);
+        });
+
+        $exceptions->render(function (PostTooLargeException $e, Request $request) {
+            return response()->json([
+                'message' => 'Les données envoyées dépassent la taille maximale autorisée par le serveur (post_max_size).',
+                'error' => 'post_too_large',
+                'code' => 'UPLOAD_ERR_POST_SIZE',
+                'errors' => [
+                    'file' => ['Le fichier dépasse la taille maximale autorisée par le serveur.'],
+                ],
+            ], 413);
+        });
+
+        $exceptions->render(function (RuntimeException $e, Request $request) {
+            if (str_contains($e->getMessage(), 'Unable to open') && str_contains($e->getMessage(), 'mode r')) {
+                return response()->json([
+                    'message' => 'Le fichier sélectionné dépasse la taille maximale de téléversement autorisée par le serveur.',
+                    'error' => 'file_too_large',
+                    'code' => 'UPLOAD_ERR_INI_SIZE',
+                    'errors' => [
+                        'file' => ['Le fichier sélectionné dépasse la taille maximale de téléversement autorisée.'],
+                    ],
+                ], 413);
+            }
+
+            return null;
         });
 
         $exceptions->render(function (ResourceNotFoundException $e, Request $request) {

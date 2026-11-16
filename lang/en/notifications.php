@@ -16,7 +16,7 @@ return [
     ],
     'countdown_remind' => [
         'title' => 'Event reminder',
-        'body' => 'Reminder set for the countdown.',
+        'body' => 'It\'s time: the countdown you were following has ended.',
     ],
     'comment' => [
         'title' => 'New comment',

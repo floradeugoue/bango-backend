@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\Support\HelpArticleCategory;
 use App\Enums\Visit\VisitDeclineReason;
 use App\Enums\Visit\VisitReservationStatus;
 use App\Models\Admin\AdminSession;
@@ -191,7 +192,18 @@ test('point 3: suivi admin des visites applique le seuil 24h et expose is_overdu
     expect($overdueItem['is_overdue_sla_24h'])->toBeTrue();
 });
 
-test('point 3: HelpArticleSeeder utilise 24 heures et le tutoiement pour les visites', function () {
+test('point 3: HelpArticleSeeder utilise 24 heures et le tutoiement pour les visites et met a jour les articles existants', function () {
+    HelpArticle::create([
+        'slug' => 'comment-reserver-une-visite',
+        'category' => HelpArticleCategory::RealEstateVisits,
+        'title' => 'Comment réserver une visite immobilière ?',
+        'content_markdown' => "# Réservation d'une visite\n\nPour réserver une visite sur BANGO :\n1. Rendez-vous sur l'annonce du bien immobilier.\n2. Cliquez sur **Réserver une visite**.\n3. Choisissez le créneau souhaité et confirmez le paiement.\n4. Le bailleur dispose de 18 heures pour accepter ou refuser votre demande.",
+        'locale' => 'fr',
+        'is_published' => true,
+        'published_at' => now(),
+        'order' => 1,
+    ]);
+
     (new HelpArticleSeeder)->run();
 
     $article = HelpArticle::where('slug', 'comment-reserver-une-visite')->firstOrFail();
@@ -201,6 +213,27 @@ test('point 3: HelpArticleSeeder utilise 24 heures et le tutoiement pour les vis
         ->and($article->content_markdown)->toContain('Rends-toi')
         ->and($article->content_markdown)->toContain('Clique')
         ->and($article->content_markdown)->toContain('ta demande');
+});
+
+test('la migration met a jour les articles existants en base avec 24 heures et tutoiement', function () {
+    $article = HelpArticle::create([
+        'slug' => 'test-visite-old',
+        'category' => HelpArticleCategory::RealEstateVisits,
+        'title' => 'Comment réserver une visite immobilière ?',
+        'content_markdown' => 'Le bailleur dispose de 18 heures pour accepter ou refuser votre demande.',
+        'locale' => 'fr',
+        'is_published' => true,
+        'published_at' => now(),
+        'order' => 10,
+    ]);
+
+    $migration = require database_path('migrations/2026_11_16_213300_update_help_articles_content_to_24_hours.php');
+    $migration->up();
+
+    $article->refresh();
+    expect($article->content_markdown)->toContain('24 heures')
+        ->and($article->content_markdown)->toContain('ta demande')
+        ->and($article->content_markdown)->not->toContain('18 heures');
 });
 
 function createAdminSessionForPoints(): array

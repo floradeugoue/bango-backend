@@ -357,6 +357,7 @@ class AdminSystemSettingsController extends Controller
         $data = $this->settingsService->getLegalDocuments();
 
         return response()->json([
+            'items' => $data,
             'success' => true,
             'data' => $data,
         ]);

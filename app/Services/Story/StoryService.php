@@ -853,21 +853,32 @@ class StoryService
         ]);
     }
 
-    public function likeStory(string $id, User $user): array
+    public function likeStory(string $id, User $user, ?string $slideId = null): array
     {
         $story = $this->getStory($id, $user);
+
+        // Si slideId est fourni, vérifier qu'il appartient bien à cette Story
+        if ($slideId) {
+            $slideExists = StorySlide::where('story_id', $story->id)->where('id', $slideId)->exists();
+            if (! $slideExists) {
+                abort(404, 'Diapositive introuvable dans cette Story.');
+            }
+        }
 
         $activePage = request()?->attributes?->get('acting_page') ?? request()?->attributes?->get('active_page');
         $activePageId = $activePage?->id;
 
         StoryLike::firstOrCreate([
             'story_id' => $story->id,
+            'slide_id' => $slideId,
             'user_id' => $user->id,
             'page_id' => $activePageId,
         ]);
 
         $count = StoryLike::where('story_id', $story->id)->count();
         $story->update(['likes_count' => $count]);
+
+        $slideLikesCount = $slideId ? StoryLike::where('slide_id', $slideId)->count() : null;
 
         if ($story->user_id !== $user->id) {
             $storyId = (string) $story->id;
@@ -893,6 +904,7 @@ class StoryService
                     $targetPageId = $story->page_id ?? null;
                     $story->user->notify(new SocialNotification('story_like', $user, [
                         'story_id' => (string) $story->id,
+                        'slide_id' => $slideId,
                         'page_id' => $targetPageId,
                     ]));
                 } catch (Throwable $e) {
@@ -904,27 +916,44 @@ class StoryService
         return [
             'is_liked' => true,
             'likes_count' => $count,
+            'slide_id' => $slideId,
+            'slide_likes_count' => $slideLikesCount,
         ];
     }
 
-    public function unlikeStory(string $id, User $user): array
+    public function unlikeStory(string $id, User $user, ?string $slideId = null): array
     {
         $story = $this->getStory($id, $user);
 
         $activePage = request()?->attributes?->get('acting_page') ?? request()?->attributes?->get('active_page');
         $activePageId = $activePage?->id;
 
-        StoryLike::where('story_id', $story->id)
+        $likeQuery = StoryLike::where('story_id', $story->id)
             ->where('user_id', $user->id)
-            ->when($activePageId, fn ($q) => $q->where('page_id', $activePageId), fn ($q) => $q->whereNull('page_id'))
-            ->delete();
+            ->when($activePageId, fn ($q) => $q->where('page_id', $activePageId), fn ($q) => $q->whereNull('page_id'));
+
+        if ($slideId) {
+            $likeQuery->where('slide_id', $slideId);
+        }
+
+        $likeQuery->delete();
 
         $count = StoryLike::where('story_id', $story->id)->count();
         $story->update(['likes_count' => $count]);
 
+        $slideLikesCount = $slideId ? StoryLike::where('slide_id', $slideId)->count() : null;
+
+        // Statut 'is_liked' de la story : vraie s'il reste au moins un like de l'utilisateur sur une slide de la story
+        $isStoryLiked = StoryLike::where('story_id', $story->id)
+            ->where('user_id', $user->id)
+            ->when($activePageId, fn ($q) => $q->where('page_id', $activePageId), fn ($q) => $q->whereNull('page_id'))
+            ->exists();
+
         return [
-            'is_liked' => false,
+            'is_liked' => $isStoryLiked,
             'likes_count' => $count,
+            'slide_id' => $slideId,
+            'slide_likes_count' => $slideLikesCount,
         ];
     }
 

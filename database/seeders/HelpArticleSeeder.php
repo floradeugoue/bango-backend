@@ -67,7 +67,7 @@ class HelpArticleSeeder extends Seeder
         ];
 
         foreach ($articles as $article) {
-            HelpArticle::firstOrCreate(
+            HelpArticle::updateOrCreate(
                 ['slug' => $article['slug'], 'locale' => $article['locale']],
                 $article
             );

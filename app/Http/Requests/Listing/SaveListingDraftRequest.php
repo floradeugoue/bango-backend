@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Listing;
 
+use App\Rules\ListingCurrencyRule;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Validator;
@@ -14,6 +15,20 @@ class SaveListingDraftRequest extends FormRequest
     public function authorize(): bool
     {
         return $this->user() !== null;
+    }
+
+    /**
+     * Prepare the data for validation.
+     */
+    protected function prepareForValidation(): void
+    {
+        $currency = $this->input('currency');
+
+        if ($currency !== null && trim((string) $currency) !== '') {
+            $this->merge([
+                'currency' => strtoupper(trim((string) $currency)),
+            ]);
+        }
     }
 
     /**
@@ -33,7 +48,7 @@ class SaveListingDraftRequest extends FormRequest
             'mode' => ['nullable', 'in:rent,sale,flatshare'],
             'kind' => ['nullable', 'in:studio,flat,villa,room,office,land'],
             'price' => ['nullable', 'numeric', 'min:0'],
-            'currency' => ['nullable', 'string', 'max:10'],
+            'currency' => ['nullable', 'string', 'size:3', new ListingCurrencyRule],
             'deposit_months' => ['nullable', 'integer', 'min:0', 'max:36'],
             'advance_months' => ['nullable', 'integer', 'min:0', 'max:36'],
             'visit_fee' => ['nullable', 'numeric', 'min:0'],

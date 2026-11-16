@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources\Support;
 
+use App\Enums\Square\PostMediaKind;
 use App\Models\Listing\Listing;
 use App\Models\Page\Page;
 use App\Models\Reel\Reel;
@@ -81,7 +82,20 @@ class ReportResource extends JsonResource
             if (! $thumbnailUrl) {
                 if ($target instanceof Post) {
                     $media = $target->relationLoaded('media') ? $target->media : $target->media()->get();
-                    $thumbnailUrl = $media->first()?->media_url;
+                    $firstMedia = $media->first();
+                    if ($firstMedia) {
+                        $isKindVideo = ($firstMedia->media_type instanceof PostMediaKind && $firstMedia->media_type === PostMediaKind::Video)
+                            || $firstMedia->media_type === PostMediaKind::Video->value
+                            || $firstMedia->media_type === 'video'
+                            || (is_string($firstMedia->mime_type) && str_starts_with($firstMedia->mime_type, 'video/'))
+                            || (is_string($firstMedia->media_url) && preg_match('/\.(mp4|mov|webm|m4v|avi|mkv)$/i', parse_url($firstMedia->media_url, PHP_URL_PATH) ?? $firstMedia->media_url));
+
+                        if ($isKindVideo) {
+                            $thumbnailUrl = $firstMedia->poster_url ?? $firstMedia->thumbnail_url ?? null;
+                        } else {
+                            $thumbnailUrl = $firstMedia->poster_url ?? $firstMedia->thumbnail_url ?? $firstMedia->media_url;
+                        }
+                    }
                 } elseif ($target instanceof Reel) {
                     $thumbnailUrl = $target->thumbnail_url;
                 } elseif ($target instanceof Listing) {

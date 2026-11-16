@@ -8,7 +8,9 @@ use App\Models\Geo\City;
 use App\Models\Geo\Neighbourhood;
 use App\Models\Geo\Operator;
 use App\Models\Legal\LegalDocument;
+use App\Models\Legal\TermsAcceptance;
 use App\Models\Listing\Listing;
+use App\Models\Payment\PaymentTransaction;
 use App\Models\Profile\Interest;
 use App\Models\Subscription\PricingChangeProposal;
 use App\Models\Subscription\Subscription;
@@ -99,27 +101,24 @@ class AdminSystemSettingsService
             $effectiveDate = Carbon::now()->addDays($noticeDays);
 
             // Résolution du document légal et de la version des CGU
+            $legalDoc = null;
             if ($legalDocumentId) {
-                $legalDoc = LegalDocument::find($legalDocumentId);
-                if ($legalDoc) {
-                    $termsVersion = $termsVersion ?: $legalDoc->version;
+                $legalDoc = LegalDocument::where('slug', LegalDocumentService::TERMS_SLUG)
+                    ->find($legalDocumentId);
+                if (! $legalDoc) {
+                    throw new DomainException('Le document légal spécifié doit être un document de type Conditions Générales d\'Utilisation (terms-of-service).');
                 }
+                $termsVersion = $termsVersion ?: $legalDoc->version;
             } elseif ($termsVersion) {
                 $legalDoc = LegalDocument::where('slug', LegalDocumentService::TERMS_SLUG)
                     ->where('version', $termsVersion)
                     ->first();
-                if ($legalDoc) {
-                    $legalDocumentId = $legalDoc->id;
+                if (! $legalDoc) {
+                    throw new DomainException("Aucune version des CGU (terms-of-service) correspondant à '{$termsVersion}' n'a été trouvée.");
                 }
+                $legalDocumentId = $legalDoc->id;
             } else {
-                $legalDoc = LegalDocument::where('slug', LegalDocumentService::TERMS_SLUG)
-                    ->orderByDesc('effective_date')
-                    ->orderByDesc('id')
-                    ->first();
-                if ($legalDoc) {
-                    $legalDocumentId = $legalDoc->id;
-                    $termsVersion = $legalDoc->version;
-                }
+                throw new DomainException('Tout changement tarifaire exige obligatoirement une version des CGU (terms-of-service) associée.');
             }
 
             $simulation = $this->previewPricingImpact($priceId, $newAmount);
@@ -743,10 +742,67 @@ class AdminSystemSettingsService
      */
     public function getLegalDocuments(): Collection
     {
-        return LegalDocument::with('author:id,name,email')
+        $docs = LegalDocument::with('author:id,name,email')
             ->orderBy('slug')
             ->orderBy('published_at', 'desc')
             ->get();
+
+        $totalUsers = User::count();
+        $totalBadged = User::whereNotNull('badge')->count() ?: $totalUsers;
+        $totalBoostBuyers = PaymentTransaction::where('purpose', 'boost')->distinct('user_id')->count('user_id') ?: $totalUsers;
+
+        $acceptances = TermsAcceptance::select(['user_id', 'legal_document_id', 'document_slug', 'version'])->get();
+        $usersWithVersion = User::whereNotNull('accepted_terms_version')->pluck('accepted_terms_version', 'id');
+
+        return $docs->map(function (LegalDocument $doc) use ($totalUsers, $totalBadged, $totalBoostBuyers, $acceptances, $usersWithVersion) {
+            $normalized = LegalDocument::normalizeSlug($doc->slug);
+            $variants = LegalDocument::slugVariants($doc->slug);
+
+            $matchedUserIds = $acceptances->filter(function ($acc) use ($doc, $variants) {
+                return ((int) $acc->legal_document_id === (int) $doc->id)
+                    || (in_array($acc->document_slug, $variants, true) && (string) $acc->version === (string) $doc->version);
+            })->pluck('user_id');
+
+            if (in_array($normalized, ['terms', 'cgu', 'terms-of-service'], true)) {
+                $userMatch = $usersWithVersion->filter(fn ($v) => (string) $v === (string) $doc->version)->keys();
+                $acceptedCount = $matchedUserIds->merge($userMatch)->unique()->count();
+            } else {
+                $acceptedCount = $matchedUserIds->unique()->count();
+            }
+
+            $audience = match ($normalized) {
+                'boosts' => 'buyers',
+                'badges' => 'badged',
+                'imprint' => 'none',
+                default => 'all',
+            };
+
+            $concernedCount = match ($audience) {
+                'buyers' => $totalBoostBuyers,
+                'badged' => $totalBadged,
+                'none' => 0,
+                default => $totalUsers,
+            };
+
+            $acceptance = $audience === 'none' ? null : [
+                'accepted' => $acceptedCount,
+                'total' => $concernedCount,
+                'audience' => $audience,
+            ];
+
+            $doc->setAttribute('acceptances_count', $acceptedCount);
+            $doc->setAttribute('concerned_accounts_count', $concernedCount);
+            $doc->setAttribute('total_accounts', $concernedCount);
+            $doc->setAttribute('acceptance', $acceptance);
+            $doc->setAttribute('key', $normalized);
+            $doc->setAttribute('publishedAt', $doc->published_at?->toISOString());
+            $doc->setAttribute('inApp', in_array($normalized, ['terms', 'privacy', 'content'], true));
+            $doc->setAttribute('languages', [$doc->locale ?? 'fr']);
+            $doc->setAttribute('nextReview', $doc->effective_date ? $doc->effective_date->addMonths(12)->toISOString() : now()->addMonths(12)->toISOString());
+            $doc->setAttribute('status', 'current');
+
+            return $doc;
+        });
     }
 
     /**

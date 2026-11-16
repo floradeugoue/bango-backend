@@ -60,6 +60,23 @@ class AdminSupportOperationsService
             }
         }
 
+        // Filtre par conseiller (ex. "mes tickets" : assigné, résolu ou ayant répondu)
+        if (isset($filters['advisor_id'])) {
+            if ($filters['advisor_id'] === 'unassigned' || $filters['advisor_id'] === null) {
+                $query->whereNull('assigned_to');
+            } else {
+                $targetAdvisorId = (int) $filters['advisor_id'];
+                $query->where(function (Builder $q) use ($targetAdvisorId) {
+                    $q->where('assigned_to', $targetAdvisorId)
+                        ->orWhere('resolved_by_id', $targetAdvisorId)
+                        ->orWhereHas('messages', function (Builder $mq) use ($targetAdvisorId) {
+                            $mq->where('sender_id', $targetAdvisorId)
+                                ->where('sender_type', TicketMessageSenderType::Support->value);
+                        });
+                });
+            }
+        }
+
         // Recherche textuelle (référence, sujet, email, handle, display_name ou nom demandeur)
         $searchTerm = $filters['q'] ?? $filters['search'] ?? null;
         if (! empty($searchTerm)) {
@@ -505,14 +522,7 @@ class AdminSupportOperationsService
      */
     public function getAssignees(): Collection
     {
-        $advisorRatings = SupportTicket::query()
-            ->whereNotNull('assigned_to')
-            ->whereNotNull('rating')
-            ->reorder()
-            ->selectRaw('assigned_to, AVG(rating) as avg_rating, COUNT(rating) as count_ratings')
-            ->groupBy('assigned_to')
-            ->get()
-            ->keyBy('assigned_to');
+        $advisorRatings = collect($this->getAdvisorRatings()['advisors'] ?? [])->keyBy('advisor_id');
 
         $assignees = User::where('status', 'active')
             ->whereHas('role', function (Builder $q) {
@@ -525,19 +535,21 @@ class AdminSupportOperationsService
 
         foreach ($assignees as $assignee) {
             $stats = $advisorRatings->get($assignee->id);
-            $avg = $stats ? round((float) $stats->avg_rating, 2) : null;
-            $count = $stats ? (int) $stats->count_ratings : 0;
+            $avg = $stats ? (float) $stats['average_rating'] : null;
+            $count = $stats ? (int) $stats['ratings_count'] : 0;
+            $posCount = $stats ? (int) $stats['positive_count'] : 0;
 
             $assignee->average_rating = $avg;
             $assignee->rating_average = $avg;
             $assignee->ratings_count = $count;
+            $assignee->positive_count = $posCount;
         }
 
         return $assignees;
     }
 
     /**
-     * 4.8 bis A. Statistiques détaillées des avis et moyennes des conseillers du support.
+     * 4.8 bis A. Statistiques détaillées des avis, moyennes et part d'avis positifs des conseillers du support.
      *
      * @param  array<string, mixed>  $filters
      * @return array<string, mixed>
@@ -553,58 +565,114 @@ class AdminSupportOperationsService
             $query->where('rated_at', '<=', Carbon::parse($filters['end_date'])->endOfDay());
         }
 
-        $totalRatings = (clone $query)->count();
-        $globalAverage = $totalRatings > 0 ? round((float) (clone $query)->avg('rating'), 2) : 0.0;
-
-        // Répartition par note (1 à 5 étoiles)
-        $starsDistribution = (clone $query)
-            ->reorder()
-            ->selectRaw('rating, count(*) as count')
-            ->groupBy('rating')
-            ->pluck('count', 'rating')
-            ->toArray();
-
-        $stars = [
-            '1' => (int) ($starsDistribution[1] ?? 0),
-            '2' => (int) ($starsDistribution[2] ?? 0),
-            '3' => (int) ($starsDistribution[3] ?? 0),
-            '4' => (int) ($starsDistribution[4] ?? 0),
-            '5' => (int) ($starsDistribution[5] ?? 0),
-        ];
-
-        // Notes par conseiller assigné
-        $advisorsStats = (clone $query)
-            ->whereNotNull('assigned_to')
-            ->reorder()
-            ->selectRaw('assigned_to, AVG(rating) as avg_rating, COUNT(rating) as count_ratings')
-            ->groupBy('assigned_to')
+        // Récupération des tickets avec leurs messages pertinents pour identifier l'opérateur
+        $tickets = (clone $query)
+            ->with([
+                'messages' => function ($q) {
+                    $q->select(['id', 'support_ticket_id', 'sender_id', 'sender_type', 'created_at'])
+                        ->orderByDesc('created_at')
+                        ->orderByDesc('id');
+                },
+            ])
             ->get();
 
-        $advisorUserIds = $advisorsStats->pluck('assigned_to')->all();
+        // Résolution de l'opérateur / conseiller responsable du ticket :
+        // 1. assigned_to
+        // 2. sinon resolved_by_id
+        // 3. sinon dernier opérateur ayant répondu (sender_type Support ou non-client)
+        $resolveAdvisorId = function (SupportTicket $ticket): ?int {
+            if ($ticket->assigned_to) {
+                return (int) $ticket->assigned_to;
+            }
+
+            if ($ticket->resolved_by_id) {
+                return (int) $ticket->resolved_by_id;
+            }
+
+            $lastSupportReply = $ticket->messages
+                ->first(fn ($m) => $m->sender_type === TicketMessageSenderType::Support && $m->sender_id !== null);
+
+            if ($lastSupportReply) {
+                return (int) $lastSupportReply->sender_id;
+            }
+
+            $lastNonClientMessage = $ticket->messages
+                ->first(fn ($m) => (int) $m->sender_id !== (int) $ticket->user_id && $m->sender_id !== null);
+
+            if ($lastNonClientMessage) {
+                return (int) $lastNonClientMessage->sender_id;
+            }
+
+            return null;
+        };
+
+        // Filtre optionnel advisor_id (ex: "mes tickets")
+        if (! empty($filters['advisor_id'])) {
+            $filterAdvisorId = (int) $filters['advisor_id'];
+            $tickets = $tickets->filter(fn ($t) => $resolveAdvisorId($t) === $filterAdvisorId)->values();
+        }
+
+        $totalRatings = $tickets->count();
+        $globalAverage = $totalRatings > 0 ? round((float) $tickets->avg('rating'), 2) : 0.0;
+        $positiveCount = $tickets->where('rating', '>=', 4)->count();
+        $positiveRate = $totalRatings > 0 ? round(($positiveCount / $totalRatings) * 100, 2) : 0.0;
+
+        // Répartition globale par note (1 à 5 étoiles)
+        $stars = [
+            '1' => $tickets->where('rating', 1)->count(),
+            '2' => $tickets->where('rating', 2)->count(),
+            '3' => $tickets->where('rating', 3)->count(),
+            '4' => $tickets->where('rating', 4)->count(),
+            '5' => $tickets->where('rating', 5)->count(),
+        ];
+
+        // Regroupement par conseiller identifié
+        $ticketsByAdvisor = $tickets
+            ->filter(fn ($t) => $resolveAdvisorId($t) !== null)
+            ->groupBy(fn ($t) => $resolveAdvisorId($t));
+
+        $advisorUserIds = $ticketsByAdvisor->keys()->all();
         $advisorUsers = User::whereIn('id', $advisorUserIds)
             ->select(['id', 'name', 'display_name', 'email', 'avatar_url'])
             ->get()
             ->keyBy('id');
 
-        $advisors = $advisorsStats->map(function ($row) use ($advisorUsers) {
-            $user = $advisorUsers->get($row->assigned_to);
-            $avg = round((float) $row->avg_rating, 2);
+        $advisors = $ticketsByAdvisor->map(function ($advisorTickets, $advisorId) use ($advisorUsers) {
+            $advisorId = (int) $advisorId;
+            $user = $advisorUsers->get($advisorId);
+            $ratingsCount = $advisorTickets->count();
+            $avg = $ratingsCount > 0 ? round((float) $advisorTickets->avg('rating'), 2) : 0.0;
+            $posCount = $advisorTickets->where('rating', '>=', 4)->count();
+            $posRate = $ratingsCount > 0 ? round(($posCount / $ratingsCount) * 100, 2) : 0.0;
 
             return [
-                'id' => (int) $row->assigned_to,
-                'advisor_id' => (int) $row->assigned_to,
-                'name' => $user?->display_name ?: ($user?->name ?? "Conseiller #{$row->assigned_to}"),
+                'id' => $advisorId,
+                'advisor_id' => $advisorId,
+                'name' => $user?->display_name ?: ($user?->name ?? "Conseiller #{$advisorId}"),
                 'email' => $user?->email,
                 'avatar_url' => $user?->avatar_url,
                 'average_rating' => $avg,
                 'rating_average' => $avg,
-                'ratings_count' => (int) $row->count_ratings,
+                'ratings_count' => $ratingsCount,
+                'positive_count' => $posCount,
+                'positive_rate' => $posRate,
+                'positive_share' => $posRate,
+                'stars_distribution' => [
+                    '1' => $advisorTickets->where('rating', 1)->count(),
+                    '2' => $advisorTickets->where('rating', 2)->count(),
+                    '3' => $advisorTickets->where('rating', 3)->count(),
+                    '4' => $advisorTickets->where('rating', 4)->count(),
+                    '5' => $advisorTickets->where('rating', 5)->count(),
+                ],
             ];
         })->sortByDesc('average_rating')->values()->all();
 
         return [
             'global_average' => $globalAverage,
             'total_ratings' => $totalRatings,
+            'positive_count' => $positiveCount,
+            'positive_rate' => $positiveRate,
+            'positive_share' => $positiveRate,
             'stars_distribution' => $stars,
             'advisors' => $advisors,
         ];

@@ -35,12 +35,20 @@ class AdminSupportTicketOperationsController extends Controller
             'priority',
             'category',
             'assigned_to',
+            'advisor_id',
             'search',
             'q',
             'overdue',
             'sort',
             'order',
         ]);
+
+        if (($filters['advisor_id'] ?? null) === 'me') {
+            $filters['advisor_id'] = $request->user()?->id;
+        }
+        if (($filters['assigned_to'] ?? null) === 'me') {
+            $filters['assigned_to'] = $request->user()?->id;
+        }
 
         $perPage = (int) $request->query('per_page', 20);
         ['paginator' => $tickets, 'counts' => $counts] = $this->supportService->getTickets($filters, $perPage);
@@ -295,7 +303,11 @@ class AdminSupportTicketOperationsController extends Controller
      */
     public function advisorRatings(Request $request): JsonResponse
     {
-        $filters = $request->only(['start_date', 'end_date']);
+        $filters = $request->only(['start_date', 'end_date', 'advisor_id']);
+        if (($filters['advisor_id'] ?? null) === 'me') {
+            $filters['advisor_id'] = $request->user()?->id;
+        }
+
         $ratings = $this->supportService->getAdvisorRatings($filters);
 
         return response()->json([

@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Listing;
 
 use App\Models\Listing\Listing;
+use App\Rules\ListingCurrencyRule;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -19,6 +20,20 @@ class UpdateListingDetailsRequest extends FormRequest
     }
 
     /**
+     * Prepare the data for validation.
+     */
+    protected function prepareForValidation(): void
+    {
+        $currency = $this->input('currency');
+
+        if ($currency !== null && trim((string) $currency) !== '') {
+            $this->merge([
+                'currency' => strtoupper(trim((string) $currency)),
+            ]);
+        }
+    }
+
+    /**
      * Get the validation rules that apply to the request.
      *
      * @return array<string, ValidationRule|array<mixed>|string>
@@ -31,6 +46,7 @@ class UpdateListingDetailsRequest extends FormRequest
             'landmark' => ['sometimes', 'nullable', 'string', 'max:80'],
             'address' => ['sometimes', 'nullable', 'string', 'max:160'],
             'price' => ['sometimes', 'numeric', 'min:0'],
+            'currency' => ['sometimes', 'string', 'size:3', new ListingCurrencyRule],
             'deposit_months' => ['sometimes', 'integer', 'min:0', 'max:36'],
             'advance_months' => ['sometimes', 'integer', 'min:0', 'max:36'],
             'visit_fee' => ['sometimes', 'numeric', 'min:0'],
@@ -57,7 +73,7 @@ class UpdateListingDetailsRequest extends FormRequest
     {
         $validator->after(function (Validator $validator) {
             $listingId = $this->route('id') ?? $this->route('listing');
-            $priceFields = ['price', 'deposit_months', 'advance_months', 'visit_fee', 'charges', 'negotiable'];
+            $priceFields = ['price', 'currency', 'deposit_months', 'advance_months', 'visit_fee', 'charges', 'negotiable'];
             $hasPriceField = false;
 
             foreach ($priceFields as $field) {
