@@ -79,11 +79,17 @@ class AdminKycDocumentController extends Controller
         }
 
         // 3. Téléchargement ou affichage sécurisé en flux binaire contrôlé déchiffré
-        if (! Storage::disk('local')->exists($document->file_path)) {
-            abort(404, 'Fichier introuvable sur le stockage sécurisé.');
+        $privateDisk = config('media.private_disk', 'local');
+        $diskInstance = Storage::disk($privateDisk);
+        if (! $diskInstance->exists($document->file_path)) {
+            if (Storage::disk('local')->exists($document->file_path)) {
+                $diskInstance = Storage::disk('local');
+            } else {
+                abort(404, 'Fichier introuvable sur le stockage sécurisé.');
+            }
         }
 
-        $rawContent = Storage::disk('local')->get($document->file_path);
+        $rawContent = $diskInstance->get($document->file_path);
         try {
             $decryptedContent = Crypt::decrypt($rawContent);
         } catch (DecryptException) {

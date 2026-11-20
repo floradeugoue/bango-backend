@@ -54,13 +54,18 @@ class PurgeKycDocumentsCommand extends Command
             ->with('documents')
             ->get();
 
+        $privateDisk = config('media.private_disk', 'local');
+
         foreach ($rejectedSubmissions as $submission) {
             foreach ($submission->documents as $doc) {
-                if ($doc->file_path && Storage::disk('local')->exists($doc->file_path)) {
-                    if (! $dryRun) {
-                        Storage::disk('local')->delete($doc->file_path);
+                if ($doc->file_path) {
+                    $foundDisk = Storage::disk($privateDisk)->exists($doc->file_path) ? $privateDisk : (Storage::disk('local')->exists($doc->file_path) ? 'local' : null);
+                    if ($foundDisk) {
+                        if (! $dryRun) {
+                            Storage::disk($foundDisk)->delete($doc->file_path);
+                        }
+                        $deletedKycDocsCount++;
                     }
-                    $deletedKycDocsCount++;
                 }
 
                 if (! $dryRun) {
@@ -102,9 +107,10 @@ class PurgeKycDocumentsCommand extends Command
                     ->get();
 
                 foreach ($userDocs as $doc) {
-                    if (Storage::disk('local')->exists($doc->file_path)) {
+                    $foundDisk = Storage::disk($privateDisk)->exists($doc->file_path) ? $privateDisk : (Storage::disk('local')->exists($doc->file_path) ? 'local' : null);
+                    if ($foundDisk) {
                         if (! $dryRun) {
-                            Storage::disk('local')->delete($doc->file_path);
+                            Storage::disk($foundDisk)->delete($doc->file_path);
                         }
                         $deletedKycDocsCount++;
                     }
@@ -138,11 +144,14 @@ class PurgeKycDocumentsCommand extends Command
 
             foreach ($docs as $key => $docMeta) {
                 $filePath = $docMeta['file_path'] ?? null;
-                if ($filePath && Storage::disk('local')->exists($filePath)) {
-                    if (! $dryRun) {
-                        Storage::disk('local')->delete($filePath);
+                if ($filePath) {
+                    $foundDisk = Storage::disk($privateDisk)->exists($filePath) ? $privateDisk : (Storage::disk('local')->exists($filePath) ? 'local' : null);
+                    if ($foundDisk) {
+                        if (! $dryRun) {
+                            Storage::disk($foundDisk)->delete($filePath);
+                        }
+                        $deletedPageDocsCount++;
                     }
-                    $deletedPageDocsCount++;
                 }
 
                 if (isset($docs[$key]['file_path'])) {

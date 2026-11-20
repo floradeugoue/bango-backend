@@ -664,6 +664,10 @@ class MediaStorageService
             return Storage::disk($disk)->delete($path);
         }
 
+        if ($disk !== 'public' && Storage::disk('public')->exists($path)) {
+            return Storage::disk('public')->delete($path);
+        }
+
         return false;
     }
 

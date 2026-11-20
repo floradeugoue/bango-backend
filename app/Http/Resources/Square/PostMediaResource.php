@@ -19,8 +19,9 @@ class PostMediaResource extends JsonResource
             $soundRaw = $this->edit_metadata['sound'];
             $soundId = $soundRaw['id'] ?? $soundRaw['sound_id'] ?? $soundRaw['soundId'] ?? null;
             $soundModel = $soundId ? Sound::find($soundId) : null;
+            $mediaDisk = config('media.disk', 'public');
             $audioUrl = $soundModel?->audio_url
-                ? (str_starts_with($soundModel->audio_url, 'http') ? $soundModel->audio_url : Storage::disk('public')->url($soundModel->audio_url))
+                ? (str_starts_with($soundModel->audio_url, 'http') ? $soundModel->audio_url : Storage::disk($mediaDisk)->url($soundModel->audio_url))
                 : ($soundRaw['audio_url'] ?? $soundRaw['audioUrl'] ?? null);
 
             $startMs = (int) ($soundRaw['start_ms'] ?? $soundRaw['startMs'] ?? 0);

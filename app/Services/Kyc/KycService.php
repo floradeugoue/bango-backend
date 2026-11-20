@@ -127,9 +127,10 @@ class KycService
                     $privatePath = "kyc/{$user->id}/{$fileName}";
 
                     // Chiffrement au repos du fichier KYC (AES-256 via Crypt)
+                    $privateDisk = config('media.private_disk', 'local');
                     $fileContent = file_get_contents($file->getRealPath());
                     $encryptedContent = Crypt::encrypt($fileContent);
-                    Storage::disk('local')->put($privatePath, $encryptedContent);
+                    Storage::disk($privateDisk)->put($privatePath, $encryptedContent);
 
                     KycDocument::create([
                         'kyc_submission_id' => $submission->id,
@@ -225,8 +226,14 @@ class KycService
             throw new AuthorizationException('Seule l\'équipe conformité BANGO est autorisée à consulter les pièces d\'identité.');
         }
 
-        if (! Storage::disk('local')->exists($document->file_path)) {
-            abort(404, 'Fichier introuvable sur le stockage sécurisé.');
+        $privateDisk = config('media.private_disk', 'local');
+        $diskInstance = Storage::disk($privateDisk);
+        if (! $diskInstance->exists($document->file_path)) {
+            if (Storage::disk('local')->exists($document->file_path)) {
+                $diskInstance = Storage::disk('local');
+            } else {
+                abort(404, 'Fichier introuvable sur le stockage sécurisé.');
+            }
         }
 
         // Journalisation de la consultation si effectuée par la conformité ou un admin
@@ -249,7 +256,7 @@ class KycService
             );
         }
 
-        $rawContent = Storage::disk('local')->get($document->file_path);
+        $rawContent = $diskInstance->get($document->file_path);
 
         // Déchiffrement au vol si le contenu a été chiffré au repos (avec rétrocompatibilité en clair)
         try {
@@ -289,9 +296,10 @@ class KycService
         $fileName = (string) Str::uuid().'.'.$extension;
         $privatePath = "kyc/{$user->id}/{$fileName}";
 
+        $privateDisk = config('media.private_disk', 'local');
         $fileContent = file_get_contents($file->getRealPath());
         $encryptedContent = Crypt::encrypt($fileContent);
-        Storage::disk('local')->put($privatePath, $encryptedContent);
+        Storage::disk($privateDisk)->put($privatePath, $encryptedContent);
 
         return KycDocument::create([
             'kyc_submission_id' => $submissionId,
@@ -396,8 +404,11 @@ class KycService
                             ->where('kind', $kind)
                             ->get();
 
+                        $privateDisk = config('media.private_disk', 'local');
                         foreach ($oldDocs as $oldDoc) {
-                            if (Storage::disk('local')->exists($oldDoc->file_path)) {
+                            if (Storage::disk($privateDisk)->exists($oldDoc->file_path)) {
+                                Storage::disk($privateDisk)->delete($oldDoc->file_path);
+                            } elseif (Storage::disk('local')->exists($oldDoc->file_path)) {
                                 Storage::disk('local')->delete($oldDoc->file_path);
                             }
                             $oldDoc->delete();
@@ -411,7 +422,7 @@ class KycService
                     // Chiffrement au repos du fichier KYC
                     $fileContent = file_get_contents($file->getRealPath());
                     $encryptedContent = Crypt::encrypt($fileContent);
-                    Storage::disk('local')->put($privatePath, $encryptedContent);
+                    Storage::disk($privateDisk)->put($privatePath, $encryptedContent);
 
                     KycDocument::create([
                         'kyc_submission_id' => $submission->id,

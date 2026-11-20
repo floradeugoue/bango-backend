@@ -16,15 +16,16 @@ class AvatarController extends Controller
         ]);
 
         $user = $request->user();
+        $disk = config('media.disk', 'public');
 
         if ($user->avatar_url) {
-            $storageService->delete($user->avatar_url, 'public');
+            $storageService->delete($user->avatar_url, $disk);
         }
 
         $directory = $storageService->pathFor('avatars');
-        $path = $request->file('avatar')->store($directory, 'public');
+        $path = $request->file('avatar')->store($directory, $disk);
 
-        $url = $storageService->getUrl($path, 'public');
+        $url = $storageService->getUrl($path, $disk);
 
         $user->update([
             'avatar_url' => $url,

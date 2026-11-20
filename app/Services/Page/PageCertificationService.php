@@ -88,9 +88,10 @@ class PageCertificationService
                     $path = "page_certifications/{$lockedPage->id}/{$fileName}";
 
                     // Chiffrement au repos de la pièce justificative
+                    $privateDisk = config('media.private_disk', 'local');
                     $fileContent = file_get_contents($file->getRealPath());
                     $encryptedContent = Crypt::encrypt($fileContent);
-                    Storage::disk('local')->put($path, $encryptedContent);
+                    Storage::disk($privateDisk)->put($path, $encryptedContent);
 
                     $storedDocuments[$key] = [
                         'file_path' => $path,
@@ -361,9 +362,10 @@ class PageCertificationService
                     $path = "page_certifications/{$lockedCert->page_id}/{$fileName}";
 
                     // Chiffrement au repos de la pièce justificative
+                    $privateDisk = config('media.private_disk', 'local');
                     $fileContent = file_get_contents($file->getRealPath());
                     $encryptedContent = Crypt::encrypt($fileContent);
-                    Storage::disk('local')->put($path, $encryptedContent);
+                    Storage::disk($privateDisk)->put($path, $encryptedContent);
 
                     $existingDocs[$key] = [
                         'file_path' => $path,
@@ -588,8 +590,14 @@ class PageCertificationService
         $originalName = $docs[$docKey]['original_name'] ?? 'document.pdf';
         $mimeType = $docs[$docKey]['mime_type'] ?? 'application/octet-stream';
 
-        if (! $filePath || ! Storage::disk('local')->exists($filePath)) {
-            abort(404, 'Fichier introuvable sur le stockage sécurisé.');
+        $privateDisk = config('media.private_disk', 'local');
+        $diskInstance = Storage::disk($privateDisk);
+        if (! $filePath || ! $diskInstance->exists($filePath)) {
+            if ($filePath && Storage::disk('local')->exists($filePath)) {
+                $diskInstance = Storage::disk('local');
+            } else {
+                abort(404, 'Fichier introuvable sur le stockage sécurisé.');
+            }
         }
 
         $isOwner = $certification->page?->isOwner($viewer);
@@ -612,7 +620,7 @@ class PageCertificationService
             );
         }
 
-        $rawContent = Storage::disk('local')->get($filePath);
+        $rawContent = $diskInstance->get($filePath);
         try {
             $decryptedContent = Crypt::decrypt($rawContent);
         } catch (DecryptException) {

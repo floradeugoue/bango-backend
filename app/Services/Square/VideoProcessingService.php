@@ -54,8 +54,10 @@ class VideoProcessingService
         string $mediaUrl,
         array $editMetadata,
         int|string $userId,
-        ?int $originalDuration = null
+        ?int $originalDuration = null,
+        ?string $disk = null
     ): array {
+        $disk = $disk ?? config('media.disk', 'public');
         $normalizedMetadata = $this->normalizeEditMetadata($editMetadata);
 
         $finalMediaUrl = $mediaUrl;
@@ -71,9 +73,9 @@ class VideoProcessingService
                 // Vraie durée en secondes
                 $duration = (int) max(1, round(($endMs - $startMs) / 1000));
 
-                $trimmedRelativePath = $this->trimVideo($mediaUrl, $startMs, $endMs, $userId);
+                $trimmedRelativePath = $this->trimVideo($mediaUrl, $startMs, $endMs, $userId, $disk);
                 if ($trimmedRelativePath) {
-                    $finalMediaUrl = Storage::disk('public')->url($trimmedRelativePath);
+                    $finalMediaUrl = Storage::disk($disk)->url($trimmedRelativePath);
                 }
             }
         }
@@ -81,9 +83,9 @@ class VideoProcessingService
         // 2. Image de couverture (Cover)
         if (isset($normalizedMetadata['cover_ms'])) {
             $coverMs = (int) $normalizedMetadata['cover_ms'];
-            $coverRelativePath = $this->extractCoverFrame($mediaUrl, $coverMs, $userId);
+            $coverRelativePath = $this->extractCoverFrame($mediaUrl, $coverMs, $userId, $disk);
             if ($coverRelativePath) {
-                $posterUrl = Storage::disk('public')->url($coverRelativePath);
+                $posterUrl = Storage::disk($disk)->url($coverRelativePath);
             }
         }
 
@@ -96,7 +98,7 @@ class VideoProcessingService
                 $normalizedMetadata['sound']['title'] = $sound->title;
                 $normalizedMetadata['sound']['artist'] = $sound->artist;
                 $normalizedMetadata['sound']['audio_url'] = $sound->audio_url
-                    ? (str_starts_with($sound->audio_url, 'http') ? $sound->audio_url : Storage::disk('public')->url($sound->audio_url))
+                    ? (str_starts_with($sound->audio_url, 'http') ? $sound->audio_url : Storage::disk($disk)->url($sound->audio_url))
                     : null;
                 $normalizedMetadata['sound']['audioUrl'] = $normalizedMetadata['sound']['audio_url'];
             }
@@ -113,9 +115,10 @@ class VideoProcessingService
     /**
      * Découpe la vidéo au stockage selon l'intervalle trim spécifié.
      */
-    public function trimVideo(string $mediaUrl, int $startMs, int $endMs, int|string $userId): ?string
+    public function trimVideo(string $mediaUrl, int $startMs, int $endMs, int|string $userId, ?string $disk = null): ?string
     {
-        $inputPath = $this->resolveLocalDiskPath($mediaUrl);
+        $disk = $disk ?? config('media.disk', 'public');
+        $inputPath = $this->resolveLocalDiskPath($mediaUrl, $disk);
         if (! $inputPath || ! file_exists($inputPath)) {
             return null;
         }
@@ -128,13 +131,17 @@ class VideoProcessingService
         $relativeOutputDir = "square/videos/{$userId}";
         $relativeOutputFile = "{$relativeOutputDir}/trimmed_{$uniqueId}.{$ext}";
 
-        $disk = Storage::disk('public');
-        $disk->makeDirectory($relativeOutputDir);
-        $absoluteOutputDir = $disk->path($relativeOutputDir);
-        if (! is_dir($absoluteOutputDir)) {
-            @mkdir($absoluteOutputDir, 0755, true);
+        $diskInstance = Storage::disk($disk);
+        $diskInstance->makeDirectory($relativeOutputDir);
+
+        $driver = config("filesystems.disks.{$disk}.driver", 'local');
+        $isRemoteDisk = in_array($driver, ['s3', 'r2', 'ftp', 'sftp'], true) || in_array($disk, ['r2', 'r2_private'], true);
+        $tempLocalDir = storage_path('app/temp/trim_'.$uniqueId);
+        if (! is_dir($tempLocalDir)) {
+            @mkdir($tempLocalDir, 0755, true);
         }
-        $absoluteOutputFile = $disk->path($relativeOutputFile);
+
+        $absoluteOutputFile = "{$tempLocalDir}/trimmed_{$uniqueId}.{$ext}";
 
         if ($this->isFfmpegAvailable()) {
             // Tentative 1 : découpage direct par flux (très rapide)
@@ -163,16 +170,42 @@ class VideoProcessingService
                             'error' => $processReencode->errorOutput(),
                         ]);
 
+                        if (is_dir($tempLocalDir)) {
+                            @unlink($absoluteOutputFile);
+                            @rmdir($tempLocalDir);
+                        }
+
                         return null;
                     }
+                }
+
+                // Upload vers le stockage distant (R2) ou copie locale
+                $fh = fopen($absoluteOutputFile, 'r');
+                $diskInstance->put($relativeOutputFile, $fh);
+                if (is_resource($fh)) {
+                    fclose($fh);
+                }
+
+                if (is_dir($tempLocalDir)) {
+                    @unlink($absoluteOutputFile);
+                    @rmdir($tempLocalDir);
                 }
 
                 return $relativeOutputFile;
             } catch (\Throwable $e) {
                 Log::warning('VideoProcessingService: Exception lors du découpage FFmpeg.', ['message' => $e->getMessage()]);
 
+                if (is_dir($tempLocalDir)) {
+                    @unlink($absoluteOutputFile);
+                    @rmdir($tempLocalDir);
+                }
+
                 return null;
             }
+        }
+
+        if (is_dir($tempLocalDir)) {
+            @rmdir($tempLocalDir);
         }
 
         // Si FFmpeg n'est pas disponible en local, on consigne et on renvoie le chemin source
@@ -182,21 +215,23 @@ class VideoProcessingService
     /**
      * Extrait une image de couverture à l'instant cover_ms.
      */
-    public function extractCoverFrame(string $mediaUrl, int $coverMs, int|string $userId): ?string
+    public function extractCoverFrame(string $mediaUrl, int $coverMs, int|string $userId, ?string $disk = null): ?string
     {
+        $disk = $disk ?? config('media.disk', 'public');
         $uniqueId = (string) Str::uuid();
         $relativeOutputDir = "square/covers/{$userId}";
         $relativeOutputFile = "{$relativeOutputDir}/cover_{$uniqueId}.jpg";
 
-        $disk = Storage::disk('public');
-        $disk->makeDirectory($relativeOutputDir);
-        $absoluteOutputDir = $disk->path($relativeOutputDir);
-        if (! is_dir($absoluteOutputDir)) {
-            @mkdir($absoluteOutputDir, 0755, true);
-        }
-        $absoluteOutputFile = $disk->path($relativeOutputFile);
+        $diskInstance = Storage::disk($disk);
+        $diskInstance->makeDirectory($relativeOutputDir);
 
-        $inputPath = $this->resolveLocalDiskPath($mediaUrl);
+        $tempLocalDir = storage_path('app/temp/cover_'.$uniqueId);
+        if (! is_dir($tempLocalDir)) {
+            @mkdir($tempLocalDir, 0755, true);
+        }
+        $absoluteOutputFile = "{$tempLocalDir}/cover_{$uniqueId}.jpg";
+
+        $inputPath = $this->resolveLocalDiskPath($mediaUrl, $disk);
         $coverSec = number_format(max(0, $coverMs / 1000), 3, '.', '');
 
         if ($this->isFfmpegAvailable() && $inputPath && file_exists($inputPath)) {
@@ -210,6 +245,17 @@ class VideoProcessingService
             try {
                 $process = Process::run($cmd);
                 if ($process->successful() && file_exists($absoluteOutputFile) && filesize($absoluteOutputFile) > 0) {
+                    $fh = fopen($absoluteOutputFile, 'r');
+                    $diskInstance->put($relativeOutputFile, $fh);
+                    if (is_resource($fh)) {
+                        fclose($fh);
+                    }
+
+                    if (is_dir($tempLocalDir)) {
+                        @unlink($absoluteOutputFile);
+                        @rmdir($tempLocalDir);
+                    }
+
                     return $relativeOutputFile;
                 }
             } catch (\Throwable $e) {
@@ -222,7 +268,26 @@ class VideoProcessingService
         // Fallback sans FFmpeg ou si extraction échoue : génération d'un poster JPEG valide
         $this->generateFallbackPoster($absoluteOutputFile);
 
-        return file_exists($absoluteOutputFile) ? $relativeOutputFile : null;
+        if (file_exists($absoluteOutputFile)) {
+            $fh = fopen($absoluteOutputFile, 'r');
+            $diskInstance->put($relativeOutputFile, $fh);
+            if (is_resource($fh)) {
+                fclose($fh);
+            }
+
+            if (is_dir($tempLocalDir)) {
+                @unlink($absoluteOutputFile);
+                @rmdir($tempLocalDir);
+            }
+
+            return $relativeOutputFile;
+        }
+
+        if (is_dir($tempLocalDir)) {
+            @rmdir($tempLocalDir);
+        }
+
+        return null;
     }
 
     /**
@@ -261,9 +326,11 @@ class VideoProcessingService
 
     /**
      * Résout le chemin absolu sur le disque local public depuis une URL ou un chemin relatif.
+     * Pour un disque distant (Cloudflare R2 / S3), télécharge temporairement le fichier pour traitement FFmpeg.
      */
-    protected function resolveLocalDiskPath(string $urlOrPath): ?string
+    protected function resolveLocalDiskPath(string $urlOrPath, ?string $disk = null): ?string
     {
+        $disk = $disk ?? config('media.disk', 'public');
         $cleanPath = $urlOrPath;
 
         // Supprime le préfixe HTTP / Domaine éventuel
@@ -273,9 +340,35 @@ class VideoProcessingService
         $cleanPath = preg_replace('#^/?storage/#', '', $cleanPath);
         $cleanPath = ltrim($cleanPath, '/');
 
-        $disk = Storage::disk('public');
-        if ($disk->exists($cleanPath)) {
-            return $disk->path($cleanPath);
+        $diskInstance = Storage::disk($disk);
+        try {
+            if ($diskInstance->exists($cleanPath)) {
+                return $diskInstance->path($cleanPath);
+            }
+        } catch (\Throwable $e) {
+            // S3 / R2 ne supporte pas ->path(), on télécharge temporairement le fichier distant
+        }
+
+        if ($diskInstance->exists($cleanPath)) {
+            $tempDir = storage_path('app/temp/downloads');
+            if (! is_dir($tempDir)) {
+                @mkdir($tempDir, 0755, true);
+            }
+            $localFile = $tempDir.'/source_'.md5($cleanPath).'_'.basename($cleanPath);
+            if (! file_exists($localFile) || filesize($localFile) === 0) {
+                $stream = $diskInstance->readStream($cleanPath);
+                if ($stream) {
+                    $dest = fopen($localFile, 'w');
+                    stream_copy_to_stream($stream, $dest);
+                    fclose($dest);
+                    if (is_resource($stream)) {
+                        fclose($stream);
+                    }
+                }
+            }
+            if (file_exists($localFile) && filesize($localFile) > 0) {
+                return $localFile;
+            }
         }
 
         // Essai sur le chemin direct
@@ -327,9 +420,10 @@ class VideoProcessingService
 
             if ($soundId) {
                 $soundModel = Sound::find($soundId);
+                $mediaDisk = config('media.disk', 'public');
                 $audioUrl = $soundModel?->audio_url
-                    ? (str_starts_with($soundModel->audio_url, 'http') ? $soundModel->audio_url : Storage::disk('public')->url($soundModel->audio_url))
-                    : ($sound['audio_url'] ?? $sound['audioUrl'] ?? null);
+                    ? (str_starts_with($soundModel->audio_url, 'http') ? $soundModel->audio_url : Storage::disk($mediaDisk)->url($soundModel->audio_url))
+                    : ($sound['audio_url'] ?? $soundRaw['audioUrl'] ?? null);
 
                 $normalized['sound'] = [
                     'id' => (string) $soundId,

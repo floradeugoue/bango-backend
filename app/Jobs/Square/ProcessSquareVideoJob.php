@@ -122,7 +122,7 @@ class ProcessSquareVideoJob implements ShouldQueue
 
             $post = $this->postMedia->post;
             $userId = $post?->user_id ?? 1;
-            $disk = 'public';
+            $disk = config('media.disk', 'public');
 
             $currentMediaUrl = $this->postMedia->media_url;
             $currentPosterUrl = $this->postMedia->poster_url;
@@ -135,7 +135,8 @@ class ProcessSquareVideoJob implements ShouldQueue
                     $currentMediaUrl,
                     $editMetadata,
                     $userId,
-                    $currentDuration
+                    $currentDuration,
+                    $disk
                 );
 
                 if (! empty($processed['media_url']) && $processed['media_url'] !== $currentMediaUrl) {
@@ -146,7 +147,7 @@ class ProcessSquareVideoJob implements ShouldQueue
                     // Si un fichier découpé temporaire a été créé, on le traquera pour nettoyage ultérieur si besoin
                     $trimmedPath = $this->extractStoragePath($currentMediaUrl);
                     if ($trimmedPath && Storage::disk($disk)->exists($trimmedPath)) {
-                        $this->tempFilesToClean[] = Storage::disk($disk)->path($trimmedPath);
+                        $this->tempFilesToClean[] = $trimmedPath;
                     }
                 }
 
@@ -235,10 +236,13 @@ class ProcessSquareVideoJob implements ShouldQueue
      */
     public function cleanupTempFiles(): void
     {
+        $disk = config('media.disk', 'public');
         foreach ($this->tempFilesToClean as $filePath) {
             try {
                 if (file_exists($filePath)) {
                     @unlink($filePath);
+                } elseif (Storage::disk($disk)->exists($filePath)) {
+                    Storage::disk($disk)->delete($filePath);
                 }
             } catch (Throwable) {
                 // Ignore unlink errors

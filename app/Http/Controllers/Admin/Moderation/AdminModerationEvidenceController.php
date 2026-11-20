@@ -77,11 +77,16 @@ class AdminModerationEvidenceController extends Controller
             'timestamp' => now()->toIso8601String(),
         ]);
 
-        $disk = Storage::disk('local');
+        $mediaDisk = config('media.disk', 'public');
+        $privateDisk = config('media.private_disk', 'local');
+
+        $disk = Storage::disk($privateDisk);
         $exists = $disk->exists($evidence->file_path);
 
         $url = null;
-        if (Storage::disk('public')->exists($evidence->file_path)) {
+        if (Storage::disk($mediaDisk)->exists($evidence->file_path)) {
+            $url = Storage::disk($mediaDisk)->url($evidence->file_path);
+        } elseif (Storage::disk('public')->exists($evidence->file_path)) {
             $url = Storage::disk('public')->url($evidence->file_path);
         } else {
             // URL temporaire ou route sécurisée
@@ -121,12 +126,19 @@ class AdminModerationEvidenceController extends Controller
             throw new NotFoundHttpException("Fichier de preuve [{$id}] introuvable.");
         }
 
-        $disk = Storage::disk('local');
+        $privateDisk = config('media.private_disk', 'local');
+        $mediaDisk = config('media.disk', 'public');
+
+        $disk = Storage::disk($privateDisk);
         $filePath = $evidence->file_path;
 
         if (! $disk->exists($filePath)) {
-            if (Storage::disk('public')->exists($filePath)) {
+            if (Storage::disk($mediaDisk)->exists($filePath)) {
+                $disk = Storage::disk($mediaDisk);
+            } elseif (Storage::disk('public')->exists($filePath)) {
                 $disk = Storage::disk('public');
+            } elseif (Storage::disk('local')->exists($filePath)) {
+                $disk = Storage::disk('local');
             } else {
                 throw new NotFoundHttpException('Le fichier de preuve physique est introuvable sur le stockage.');
             }

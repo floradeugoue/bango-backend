@@ -91,7 +91,9 @@ class Page extends Model
             return url('/'.$value);
         }
 
-        return Storage::disk('public')->url($value);
+        $mediaDisk = config('media.disk', 'public');
+
+        return Storage::disk($mediaDisk)->url($value);
     }
 
     /**
@@ -123,7 +125,9 @@ class Page extends Model
             return url('/'.$value);
         }
 
-        return Storage::disk('public')->url($value);
+        $mediaDisk = config('media.disk', 'public');
+
+        return Storage::disk($mediaDisk)->url($value);
     }
 
     /**
