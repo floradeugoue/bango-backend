@@ -1367,7 +1367,8 @@ class ModerationQueueService
 
         // 4. Message de conversation
         if ($content instanceof Message) {
-            $url = $content->attachment_url ?? ($content->attachment_path ? (str_starts_with($content->attachment_path, 'http') ? $content->attachment_path : Storage::disk('public')->url($content->attachment_path)) : null);
+            $mediaDisk = config('media.disk', 'public');
+            $url = $content->attachment_url ?? ($content->attachment_path ? (str_starts_with($content->attachment_path, 'http') ? $content->attachment_path : Storage::disk($mediaDisk)->url($content->attachment_path)) : null);
             if ($url) {
                 $type = str_starts_with($content->attachment_mime ?? '', 'video') ? 'video' : 'image';
                 $mediaList[] = [

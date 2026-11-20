@@ -199,7 +199,9 @@ class User extends Authenticatable
             return url('/'.$value);
         }
 
-        return Storage::disk('public')->url($value);
+        $mediaDisk = config('media.disk', 'public');
+
+        return Storage::disk($mediaDisk)->url($value);
     }
 
     public function assignedReports(): HasMany

@@ -36,5 +36,8 @@
         <env name="NIGHTWATCH_ENABLED" value="false"/>
         <env name="RESEND_API_KEY" value="test_key"/>
         <env name="ENFORCE_TERMS_ACCEPTANCE" value="true"/>
+        <env name="FILESYSTEM_DISK" value="public"/>
+        <env name="MEDIA_DISK" value="public"/>
+        <env name="MEDIA_PRIVATE_DISK" value="local"/>
     </php>
 </phpunit>

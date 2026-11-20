@@ -52,16 +52,18 @@ class PageService
                 }
             }
 
+            $mediaDisk = config('media.disk', 'public');
+
             $logoUrl = null;
             if ($logo) {
-                $path = $logo->store('pages/logos', 'public');
-                $logoUrl = Storage::disk('public')->url($path);
+                $path = $logo->store('pages/logos', $mediaDisk);
+                $logoUrl = Storage::disk($mediaDisk)->url($path);
             }
 
             $coverUrl = null;
             if ($cover) {
-                $path = $cover->store('pages/covers', 'public');
-                $coverUrl = Storage::disk('public')->url($path);
+                $path = $cover->store('pages/covers', $mediaDisk);
+                $coverUrl = Storage::disk($mediaDisk)->url($path);
             }
 
             $sector = $data['sector'] ?? PageSector::Other->value;
@@ -115,16 +117,18 @@ class PageService
             /** @var Page $lockedPage */
             $lockedPage = Page::where('id', $page->id)->lockForUpdate()->firstOrFail();
 
+            $mediaDisk = config('media.disk', 'public');
+
             if ($logo) {
-                $path = $logo->store('pages/logos', 'public');
-                $lockedPage->logo_url = Storage::disk('public')->url($path);
+                $path = $logo->store('pages/logos', $mediaDisk);
+                $lockedPage->logo_url = Storage::disk($mediaDisk)->url($path);
             } elseif (array_key_exists('logo_url', $data)) {
                 $lockedPage->logo_url = $data['logo_url'];
             }
 
             if ($cover) {
-                $path = $cover->store('pages/covers', 'public');
-                $lockedPage->cover_url = Storage::disk('public')->url($path);
+                $path = $cover->store('pages/covers', $mediaDisk);
+                $lockedPage->cover_url = Storage::disk($mediaDisk)->url($path);
             } elseif (array_key_exists('cover_url', $data)) {
                 $lockedPage->cover_url = $data['cover_url'];
             }

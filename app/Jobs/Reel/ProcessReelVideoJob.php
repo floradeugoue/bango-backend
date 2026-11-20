@@ -74,9 +74,10 @@ class ProcessReelVideoJob implements ShouldQueue
             // 2. Génération et transcodage des renditions adaptatives (480p, 720p, 1080p)
             $videoUrl = $this->reel->video_url ?? '';
             if (! empty($videoUrl)) {
+                $disk = config('media.disk', 'r2');
                 /** @var VideoTranscodingService $transcoder */
                 $transcoder = app(VideoTranscodingService::class);
-                $transcoded = $transcoder->transcode($videoUrl, 'reels/renditions', $this->reel->user_id);
+                $transcoded = $transcoder->transcode($videoUrl, 'reels/renditions', $this->reel->user_id, $disk);
 
                 // Garder l'original haute définition hors de la lecture
                 $this->reel->original_video_url = $this->reel->original_video_url ?? $videoUrl;

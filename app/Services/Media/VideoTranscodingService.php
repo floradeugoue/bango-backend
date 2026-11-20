@@ -58,8 +58,9 @@ class VideoTranscodingService
         string $sourcePathOrUrl,
         string $targetSubDir,
         int|string $userId,
-        string $disk = 'public'
+        ?string $disk = null
     ): array {
+        $disk = $disk ?? config('media.disk', 'public');
         $diskInstance = Storage::disk($disk);
         $inputAbsPath = $this->resolveLocalDiskPath($sourcePathOrUrl, $disk);
 
@@ -314,16 +315,21 @@ class VideoTranscodingService
     /**
      * Résout le chemin absolu sur le disque local public depuis une URL ou un chemin relatif.
      */
-    protected function resolveLocalDiskPath(string $urlOrPath, string $disk = 'public'): ?string
+    protected function resolveLocalDiskPath(string $urlOrPath, ?string $disk = null): ?string
     {
+        $disk = $disk ?? config('media.disk', 'public');
         $cleanPath = $urlOrPath;
         $cleanPath = preg_replace('#^https?://[^/]+/#', '', $cleanPath);
         $cleanPath = preg_replace('#^/?storage/#', '', $cleanPath);
         $cleanPath = ltrim($cleanPath, '/');
 
         $diskInstance = Storage::disk($disk);
-        if ($diskInstance->exists($cleanPath)) {
-            return $diskInstance->path($cleanPath);
+        try {
+            if ($diskInstance->exists($cleanPath)) {
+                return $diskInstance->path($cleanPath);
+            }
+        } catch (\Throwable $e) {
+            // Les disques distants comme Cloudflare R2 ou S3 ne supportent pas ->path()
         }
 
         if (file_exists($urlOrPath)) {
@@ -336,8 +342,10 @@ class VideoTranscodingService
     /**
      * Résout l'URL publique absolue.
      */
-    protected function resolvePublicUrl(string $urlOrPath, string $disk = 'public'): string
+    protected function resolvePublicUrl(string $urlOrPath, ?string $disk = null): string
     {
+        $disk = $disk ?? config('media.disk', 'public');
+
         if (str_starts_with($urlOrPath, 'http://') || str_starts_with($urlOrPath, 'https://')) {
             return $urlOrPath;
         }
