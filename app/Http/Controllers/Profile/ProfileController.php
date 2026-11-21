@@ -5,11 +5,11 @@ namespace App\Http\Controllers\Profile;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\PublicProfileResource;
 use App\Http\Resources\UserResource;
-use App\Models\Geo\City;
-use App\Models\Geo\Country;
-use App\Models\Geo\Neighbourhood;
 use App\Models\User;
+use App\Services\Admin\AutomatedTextFilterService;
 use App\Services\Boost\CampaignAttributionService;
+use App\Services\Geo\NeighbourhoodVerificationService;
+use App\Services\Profile\NeighbourhoodConfirmationInvitationService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -76,8 +76,11 @@ class ProfileController extends Controller
     /**
      * Update full or partial profile (PUT /profile or PUT /profile/).
      */
-    public function update(Request $request): JsonResponse
-    {
+    public function update(
+        Request $request,
+        NeighbourhoodVerificationService $neighbourhoodVerification,
+        NeighbourhoodConfirmationInvitationService $invitationService
+    ): JsonResponse {
         $user = $request->user();
 
         $validated = $request->validate([
@@ -89,6 +92,21 @@ class ProfileController extends Controller
             'website' => ['nullable', 'url', 'max:120'],
             'locale' => ['sometimes', 'required', 'string', 'in:fr,en'],
             'uses_agenda' => ['sometimes', 'boolean'],
+            'countryCode' => ['nullable', 'string', 'size:2'],
+            'country_code' => ['nullable', 'string', 'size:2'],
+            'countryId' => ['nullable', 'exists:countries,id'],
+            'country_id' => ['nullable', 'exists:countries,id'],
+            'cityId' => ['nullable', 'exists:cities,id'],
+            'city_id' => ['nullable', 'exists:cities,id'],
+            'city' => ['nullable', 'string', 'max:100'],
+            'neighbourhoodId' => ['nullable', 'integer'],
+            'neighbourhood_id' => ['nullable', 'integer'],
+            'neighbourhood' => ['nullable', 'string', 'max:100'],
+            'latitude' => ['nullable', 'numeric', 'between:-90,90'],
+            'longitude' => ['nullable', 'numeric', 'between:-180,180'],
+            'accuracy' => ['nullable', 'numeric', 'min:0'],
+            'birthday_visibility' => ['sometimes', 'in:none,mutuals'],
+            'birthdayVisibility' => ['sometimes', 'in:none,mutuals'],
         ]);
 
         $updates = [];
@@ -121,8 +139,26 @@ class ProfileController extends Controller
             $updates['uses_agenda'] = (bool) $validated['uses_agenda'];
         }
 
+        if (array_key_exists('birthday_visibility', $validated)) {
+            $updates['birthday_visibility'] = $validated['birthday_visibility'];
+        } elseif (array_key_exists('birthdayVisibility', $validated)) {
+            $updates['birthday_visibility'] = $validated['birthdayVisibility'];
+        }
+
+        $locationResult = $neighbourhoodVerification->resolveProfileLocationUpdates($user, $validated);
+        $updates = array_merge($updates, $locationResult['updates']);
+
         if (! empty($updates)) {
             $user->update($updates);
+            $fresh = $user->fresh();
+            $textToScan = trim(($fresh->display_name ?? '').' '.($fresh->bio ?? ''));
+            if ($textToScan !== '') {
+                app(AutomatedTextFilterService::class)->scanText($textToScan, 'user', $user->id, $user);
+            }
+        }
+
+        if ($locationResult['neighbourhood_just_verified']) {
+            $invitationService->markInvitationsRead($user);
         }
 
         return response()->json([
@@ -162,6 +198,11 @@ class ProfileController extends Controller
         }
 
         $request->user()->update($updates);
+        $fresh = $request->user()->fresh();
+        $textToScan = trim(($fresh->display_name ?? '').' '.($fresh->bio ?? ''));
+        if ($textToScan !== '') {
+            app(AutomatedTextFilterService::class)->scanText($textToScan, 'user', $fresh->id, $fresh);
+        }
 
         return response()->json(['success' => true]);
     }
@@ -172,11 +213,28 @@ class ProfileController extends Controller
      */
     public function updateBirthdate(Request $request): JsonResponse
     {
-        $request->validate([
-            'birthDate' => ['required', 'date'],
-        ]);
+        $rawBirthDate = $request->input('birthDate') ?? $request->input('birth_date');
 
-        $birthDate = Carbon::parse($request->birthDate);
+        if (! $rawBirthDate) {
+            return response()->json([
+                'message' => 'The birthDate field is required.',
+                'errors' => [
+                    'birthDate' => ['Le champ date de naissance est requis.'],
+                ],
+            ], 422);
+        }
+
+        try {
+            $birthDate = Carbon::parse($rawBirthDate);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'The birthDate must be a valid date.',
+                'errors' => [
+                    'birthDate' => ['La date de naissance est invalide.'],
+                ],
+            ], 422);
+        }
+
         if ($birthDate->isAfter(Carbon::now()->subYears(18))) {
             $user = $request->user();
             if ($user) {
@@ -193,10 +251,28 @@ class ProfileController extends Controller
         }
 
         $request->user()->update([
-            'birth_date' => $request->birthDate,
+            'birth_date' => $birthDate->toDateString(),
         ]);
 
         return response()->json(['success' => true]);
+    }
+
+    /**
+     * Signale un utilisateur comme mineur et efface immédiatement et définitivement son compte et ses données.
+     * Sans mot de passe ni délai de 30 jours (LG-09).
+     */
+    public function reportUnderage(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if ($user) {
+            $user->tokens()->delete();
+            $user->forceDelete();
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Le compte et les données associées ont été immédiatement et définitivement effacés.',
+        ], 200);
     }
 
     /**
@@ -218,58 +294,45 @@ class ProfileController extends Controller
     }
 
     /**
-     * Update location (country, city, neighbourhood).
+     * Update location (country, city, neighbourhood) with geolocation proof for neighbourhood.
      */
-    public function updateLocation(Request $request): JsonResponse
-    {
-        $request->validate([
+    public function updateLocation(
+        Request $request,
+        NeighbourhoodVerificationService $neighbourhoodVerification,
+        NeighbourhoodConfirmationInvitationService $invitationService
+    ): JsonResponse {
+        $user = $request->user();
+
+        $validated = $request->validate([
             'countryCode' => ['nullable', 'string', 'size:2'],
+            'country_code' => ['nullable', 'string', 'size:2'],
             'countryId' => ['nullable', 'exists:countries,id'],
+            'country_id' => ['nullable', 'exists:countries,id'],
             'cityId' => ['nullable', 'exists:cities,id'],
-            'neighbourhoodId' => ['nullable', 'exists:neighbourhoods,id'],
-            'city' => ['nullable', 'string'],
-            'neighbourhood' => ['nullable', 'string'],
+            'city_id' => ['nullable', 'exists:cities,id'],
+            'neighbourhoodId' => ['nullable', 'integer'],
+            'neighbourhood_id' => ['nullable', 'integer'],
+            'city' => ['nullable', 'string', 'max:100'],
+            'neighbourhood' => ['nullable', 'string', 'max:100'],
+            'latitude' => ['nullable', 'numeric', 'between:-90,90'],
+            'longitude' => ['nullable', 'numeric', 'between:-180,180'],
+            'accuracy' => ['nullable', 'numeric', 'min:0'],
         ]);
 
-        $updates = [];
-        if ($request->filled('countryCode')) {
-            $updates['country_code'] = strtoupper($request->countryCode);
-            $country = Country::where('iso2', strtoupper($request->countryCode))->first();
-            if ($country) {
-                $updates['country_id'] = $country->id;
-            }
-        }
-        if ($request->filled('countryId')) {
-            $updates['country_id'] = $request->countryId;
-            $country = Country::find($request->countryId);
-            if ($country) {
-                $updates['country_code'] = $country->iso2;
-            }
-        }
-        if ($request->filled('cityId')) {
-            $updates['city_id'] = $request->cityId;
-            $city = City::find($request->cityId);
-            if ($city) {
-                $updates['city'] = $city->name;
-            }
-        } elseif ($request->filled('city')) {
-            $updates['city'] = $request->city;
-        }
-        if ($request->filled('neighbourhoodId')) {
-            $updates['neighbourhood_id'] = $request->neighbourhoodId;
-            $n = Neighbourhood::find($request->neighbourhoodId);
-            if ($n) {
-                $updates['neighbourhood'] = $n->name;
-            }
-        } elseif ($request->filled('neighbourhood')) {
-            $updates['neighbourhood'] = $request->neighbourhood;
+        $locationResult = $neighbourhoodVerification->resolveProfileLocationUpdates($user, $validated);
+
+        if (! empty($locationResult['updates'])) {
+            $user->update($locationResult['updates']);
         }
 
-        if (! empty($updates)) {
-            $request->user()->update($updates);
+        if ($locationResult['neighbourhood_just_verified']) {
+            $invitationService->markInvitationsRead($user);
         }
 
-        return response()->json(['success' => true]);
+        return response()->json([
+            'success' => true,
+            'user' => new UserResource($user->fresh()),
+        ]);
     }
 
     /**
@@ -284,6 +347,10 @@ class ProfileController extends Controller
         $request->user()->update([
             'bio' => $request->bio,
         ]);
+
+        if (! empty($request->bio)) {
+            app(AutomatedTextFilterService::class)->scanText($request->bio, 'user', $request->user()->id, $request->user());
+        }
 
         return response()->json(['success' => true]);
     }

@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers\Delegation;
 
+use App\Enums\Delegation\DelegationStatus;
 use App\Http\Controllers\Controller;
+use App\Models\Delegation\Delegation;
 use App\Models\Delegation\VisitShare;
 use App\Models\User;
 use App\Notifications\Delegation\VisitShareNegotiationNotification;
@@ -42,6 +44,20 @@ class VisitShareController extends Controller
             $recipient = User::findOrFail($landlordId);
         }
 
+        if (! $this->hasActiveOrPendingDelegation($landlordId, $agentId)) {
+            return response()->json([
+                'success' => false,
+                'code' => 'NO_ACTIVE_DELEGATION',
+                'kind' => 'NO_ACTIVE_DELEGATION',
+                'message' => 'Aucune délégation active ou en attente ne lie ce bailleur et cet agent.',
+            ], 403);
+        }
+
+        $existingShare = VisitShare::where('landlord_id', $landlordId)
+            ->where('agent_id', $agentId)
+            ->first();
+        $previousOfferBy = $existingShare?->offer_by;
+
         $share = VisitShare::updateOrCreate(
             ['landlord_id' => $landlordId, 'agent_id' => $agentId],
             [
@@ -51,15 +67,40 @@ class VisitShareController extends Controller
             ]
         );
 
-        // Notifier l'autre côté avec page_id si actif
-        try {
-            $recipient->notify(new VisitShareNegotiationNotification(
-                visitShare: $share,
-                event: 'offer',
-                pageId: $activePage?->id
-            ));
-        } catch (\Throwable $e) {
-            // Continuer sans bloquer
+        // Détection : l'offre part-elle avec une invitation initiale ?
+        // Ne pas envoyer visit_share_offer quand l'offre part avec une invitation.
+        // La garder pour une contre-proposition faite après coup.
+        $isExplicitInvitationOffer = $request->boolean('with_invitation')
+            || $request->boolean('is_invitation')
+            || $request->boolean('from_invitation');
+
+        $isPendingInvitationOffer = false;
+        if ($offerBy === 'landlord' && $previousOfferBy !== 'agent') {
+            $hasPendingDelegation = Delegation::query()
+                ->where('bailleur_id', $landlordId)
+                ->where('agent_id', $agentId)
+                ->where('status', DelegationStatus::Pending)
+                ->whereNull('revoked_at')
+                ->exists();
+
+            if ($hasPendingDelegation) {
+                $isPendingInvitationOffer = true;
+            }
+        }
+
+        $shouldNotifyOffer = ! ($isExplicitInvitationOffer || $isPendingInvitationOffer);
+
+        if ($shouldNotifyOffer) {
+            // Notifier l'autre côté avec page_id si actif
+            try {
+                $recipient->notify(new VisitShareNegotiationNotification(
+                    visitShare: $share,
+                    event: 'offer',
+                    pageId: $activePage?->id
+                ));
+            } catch (\Throwable $e) {
+                // Continuer sans bloquer
+            }
         }
 
         return response()->json([
@@ -89,6 +130,15 @@ class VisitShareController extends Controller
             $agentId = (int) $validated['agent_id'];
             $share = VisitShare::where('landlord_id', $landlordId)->where('agent_id', $agentId)->first();
 
+            if (! $this->hasActiveOrPendingDelegation($landlordId, $agentId)) {
+                return response()->json([
+                    'success' => false,
+                    'code' => 'NO_ACTIVE_DELEGATION',
+                    'kind' => 'NO_ACTIVE_DELEGATION',
+                    'message' => 'Aucune délégation active ou en attente ne lie ce bailleur et cet agent.',
+                ], 403);
+            }
+
             if (! $share) {
                 return response()->json(['message' => 'Aucune proposition trouvée.'], 404);
             }
@@ -105,6 +155,15 @@ class VisitShareController extends Controller
             $agentId = $user->id;
             $landlordId = (int) $validated['bailleur_id'];
             $share = VisitShare::where('landlord_id', $landlordId)->where('agent_id', $agentId)->first();
+
+            if (! $this->hasActiveOrPendingDelegation($landlordId, $agentId)) {
+                return response()->json([
+                    'success' => false,
+                    'code' => 'NO_ACTIVE_DELEGATION',
+                    'kind' => 'NO_ACTIVE_DELEGATION',
+                    'message' => 'Aucune délégation active ou en attente ne lie ce bailleur et cet agent.',
+                ], 403);
+            }
 
             if (! $share) {
                 return response()->json(['message' => 'Aucune proposition trouvée.'], 404);
@@ -138,5 +197,29 @@ class VisitShareController extends Controller
             'message' => 'Proposition acceptée. L\'accord est désormais actif.',
             'data' => $share,
         ], 200);
+    }
+
+    /**
+     * Vérifie s'il existe une délégation en attente ou acceptée reliant le bailleur et l'agent.
+     * Une délégation révoquée, refusée ou expirée ne permet pas la négociation.
+     */
+    protected function hasActiveOrPendingDelegation(int $landlordId, int $agentId): bool
+    {
+        return Delegation::query()
+            ->where('bailleur_id', $landlordId)
+            ->where('agent_id', $agentId)
+            ->whereNull('revoked_at')
+            ->whereIn('status', [DelegationStatus::Pending, DelegationStatus::Active])
+            ->where(function ($query) {
+                $query->where('status', DelegationStatus::Active)
+                    ->orWhere(function ($q) {
+                        $q->where('status', DelegationStatus::Pending)
+                            ->where(function ($sub) {
+                                $sub->whereNull('expires_at')
+                                    ->orWhere('expires_at', '>', now());
+                            });
+                    });
+            })
+            ->exists();
     }
 }

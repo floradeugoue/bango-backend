@@ -1,14 +1,18 @@
 <?php
 
+use App\Enums\Boost\CreditTransactionType;
+use App\Enums\Payment\PaymentChannel;
 use App\Enums\Payment\PaymentServiceType;
 use App\Enums\Payment\PaymentStatus;
 use App\Models\Auth\Role;
 use App\Models\Payment\PaymentTransaction;
 use App\Models\Subscription\Subscription;
+use App\Models\Subscription\SubscriptionEvent;
 use App\Models\Subscription\SubscriptionProduct;
 use App\Models\User;
 use App\Notifications\Subscription\PaymentFailedReminderNotification;
 use App\Notifications\Subscription\RenewalUpcomingReminderNotification;
+use App\Services\Boost\CreditWalletService;
 use App\Services\Payment\Gateways\MonetbilGateway;
 use App\Services\Subscription\SubscriptionRenewalService;
 use App\Services\Subscription\SubscriptionService;
@@ -541,4 +545,97 @@ it('14. maintains backward compatibility with Passport and previous PAY phases',
     getJson('/api/subscriptions')
         ->assertStatus(200)
         ->assertJsonStructure(['data']);
+});
+
+it('15. preleve automatiquement le credit BANGO a l echeance quand le solde suffit et auto_renew est actif', function () {
+    /** @var CreditWalletService $walletService */
+    $walletService = app(CreditWalletService::class);
+    $wallet = $walletService->getOrCreateWallet($this->userA);
+    // Créditer le compte avec 68 000 FCFA
+    $walletService->credit($wallet, 68000, CreditTransactionType::Purchase, 'Approvisionnement test');
+
+    $priceAmount = (float) $this->price->price_amount;
+
+    $sub = Subscription::create([
+        'user_id' => $this->userA->id,
+        'product_id' => $this->product->id,
+        'price_id' => $this->price->id,
+        'badge_type' => 'landlord',
+        'cadence' => 'monthly',
+        'amount' => $priceAmount,
+        'currency' => 'XAF',
+        'state' => 'active',
+        'current_period_start' => now()->subDays(31),
+        'current_period_end' => now()->subHour(),
+        'auto_renew' => true,
+        'failed_attempts' => 0,
+    ]);
+
+    $service = app(SubscriptionRenewalService::class);
+    $stats = $service->processLifecycle();
+
+    expect($stats['renewed_auto'])->toBe(1);
+    expect($stats['entered_grace'])->toBe(0);
+
+    $sub->refresh();
+    expect($sub->state)->toBe('active');
+    expect($sub->failed_attempts)->toBe(0);
+    expect($sub->current_period_end->isFuture())->toBeTrue();
+
+    // Vérifier que le portefeuille a été débité
+    $wallet->refresh();
+    expect((int) $wallet->balance)->toBe((int) (68000 - $priceAmount));
+
+    // Vérifier la présence d'une transaction de paiement confirmée par portefeuille
+    $tx = PaymentTransaction::where('subscription_id', $sub->id)
+        ->where('channel', PaymentChannel::CreditWallet)
+        ->where('status', PaymentStatus::Confirmed)
+        ->first();
+    expect($tx)->not->toBeNull();
+
+    // Vérifier l'événement de renouvellement
+    $event = SubscriptionEvent::where('subscription_id', $sub->id)
+        ->where('event_type', 'renewed')
+        ->latest()
+        ->first();
+    expect($event)->not->toBeNull();
+});
+
+it('16. passe en grace avec failed_attempts a 0 et motif echeance passee sans renouvellement quand aucun prelevement n a eu lieu', function () {
+    // User B n'a aucun crédit sur son portefeuille
+    $sub = Subscription::create([
+        'user_id' => $this->userB->id,
+        'product_id' => $this->product->id,
+        'price_id' => $this->price->id,
+        'badge_type' => 'landlord',
+        'cadence' => 'monthly',
+        'amount' => $this->price->price_amount,
+        'currency' => 'XAF',
+        'state' => 'active',
+        'current_period_start' => now()->subDays(31),
+        'current_period_end' => now()->subHour(),
+        'auto_renew' => true,
+        'failed_attempts' => 0,
+    ]);
+
+    $service = app(SubscriptionRenewalService::class);
+    $stats = $service->processLifecycle();
+
+    expect($stats['renewed_auto'])->toBe(0);
+    expect($stats['entered_grace'])->toBe(1);
+
+    $sub->refresh();
+    expect($sub->state)->toBe('grace');
+    // failed_attempts doit rester à 0 car aucun prélèvement n'a été tenté
+    expect($sub->failed_attempts)->toBe(0);
+    expect($sub->isInGrace())->toBeTrue();
+
+    // L'événement doit indiquer "Échéance passée sans renouvellement"
+    $event = SubscriptionEvent::where('subscription_id', $sub->id)
+        ->where('event_type', 'grace_entered')
+        ->latest()
+        ->first();
+    expect($event)->not->toBeNull()
+        ->and($event->reason)->toBe('Échéance passée sans renouvellement')
+        ->and($event->payload['attempt'])->toBe(0);
 });

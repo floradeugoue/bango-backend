@@ -8,6 +8,7 @@ use App\Models\Payment\AgentPayout;
 use App\Models\Payment\LandlordPayout;
 use App\Models\User;
 use App\Models\Visit\VisitReservation;
+use App\Services\Payment\Gateways\MonetbilGateway;
 use DomainException;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
@@ -156,7 +157,13 @@ class AdminPayoutService
         $agentAmount = round(($totalFee * $agentPercent) / 100, 2);
         $landlordAmount = round($totalFee - $agentAmount, 2);
 
-        // Si l'agent a une part, planifier le versement de l'agent
+        $payoutMode = (string) config('payment.payout_mode', 'mandate_payout');
+        $isSplitAtCollection = $payoutMode === 'split_payment';
+        $splitExtRef = $isSplitAtCollection
+            ? 'SPLIT-'.($reservation->payment_reference ?: strtoupper(Str::random(10)))
+            : null;
+
+        // Si l'agent a une part, planifier ou constater le versement de l'agent
         if ($agentId && $agentAmount > 0) {
             AgentPayout::firstOrCreate([
                 'visit_reservation_id' => $reservation->id,
@@ -168,12 +175,17 @@ class AdminPayoutService
                 'amount' => $agentAmount,
                 'percent' => $agentPercent,
                 'currency' => $reservation->currency ?: 'XAF',
-                'status' => AgentPayout::STATUS_SCHEDULED,
-                'scheduled_at' => $scheduledAt,
+                'status' => $isSplitAtCollection ? AgentPayout::STATUS_COMPLETED : AgentPayout::STATUS_SCHEDULED,
+                'scheduled_at' => $isSplitAtCollection ? now() : $scheduledAt,
+                'executed_at' => $isSplitAtCollection ? now() : null,
+                'external_reference' => $splitExtRef ? $splitExtRef.'-AG' : null,
                 'provider' => 'monetbil',
                 'channel' => 'mobile_money',
                 'metadata' => [
-                    'rule' => 'Agent visit fee cut',
+                    'rule' => $isSplitAtCollection
+                        ? 'Marketplace split payment at collection (Monetbil license)'
+                        : 'Agent visit fee cut (collection mandate)',
+                    'payout_mode' => $payoutMode,
                     'visit_slot_start' => $reservation->slot?->start_at?->toIso8601String(),
                 ],
             ]);
@@ -186,12 +198,17 @@ class AdminPayoutService
             'transaction_id' => $reservation->transaction_id,
             'amount' => $landlordAmount,
             'currency' => $reservation->currency ?: 'XAF',
-            'status' => LandlordPayout::STATUS_SCHEDULED,
-            'scheduled_at' => $scheduledAt,
+            'status' => $isSplitAtCollection ? LandlordPayout::STATUS_COMPLETED : LandlordPayout::STATUS_SCHEDULED,
+            'scheduled_at' => $isSplitAtCollection ? now() : $scheduledAt,
+            'executed_at' => $isSplitAtCollection ? now() : null,
+            'external_reference' => $splitExtRef ? $splitExtRef.'-LL' : null,
             'provider' => 'monetbil',
             'channel' => 'mobile_money',
             'metadata' => [
-                'rule' => 'J+1 08:00 post-visit fee disbursement',
+                'rule' => $isSplitAtCollection
+                    ? 'Marketplace split payment at collection (Monetbil license)'
+                    : 'J+1 08:00 post-visit fee disbursement (collection mandate)',
+                'payout_mode' => $payoutMode,
                 'visit_slot_start' => $reservation->slot?->start_at?->toIso8601String(),
                 'scheduled_time' => '08:00:00',
                 'agent_cut' => $agentId && $agentAmount > 0 ? [
@@ -204,25 +221,61 @@ class AdminPayoutService
     }
 
     /**
-     * Traitement par lot des reversements planifiés dont l'échéance J+1 08:00 est échue.
+     * Traitement par lot des reversements planifiés (bailleurs et agents) dont l'échéance J+1 08:00 est échue.
      */
     public function processScheduledPayouts(): int
     {
-        $duePayouts = LandlordPayout::where('status', LandlordPayout::STATUS_SCHEDULED)
+        $gateway = app(MonetbilGateway::class);
+        $duePayouts = LandlordPayout::with('landlord')
+            ->where('status', LandlordPayout::STATUS_SCHEDULED)
             ->where('scheduled_at', '<=', now())
             ->get();
 
         $processed = 0;
         foreach ($duePayouts as $payout) {
-            DB::transaction(function () use ($payout, &$processed) {
-                /** @var LandlordPayout $locked */
-                $locked = LandlordPayout::where('id', $payout->id)->lockForUpdate()->first();
+            DB::transaction(function () use ($payout, $gateway, &$processed) {
+                /** @var LandlordPayout|null $locked */
+                $locked = LandlordPayout::with('landlord')->where('id', $payout->id)->lockForUpdate()->first();
                 if ($locked && $locked->status === LandlordPayout::STATUS_SCHEDULED) {
+                    $phone = $locked->landlord?->phone ?? '+237690000000';
+                    $disburse = $gateway->disburseToMobileMoney(
+                        phone: $phone,
+                        amount: (float) $locked->amount,
+                        currency: $locked->currency ?: 'XAF',
+                        reference: $locked->reference
+                    );
+
                     $locked->status = LandlordPayout::STATUS_COMPLETED;
                     $locked->executed_at = now();
-                    $locked->external_reference = 'PAYOUT-AUTO-'.strtoupper(Str::random(12));
+                    $locked->external_reference = $disburse['external_reference'] ?? ('PAYOUT-AUTO-'.strtoupper(Str::random(12)));
                     $locked->save();
                     $processed++;
+                }
+            });
+        }
+
+        $dueAgentPayouts = AgentPayout::with('agent')
+            ->where('status', AgentPayout::STATUS_SCHEDULED)
+            ->where('scheduled_at', '<=', now())
+            ->get();
+
+        foreach ($dueAgentPayouts as $agentPayout) {
+            DB::transaction(function () use ($agentPayout, $gateway, &$processed) {
+                /** @var AgentPayout|null $lockedAg */
+                $lockedAg = AgentPayout::with('agent')->where('id', $agentPayout->id)->lockForUpdate()->first();
+                if ($lockedAg && $lockedAg->status === AgentPayout::STATUS_SCHEDULED) {
+                    $phone = $lockedAg->agent?->phone ?? '+237690000000';
+                    $disburse = $gateway->disburseToMobileMoney(
+                        phone: $phone,
+                        amount: (float) $lockedAg->amount,
+                        currency: $lockedAg->currency ?: 'XAF',
+                        reference: $lockedAg->reference
+                    );
+
+                    $lockedAg->status = AgentPayout::STATUS_COMPLETED;
+                    $lockedAg->executed_at = now();
+                    $lockedAg->external_reference = $disburse['external_reference'] ?? ('PAYOUT-AG-AUTO-'.strtoupper(Str::random(10)));
+                    $lockedAg->save();
                 }
             });
         }

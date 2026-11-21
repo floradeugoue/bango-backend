@@ -14,6 +14,17 @@ class StoreReportRequest extends FormRequest
         return $this->user() !== null;
     }
 
+    protected function prepareForValidation(): void
+    {
+        $reason = $this->input('reason');
+        // Tolérance et normalisation pour les libellés provisoires ou envoyés en texte libre par l'app mobile
+        if ($reason === 'minor' || $reason === 'child') {
+            $this->merge(['reason' => ReportReason::ChildSafety->value]);
+        } elseif ($reason === 'sexual' || $reason === 'nudity') {
+            $this->merge(['reason' => ReportReason::SexualContent->value]);
+        }
+    }
+
     /**
      * @return array<string, ValidationRule|array<mixed>|string>
      */

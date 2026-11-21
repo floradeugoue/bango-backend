@@ -3,8 +3,10 @@
 namespace App\Services\Admin;
 
 use App\Enums\Admin\AdminPermission;
+use App\Enums\Kyc\KycDocKind;
 use App\Enums\Kyc\KycStatus;
 use App\Models\Admin\AdminAuditLog;
+use App\Models\Kyc\KycDocument;
 use App\Models\Kyc\KycSubmission;
 use App\Models\Subscription\Subscription;
 use App\Models\User;
@@ -17,6 +19,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -121,6 +124,14 @@ class AdminKycService
         }
 
         // 6. Filtre par statut et awaiting
+        if (isset($filters['is_manual_verification'])) {
+            $isManual = filter_var($filters['is_manual_verification'], FILTER_VALIDATE_BOOLEAN);
+            $query->where(function (Builder $mq) use ($isManual) {
+                $mq->where('is_manual_verification', $isManual)
+                    ->orWhere('metadata->is_manual_verification', $isManual);
+            });
+        }
+
         if (isset($filters['awaiting'])) {
             $awaiting = filter_var($filters['awaiting'], FILTER_VALIDATE_BOOLEAN);
             if ($awaiting) {
@@ -480,6 +491,11 @@ class AdminKycService
                 throw new DomainException("Décision '{$decision}' non reconnue.");
             }
 
+            // 1. Suppression définitive des poses de vivacité dès la décision (seul le selfie de face est conservé)
+            if (in_array($decision, ['approve', 'reject'], true)) {
+                $this->purgeLivenessFrames($submission);
+            }
+
             // Point 21 : Journalisation d'audit chaînée de la décision KYC
             AdminAuditLog::logChainedEvent(
                 event: 'kyc.decision_'.$decision,
@@ -516,6 +532,73 @@ class AdminKycService
 
             return $submission->fresh(['user', 'decidedBy', 'documents']);
         });
+    }
+
+    /**
+     * Supprime définitivement les captures de vivacité (tête à gauche, tête à droite)
+     * dès la prise de décision sur le dossier, tout en conservant le selfie de face.
+     */
+    public function purgeLivenessFrames(KycSubmission $submission): int
+    {
+        $livenessDocs = KycDocument::where('kyc_submission_id', $submission->id)
+            ->where('kind', KycDocKind::LivenessFrame)
+            ->get();
+
+        $privateDisk = config('media.private_disk', 'local');
+        $purgedCount = 0;
+
+        foreach ($livenessDocs as $doc) {
+            if ($doc->file_path && $doc->file_path !== 'purged') {
+                if (Storage::disk($privateDisk)->exists($doc->file_path)) {
+                    Storage::disk($privateDisk)->delete($doc->file_path);
+                } elseif (Storage::disk('local')->exists($doc->file_path)) {
+                    Storage::disk('local')->delete($doc->file_path);
+                }
+            }
+            $doc->delete();
+            $purgedCount++;
+        }
+
+        return $purgedCount;
+    }
+
+    /**
+     * Active ou désactive l'indicateur de vérification manuelle sans biométrie sur un dossier KYC.
+     */
+    public function setManualVerification(KycSubmission $submission, User $operator, bool $manual, ?string $reason = null): KycSubmission
+    {
+        $submission->is_manual_verification = $manual;
+        $meta = $submission->metadata ?? [];
+        $meta['is_manual_verification'] = $manual;
+
+        if ($manual) {
+            $meta['manual_verification_flagged_at'] = now()->toIso8601String();
+            $meta['manual_verification_flagged_by'] = $operator->id;
+            $meta['manual_verification_reason'] = $reason ?? 'Demande d\'instruction manuelle posée par le support';
+        } else {
+            unset($meta['manual_verification_flagged_at'], $meta['manual_verification_flagged_by']);
+        }
+
+        $submission->metadata = $meta;
+        $submission->save();
+
+        AdminAuditLog::logChainedEvent(
+            event: $manual ? 'kyc.manual_verification_enabled' : 'kyc.manual_verification_disabled',
+            operator: $operator,
+            targetType: 'KycSubmission',
+            targetId: (string) $submission->id,
+            targetLabel: ($manual ? 'Activation' : 'Désactivation')." de la vérification manuelle sans biométrie pour le dossier {$submission->reference}",
+            context: [
+                'submission_id' => $submission->id,
+                'submission_reference' => $submission->reference,
+                'is_manual_verification' => $manual,
+                'reason' => $reason,
+            ],
+            ip: request()?->ip(),
+            userAgent: request()?->userAgent()
+        );
+
+        return $submission->fresh(['user', 'documents']);
     }
 
     /**

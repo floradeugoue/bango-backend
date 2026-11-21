@@ -13,18 +13,18 @@ return [
     'versions' => [
         'android' => [
             'min_version' => env('APP_MIN_VERSION_ANDROID', '1.0.0'),
-            'latest_version' => env('APP_LATEST_VERSION_ANDROID', '1.2.0'),
-            'store_url' => env('APP_STORE_URL_ANDROID', 'https://play.google.com/store/apps/details?id=com.bango.app'),
+            'latest_version' => env('APP_LATEST_VERSION_ANDROID', '1.0.0'),
+            'store_url' => env('APP_STORE_URL_ANDROID', 'https://play.google.com/store/apps/details?id=com.bangoapp.app'),
         ],
         'ios' => [
             'min_version' => env('APP_MIN_VERSION_IOS', '1.0.0'),
-            'latest_version' => env('APP_LATEST_VERSION_IOS', '1.2.0'),
+            'latest_version' => env('APP_LATEST_VERSION_IOS', '1.0.0'),
             'store_url' => env('APP_STORE_URL_IOS', 'https://apps.apple.com/app/bango/id000000000'),
         ],
         'web' => [
             'min_version' => env('APP_MIN_VERSION_WEB', '1.0.0'),
             'latest_version' => env('APP_LATEST_VERSION_WEB', '1.0.0'),
-            'store_url' => env('APP_STORE_URL_WEB', 'https://bango.app'),
+            'store_url' => env('APP_STORE_URL_WEB', 'https://bangoapp.com'),
         ],
     ],
 ];

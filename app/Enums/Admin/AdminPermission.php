@@ -74,6 +74,7 @@ enum AdminPermission: string
     case SettingsMaintenance = 'settings:maintenance';
     case SettingsDelays = 'settings:delays';
     case StatsView = 'stats:view';
+    case StatsRead = 'stats:read';
     case StatsReports = 'stats:reports';
     case StatsExport = 'stats:export';
 

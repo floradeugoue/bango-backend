@@ -3,6 +3,7 @@
 namespace App\Http\Resources\Delegation;
 
 use App\Models\Delegation\Delegation;
+use App\Models\Delegation\VisitShare;
 use App\Services\Delegation\DelegationService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -45,6 +46,9 @@ class DelegationResource extends JsonResource
             'listing_title' => $this->listing?->title,
             'status' => $this->status->value,
             'capabilities' => $this->capabilities ?? [],
+            'visit_share_percent' => VisitShare::where('landlord_id', $this->bailleur_id)
+                ->where('agent_id', $this->agent_id)
+                ->value('offer_percent'),
             'invited_at' => $this->invited_at?->toIso8601String(),
             'answered_at' => $this->answered_at?->toIso8601String(),
             'expires_at' => $this->expires_at?->toIso8601String(),

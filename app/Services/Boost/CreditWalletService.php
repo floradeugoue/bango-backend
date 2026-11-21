@@ -9,7 +9,9 @@ use App\Exceptions\Boost\InsufficientCreditException;
 use App\Models\Boost\CreditTransaction;
 use App\Models\Boost\CreditWallet;
 use App\Models\Payment\PaymentTransaction;
+use App\Models\Payment\SavedPaymentMethod;
 use App\Models\User;
+use App\Services\Payment\Gateways\MonetbilGateway;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
@@ -381,5 +383,102 @@ class CreditWalletService
         return $query->orderByDesc('created_at')
             ->orderByDesc('id')
             ->paginate($perPage);
+    }
+
+    /**
+     * Rembourse en argent sur le moyen de paiement d'origine le solde de crédits BANGO restant
+     * avant la suppression d'un compte ou à la demande de l'utilisateur.
+     *
+     * @return array{
+     *     refunded: bool,
+     *     amount: float,
+     *     currency: string,
+     *     refund_channel: string,
+     *     phone: string,
+     *     operator: ?string,
+     *     external_reference: string,
+     *     credit_transaction_id: int
+     * }|null
+     */
+    public function refundBalanceBeforeAccountDeletion(
+        User $user,
+        ?string $phone = null,
+        ?string $operator = null
+    ): ?array {
+        $balance = $this->getBalance($user);
+        if ($balance <= 0) {
+            return null;
+        }
+
+        return DB::transaction(function () use ($user, $phone, $operator) {
+            $wallet = $this->getOrCreateWallet($user);
+
+            /** @var CreditWallet $lockedWallet */
+            $lockedWallet = CreditWallet::where('id', $wallet->id)->lockForUpdate()->firstOrFail();
+            $currentBalance = (int) round((float) $lockedWallet->balance);
+
+            if ($currentBalance <= 0) {
+                return null;
+            }
+
+            // Résolution du moyen de paiement d'origine (dernière transaction confirmée ou méthode enregistrée)
+            $lastTx = PaymentTransaction::where('user_id', $user->id)
+                ->where('status', PaymentStatus::Confirmed)
+                ->latest('id')
+                ->first();
+
+            $txMeta = $lastTx?->metadata ?? [];
+            $savedMethod = SavedPaymentMethod::where('user_id', $user->id)
+                ->orderByDesc('is_default')
+                ->latest('id')
+                ->first();
+
+            $targetPhone = $phone
+                ?: ($txMeta['phone'] ?? $txMeta['phonenumber'] ?? $savedMethod?->phone_number ?? $user->phone ?? '+237690000000');
+            $targetOperator = $operator
+                ?: ($txMeta['operator'] ?? $savedMethod?->operator ?? null);
+            $currency = $lockedWallet->currency ?: ($lastTx?->currency ?: 'XAF');
+
+            $ref = 'CRED-REFUND-'.$user->id.'-'.strtoupper(Str::random(6));
+
+            $disburse = app(MonetbilGateway::class)->disburseToMobileMoney(
+                phone: (string) $targetPhone,
+                amount: (float) $currentBalance,
+                currency: $currency,
+                reference: $ref,
+                operator: is_string($targetOperator) ? $targetOperator : null,
+                countryCode: $user->country_code,
+                metadata: [
+                    'user_id' => $user->id,
+                    'reason' => 'Remboursement du solde de crédit BANGO sur le moyen de paiement d\'origine',
+                ]
+            );
+
+            $creditTx = $this->debit(
+                account: $lockedWallet,
+                amount: $currentBalance,
+                source: 'credit_balance_cash_refund',
+                reference: $ref,
+                description: 'Remboursement en argent du solde de crédits sur le moyen de paiement d\'origine',
+                idempotencyKey: 'credit_cash_refund_'.$user->id.'_'.$currentBalance.'_'.now()->format('YmdHis'),
+                metadata: [
+                    'refund_channel' => 'original_payment_method',
+                    'phone' => $disburse['phone'],
+                    'operator' => $disburse['operator'],
+                    'external_reference' => $disburse['external_reference'],
+                ]
+            );
+
+            return [
+                'refunded' => true,
+                'amount' => (float) $currentBalance,
+                'currency' => $currency,
+                'refund_channel' => 'original_payment_method',
+                'phone' => $disburse['phone'],
+                'operator' => $disburse['operator'],
+                'external_reference' => $disburse['external_reference'],
+                'credit_transaction_id' => $creditTx->id,
+            ];
+        });
     }
 }

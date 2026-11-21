@@ -20,8 +20,8 @@ class CampaignActivatedNotification extends Notification implements ShouldQueue
     public function toMail(object $notifiable): MailMessage
     {
         return (new MailMessage)
-            ->subject('Votre campagne de boost est active')
-            ->line('Votre campagne publicitaire a été activée et est désormais diffusée dans les feeds.')
+            ->subject('Ta campagne de boost est active')
+            ->line('Ta campagne publicitaire a été activée et est désormais diffusée dans les feeds.')
             ->action('Voir la campagne', url("/boost/campaigns/{$this->campaign->id}"));
     }
 

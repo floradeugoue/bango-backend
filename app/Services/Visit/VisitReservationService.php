@@ -582,7 +582,41 @@ class VisitReservationService
                 ->firstOrFail();
 
             if (in_array($reservation->status, [VisitReservationStatus::Confirmed, VisitReservationStatus::Requested], true)) {
-                return $reservation; // Idempotent
+                $isDuplicateCharge = ($reservation->transaction_id && (int) $reservation->transaction_id !== (int) $transaction->id)
+                    || str_starts_with((string) $reservation->payment_reference, 'VISIT-CREDIT-');
+
+                if ($isDuplicateCharge && $transaction->status === PaymentStatus::Confirmed) {
+                    $txMeta = $transaction->metadata ?? [];
+                    $prospect = $reservation->prospect ?? User::find($reservation->prospect_id);
+                    $phone = (string) ($txMeta['phone'] ?? $txMeta['phonenumber'] ?? $prospect?->phone ?? '+237690000000');
+                    $operator = $txMeta['operator'] ?? null;
+
+                    $disburse = $this->monetbilGateway->disburseToMobileMoney(
+                        phone: $phone,
+                        amount: (float) $transaction->total_amount,
+                        currency: $transaction->currency ?: 'XAF',
+                        reference: 'DBL-REFUND-'.$transaction->reference,
+                        operator: is_string($operator) ? $operator : null,
+                        metadata: [
+                            'reservation_id' => $reservation->id,
+                            'duplicate_transaction_id' => $transaction->id,
+                        ]
+                    );
+
+                    $this->paymentEngineService->refundTransaction(
+                        transaction: $transaction,
+                        reason: 'Double débit détecté sur visite déjà réglée : remboursement en argent sur le moyen de paiement d\'origine',
+                        amount: (float) $transaction->total_amount,
+                        externalRefundReference: $disburse['external_reference'],
+                        metadata: [
+                            'refund_channel' => 'original_payment_method',
+                            'double_charge_auto_refund' => true,
+                            'disbursed_phone' => $disburse['phone'],
+                        ]
+                    );
+                }
+
+                return $reservation;
             }
 
             /** @var VisitSlot $slot */
@@ -851,8 +885,12 @@ class VisitReservationService
     /**
      * Annule une visite et applique la politique de remboursement (IM-14 24h).
      */
-    public function cancelVisit(VisitReservation $reservation, User $actor, ?string $reason = null): VisitReservation
-    {
+    public function cancelVisit(
+        VisitReservation $reservation,
+        User $actor,
+        ?string $reason = null,
+        ?string $refundMethod = null
+    ): VisitReservation {
         $isProspect = $reservation->prospect_id === $actor->id;
         $isManager = $this->listingService->canManageVisits($actor, $reservation->listing);
         $isAdmin = $actor->isAdmin();
@@ -861,7 +899,7 @@ class VisitReservationService
             throw new AuthorizationException('Vous n\'êtes pas autorisé à annuler cette visite.');
         }
 
-        return DB::transaction(function () use ($reservation, $isProspect, $isManager, $reason) {
+        return DB::transaction(function () use ($reservation, $isProspect, $isManager, $reason, $refundMethod) {
             $locked = VisitReservation::where('id', $reservation->id)->lockForUpdate()->firstOrFail();
 
             if (in_array($locked->status, [
@@ -905,7 +943,7 @@ class VisitReservationService
 
             $isCredit = str_starts_with((string) $locked->payment_reference, 'VISIT-CREDIT-');
             if ($isEligibleForRefund && ($locked->paymentTransaction || $isCredit)) {
-                $this->processRefund($locked, $locked->cancellation_reason);
+                $this->processRefund($locked, $locked->cancellation_reason, VisitReservationStatus::Refunded, $refundMethod);
             } else {
                 try {
                     app(AdminPayoutService::class)->cancelScheduledPayoutForVisit($locked);
@@ -923,7 +961,8 @@ class VisitReservationService
     protected function processRefund(
         VisitReservation $reservation,
         string $reason,
-        ?VisitReservationStatus $targetStatus = VisitReservationStatus::Refunded
+        ?VisitReservationStatus $targetStatus = VisitReservationStatus::Refunded,
+        ?string $refundMethod = null
     ): void {
         $isCredit = str_starts_with((string) $reservation->payment_reference, 'VISIT-CREDIT-');
         $transaction = $reservation->paymentTransaction;
@@ -931,6 +970,14 @@ class VisitReservationService
         if (! $transaction && ! $isCredit) {
             return;
         }
+
+        $wantsCashToOriginalMethod = in_array(strtolower((string) $refundMethod), [
+            'original_payment_method',
+            'cash',
+            'mobile_money',
+        ], true);
+
+        $resolvedChannel = 'bango_credit';
 
         if ($isCredit) {
             $prospect = $reservation->prospect ?? User::find($reservation->prospect_id);
@@ -952,12 +999,45 @@ class VisitReservationService
                 );
             }
         } elseif ($transaction) {
+            $extRef = 'REFUND-VISIT-'.$reservation->id;
+            $refundMeta = [];
+
+            if ($wantsCashToOriginalMethod) {
+                $txMeta = $transaction->metadata ?? [];
+                $prospect = $reservation->prospect ?? User::find($reservation->prospect_id);
+                $phone = (string) ($txMeta['phone'] ?? $txMeta['phonenumber'] ?? $prospect?->phone ?? '+237690000000');
+                $operator = $txMeta['operator'] ?? null;
+
+                $disburse = $this->monetbilGateway->disburseToMobileMoney(
+                    phone: $phone,
+                    amount: (float) $reservation->fee_amount,
+                    currency: $reservation->currency ?: ($transaction->currency ?: 'XAF'),
+                    reference: 'CASH-REFUND-VISIT-'.$reservation->id,
+                    operator: is_string($operator) ? $operator : null,
+                    metadata: [
+                        'reservation_id' => $reservation->id,
+                        'transaction_id' => $transaction->id,
+                        'reason' => $reason,
+                    ]
+                );
+
+                $extRef = $disburse['external_reference'];
+                $resolvedChannel = 'original_payment_method';
+                $refundMeta = [
+                    'refund_channel' => 'original_payment_method',
+                    'disbursed_phone' => $disburse['phone'],
+                    'disbursed_operator' => $disburse['operator'],
+                    'external_reference' => $extRef,
+                ];
+            }
+
             if ($transaction->status !== PaymentStatus::Refunded) {
                 $this->paymentEngineService->refundTransaction(
                     transaction: $transaction,
                     reason: $reason,
                     amount: (float) $reservation->fee_amount,
-                    externalRefundReference: 'REFUND-VISIT-'.$reservation->id
+                    externalRefundReference: $extRef,
+                    metadata: $refundMeta
                 );
             }
         }
@@ -967,7 +1047,7 @@ class VisitReservationService
         }
         $reservation->refund_amount = $reservation->fee_amount;
         $reservation->refunded_at = now();
-        $reservation->refund_channel = 'bango_credit';
+        $reservation->refund_channel = $resolvedChannel;
         $reservation->save();
 
         try {
@@ -975,6 +1055,123 @@ class VisitReservationService
         } catch (\Throwable $e) {
             // Log or ignore
         }
+    }
+
+    /**
+     * Rembourse en argent sur le moyen de paiement d'origine une visite annulée, déclinée ou remboursée en crédit,
+     * à la demande de l'utilisateur.
+     */
+    public function requestCashRefundToOriginalMethod(
+        VisitReservation $reservation,
+        User $actor,
+        ?string $phone = null
+    ): VisitReservation {
+        if ((int) $reservation->prospect_id !== (int) $actor->id && ! $actor->isAdmin()) {
+            throw new AuthorizationException('Seul le prospect titulaire de la réservation peut demander ce remboursement.');
+        }
+
+        return DB::transaction(function () use ($reservation, $phone) {
+            /** @var VisitReservation $locked */
+            $locked = VisitReservation::with(['paymentTransaction', 'prospect'])
+                ->where('id', $reservation->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if (! in_array($locked->status, [
+                VisitReservationStatus::Cancelled,
+                VisitReservationStatus::Declined,
+                VisitReservationStatus::Expired,
+                VisitReservationStatus::Refunded,
+                VisitReservationStatus::RefundPending,
+            ], true)) {
+                throw ValidationException::withMessages([
+                    'status' => ['Seule une visite annulée, déclinée ou éligible au remboursement peut être remboursée sur le moyen de paiement d\'origine.'],
+                ]);
+            }
+
+            if ($locked->refund_channel === 'original_payment_method') {
+                throw ValidationException::withMessages([
+                    'refund_channel' => ['Cette visite a déjà fait l\'objet d\'un remboursement en argent sur le moyen de paiement d\'origine.'],
+                ]);
+            }
+
+            $feeAmount = (float) ($locked->refund_amount ?: $locked->fee_amount);
+            if ($feeAmount <= 0) {
+                throw ValidationException::withMessages([
+                    'amount' => ['Cette visite ne comporte aucun montant éligible au remboursement.'],
+                ]);
+            }
+
+            $prospect = $locked->prospect ?? User::findOrFail($locked->prospect_id);
+            $transaction = $locked->paymentTransaction;
+
+            // Si un crédit BANGO avait été émis pour cette visite, on le débite avant d'envoyer l'argent
+            if ($locked->refund_channel === 'bango_credit') {
+                $currentBalance = $this->creditWalletService->getBalance($prospect);
+                if ($currentBalance >= $feeAmount) {
+                    $this->creditWalletService->debit(
+                        account: $prospect,
+                        amount: (int) round($feeAmount),
+                        source: 'visit_cash_refund_conversion',
+                        reference: 'CASH-CONV-VISIT-'.$locked->id,
+                        description: sprintf('Conversion en remboursement Mobile Money de la visite annulée #%s', $locked->id),
+                        idempotencyKey: 'visit_cash_refund_conv_'.$locked->id,
+                        referenceModel: $locked
+                    );
+                }
+            }
+
+            $txMeta = $transaction?->metadata ?? [];
+            $targetPhone = $phone
+                ?: ($txMeta['phone'] ?? $txMeta['phonenumber'] ?? $prospect->phone ?? '+237690000000');
+            $operator = $txMeta['operator'] ?? null;
+
+            $disburse = $this->monetbilGateway->disburseToMobileMoney(
+                phone: (string) $targetPhone,
+                amount: $feeAmount,
+                currency: $locked->currency ?: ($transaction?->currency ?: 'XAF'),
+                reference: 'CASH-REFUND-VISIT-'.$locked->id,
+                operator: is_string($operator) ? $operator : null,
+                metadata: [
+                    'reservation_id' => $locked->id,
+                    'transaction_id' => $transaction?->id,
+                ]
+            );
+
+            if ($transaction && $transaction->status !== PaymentStatus::Refunded) {
+                $this->paymentEngineService->refundTransaction(
+                    transaction: $transaction,
+                    reason: 'Remboursement en argent sur le moyen de paiement d\'origine (visite annulée)',
+                    amount: $feeAmount,
+                    externalRefundReference: $disburse['external_reference'],
+                    metadata: [
+                        'refund_channel' => 'original_payment_method',
+                        'disbursed_phone' => $disburse['phone'],
+                    ]
+                );
+            } elseif ($transaction) {
+                $meta = $transaction->metadata ?? [];
+                $meta['refund']['refund_channel'] = 'original_payment_method';
+                $meta['refund']['external_reference'] = $disburse['external_reference'];
+                $meta['refund']['disbursed_phone'] = $disburse['phone'];
+                $transaction->metadata = $meta;
+                $transaction->save();
+            }
+
+            $locked->status = VisitReservationStatus::Refunded;
+            $locked->refund_amount = $feeAmount;
+            $locked->refunded_at = now();
+            $locked->refund_channel = 'original_payment_method';
+            $locked->save();
+
+            try {
+                app(AdminPayoutService::class)->cancelScheduledPayoutForVisit($locked);
+            } catch (\Throwable) {
+                // Ignore
+            }
+
+            return $locked;
+        });
     }
 
     /**

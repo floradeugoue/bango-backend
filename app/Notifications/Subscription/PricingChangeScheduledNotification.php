@@ -24,21 +24,24 @@ class PricingChangeScheduledNotification extends Notification implements ShouldQ
      */
     public function toMail(object $notifiable): MailMessage
     {
-        $productName = $this->proposal->price?->product?->name ?? 'votre formule BANGO';
+        $productName = $this->proposal->price?->product?->name ?? 'ta formule BANGO';
         $currency = $this->proposal->price?->currency ?? 'XAF';
         $newAmount = number_format((float) $this->proposal->new_price_amount, 0, ',', ' ').' '.$currency;
-        $effectiveDate = $this->proposal->effective_date?->format('d/m/Y') ?? 'prochainement';
+        $timezone = method_exists($notifiable, 'resolveTimezone')
+            ? $notifiable->resolveTimezone()
+            : ($notifiable->timezone ?? 'Africa/Douala');
+        $effectiveDate = $this->proposal->effective_date?->copy()->setTimezone($timezone)->format('d/m/Y') ?? 'prochainement';
 
         $currentAmount = $this->subscription?->amount ?? $this->proposal->price?->price_amount;
         $currentAmountFormatted = number_format((float) $currentAmount, 0, ',', ' ').' '.$currency;
 
         $mail = (new MailMessage)
-            ->subject("Information importante : Évolution tarifaire de votre abonnement {$productName}")
+            ->subject("Information importante : Évolution tarifaire de ton abonnement {$productName}")
             ->greeting("Bonjour {$notifiable->name},")
-            ->line("Nous vous informons d'une programmation d'évolution tarifaire concernant votre formule {$productName}.")
+            ->line("Nous t'informons d'une programmation d'évolution tarifaire concernant ta formule {$productName}.")
             ->line("À compter du {$effectiveDate}, le nouveau montant de l'abonnement sera de {$newAmount}.")
-            ->line("Conformément à nos engagements, vous conservez votre tarif actuel ({$currentAmountFormatted}) sans surcoût jusqu'à la fin de votre période en cours.")
-            ->line("Le nouveau tarif s'appliquera uniquement lors de votre prochain renouvellement.")
+            ->line("Conformément à nos engagements, tu conserves ton tarif actuel ({$currentAmountFormatted}) sans surcoût jusqu'à la fin de ta période en cours.")
+            ->line("Le nouveau tarif s'appliquera uniquement lors de ton prochain renouvellement.")
             ->action('Consulter mon abonnement', url('/subscriptions'));
 
         if (! empty($this->proposal->terms_version)) {
@@ -59,7 +62,10 @@ class PricingChangeScheduledNotification extends Notification implements ShouldQ
         $currency = $this->proposal->price?->currency ?? 'XAF';
         $newAmount = (float) $this->proposal->new_price_amount;
         $currentAmount = (float) ($this->subscription?->amount ?? $this->proposal->price?->price_amount ?? 0);
-        $dateFormatted = $this->proposal->effective_date?->format('d/m/Y') ?? '';
+        $timezone = method_exists($notifiable, 'resolveTimezone')
+            ? $notifiable->resolveTimezone()
+            : ($notifiable->timezone ?? 'Africa/Douala');
+        $dateFormatted = $this->proposal->effective_date?->copy()->setTimezone($timezone)->format('d/m/Y') ?? '';
 
         return [
             'type' => 'pricing_change_scheduled',
@@ -72,7 +78,7 @@ class PricingChangeScheduledNotification extends Notification implements ShouldQ
             'effective_date' => $this->proposal->effective_date?->toIso8601String(),
             'terms_version' => $this->proposal->terms_version,
             'title' => "Évolution tarifaire : {$productName}",
-            'message' => "Le tarif de votre abonnement {$productName} passera à ".number_format($newAmount, 0, ',', ' ')." {$currency} à compter du {$dateFormatted}. Vous conservez votre tarif actuel jusqu'à votre prochain renouvellement.",
+            'message' => "Le tarif de ton abonnement {$productName} passera à ".number_format($newAmount, 0, ',', ' ')." {$currency} à compter du {$dateFormatted}. Tu conserves ton tarif actuel jusqu'à ton prochain renouvellement.",
             'action_url' => '/subscriptions',
         ];
     }

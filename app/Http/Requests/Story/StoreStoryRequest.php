@@ -33,6 +33,10 @@ class StoreStoryRequest extends FormRequest
             'media' => ['nullable', 'file', 'mimes:jpeg,jpg,png,webp,mp4,mov,webm,3gp,m4v', 'max:51200'],
             'thumbnail' => ['nullable', 'file', 'mimes:jpeg,jpg,png,webp', 'max:10240'],
             'thumbnail_url' => ['nullable', 'string', 'max:2048'],
+            'preview' => ['nullable', 'file', 'mimes:jpeg,jpg,png,webp', 'max:10240'],
+            'capture' => ['nullable', 'file', 'mimes:jpeg,jpg,png,webp', 'max:10240'],
+            'preview_url' => ['nullable', 'string', 'max:2048'],
+            'capture_url' => ['nullable', 'string', 'max:2048'],
             'background' => ['nullable'],
             'drawings' => ['nullable'],
             'drawing' => ['nullable'],
@@ -57,6 +61,10 @@ class StoreStoryRequest extends FormRequest
             'slides.*.crop' => ['nullable'],
             'slides.*.thumbnail' => ['nullable', 'file', 'mimes:jpeg,jpg,png,webp', 'max:10240'],
             'slides.*.thumbnail_url' => ['nullable', 'string', 'max:2048'],
+            'slides.*.preview' => ['nullable', 'file', 'mimes:jpeg,jpg,png,webp', 'max:10240'],
+            'slides.*.capture' => ['nullable', 'file', 'mimes:jpeg,jpg,png,webp', 'max:10240'],
+            'slides.*.preview_url' => ['nullable', 'string', 'max:2048'],
+            'slides.*.capture_url' => ['nullable', 'string', 'max:2048'],
         ];
     }
 }

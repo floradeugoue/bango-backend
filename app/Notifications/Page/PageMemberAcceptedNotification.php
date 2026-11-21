@@ -26,12 +26,12 @@ class PageMemberAcceptedNotification extends Notification implements ShouldQueue
 
     public function toMail(object $notifiable): MailMessage
     {
-        $userName = $this->member->user->name ?? 'Un membre';
-        $pageName = $this->member->page->name ?? 'votre page';
+        $userName = $this->member->user?->display_name ?: ($this->member->user?->name ?? 'Un membre');
+        $pageName = $this->member->page->name ?? 'ta page';
 
         return (new MailMessage)
             ->subject("Invitation acceptée pour {$pageName}")
-            ->line("{$userName} a accepté votre invitation et rejoint l'équipe de {$pageName}.")
+            ->line("{$userName} a accepté ton invitation et rejoint l'équipe de {$pageName}.")
             ->action('Gérer les membres', url('/my-pages'));
     }
 
@@ -41,16 +41,17 @@ class PageMemberAcceptedNotification extends Notification implements ShouldQueue
     public function toArray(object $notifiable): array
     {
         $locale = $notifiable->locale ?? 'fr';
+        $userName = $this->member->user?->display_name ?: ($this->member->user?->name ?? 'Un utilisateur');
 
         return [
             'type' => 'page_member_accepted',
             'page_id' => $this->member->page_id,
             'page_name' => $this->member->page->name ?? 'Page',
             'user_id' => $this->member->user_id,
-            'user_name' => $this->member->user->display_name ?: ($this->member->user->name ?? 'Utilisateur'),
+            'user_name' => $userName,
             'role' => $this->member->role->value,
             'title' => trans('notifications.page_member_accepted.title', [], $locale),
-            'message' => trans('notifications.page_member_accepted.body', [], $locale),
+            'message' => trans('notifications.page_member_accepted.body', ['user' => $userName], $locale),
         ];
     }
 }

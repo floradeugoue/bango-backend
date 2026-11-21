@@ -190,12 +190,12 @@ test('invitation envoie notification page_invitation avec member_id et apparait 
 
     $memberId = $resInvite->json('data.id');
 
-    // Vérifier la notification reçue en base
+    // Vérifier la notification reçue en base (sans page_id afin qu'elle apparaisse dans le fil personnel)
     $notification = $invitedUser->notifications()->first();
     expect($notification)->not->toBeNull();
     expect($notification->data['type'])->toBe('page_invitation');
     expect($notification->data['member_id'])->toBe($memberId);
-    expect($notification->data['page_id'])->toBe($this->page->id);
+    expect($notification->data)->not->toHaveKey('page_id');
     expect($notification->data['page_name'])->toBe($this->page->name);
     expect($notification->data['role'])->toBe('editor');
 
@@ -208,4 +208,64 @@ test('invitation envoie notification page_invitation avec member_id et apparait 
         ->assertJsonPath('data.0.page_id', $this->page->id)
         ->assertJsonPath('data.0.role', 'editor')
         ->assertJsonPath('data.0.user.name', 'Jean-Paul Kamga');
+
+    // Vérifier que l'invité·e voit bien la notification dans son fil personnel GET /api/notifications
+    $resNotifs = $this->getJson('/api/notifications');
+    $resNotifs->assertOk()
+        ->assertJsonCount(1, 'data')
+        ->assertJsonPath('data.0.type', 'page_invitation')
+        ->assertJsonPath('data.0.data.member_id', $memberId)
+        ->assertJsonPath('data.0.data.page_name', $this->page->name)
+        ->assertJsonPath('unread_count', 1)
+        ->assertJsonPath('unread_by_identity.account', 1);
+});
+
+test('page_invitation et page_member_revoked apparaissent toujours dans le fil personnel même si un page_id historique est présent', function () {
+    $nadege = User::factory()->create([
+        'name' => 'nadege',
+        'display_name' => 'Nadège',
+    ]);
+
+    // 1. Invitation par le propriétaire
+    Passport::actingAs($this->owner);
+    $resInvite = $this->postJson("/api/pages/{$this->page->id}/members/invite", [
+        'user_id' => $nadege->id,
+        'role' => PageRole::Editor->value,
+    ]);
+    $resInvite->assertStatus(201);
+    $memberId = $resInvite->json('data.id');
+
+    // Simuler une ancienne notification d'invitation contenant encore page_id dans ses données
+    $notifInvite = $nadege->notifications()->first();
+    $dataWithPageId = $notifInvite->data;
+    $dataWithPageId['page_id'] = $this->page->id;
+    $notifInvite->update(['data' => $dataWithPageId]);
+
+    // Nadège (qui n'est pas encore membre active) consulte GET /api/notifications
+    Passport::actingAs($nadege);
+    $resPersonal = $this->getJson('/api/notifications');
+    $resPersonal->assertOk()
+        ->assertJsonCount(1, 'data')
+        ->assertJsonPath('data.0.type', 'page_invitation')
+        ->assertJsonPath('unread_count', 1)
+        ->assertJsonPath('unread_by_identity.account', 1);
+
+    // 2. Nadège accepte puis est révoquée par le propriétaire
+    $this->postJson("/api/page-members/{$memberId}/accept")->assertOk();
+
+    Passport::actingAs($this->owner);
+    $this->deleteJson("/api/pages/{$this->page->id}/members/{$memberId}")->assertOk();
+
+    // Vérifier que la notification page_member_revoked n'a pas de page_id et remonte dans le fil personnel de Nadège
+    Passport::actingAs($nadege);
+    $resAfterRevoke = $this->getJson('/api/notifications');
+    $resAfterRevoke->assertOk();
+
+    $types = collect($resAfterRevoke->json('data'))->pluck('type')->all();
+    expect($types)->toContain('page_member_revoked');
+
+    $revokedNotif = collect($resAfterRevoke->json('data'))->firstWhere('type', 'page_member_revoked');
+    expect($revokedNotif['data'])->not->toHaveKey('page_id');
+    expect($revokedNotif['data']['member_id'])->toBe($memberId);
+    expect($revokedNotif['data']['page_name'])->toBe($this->page->name);
 });

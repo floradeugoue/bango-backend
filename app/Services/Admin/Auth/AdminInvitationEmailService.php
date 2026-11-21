@@ -3,14 +3,79 @@
 namespace App\Services\Admin\Auth;
 
 use App\Mail\Admin\AdminAccessRequestRejectedMail;
+use App\Mail\Admin\AdminAccessRequestSubmittedMail;
 use App\Mail\Admin\AdminInvitationMail;
 use App\Models\Admin\AdminAccessRequest;
 use App\Models\Admin\AdminInvitation;
+use App\Models\User;
+use App\Notifications\Admin\AdminAccessRequestPendingNotification;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 
 class AdminInvitationEmailService
 {
+    /**
+     * Envoie l'accusé de réception d'une demande d'accès au demandeur.
+     */
+    public function sendSubmissionReceipt(AdminAccessRequest $accessRequest): void
+    {
+        try {
+            Mail::to($accessRequest->email)->send(new AdminAccessRequestSubmittedMail($accessRequest));
+
+            Log::info('Admin access request submission receipt email sent', [
+                'email' => $accessRequest->email,
+                'reference' => $accessRequest->reference,
+                'role' => $accessRequest->requested_role,
+                'mailer' => config('mail.default'),
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Failed to send admin access request submission receipt email', [
+                'email' => $accessRequest->email,
+                'reference' => $accessRequest->reference,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Notifie les validateurs (direction, admin, opérateurs autorisés) par e-mail et en base.
+     */
+    public function notifyReviewers(AdminAccessRequest $accessRequest): void
+    {
+        try {
+            $reviewers = User::query()
+                ->whereHas('role', function ($q) {
+                    $q->whereIn('slug', ['admin', 'direction'])
+                        ->orWhere('permissions', 'like', '%operators:manage%')
+                        ->orWhere('permissions', 'like', '%operators.manage%');
+                })
+                ->get();
+
+            foreach ($reviewers as $reviewer) {
+                try {
+                    $reviewer->notify(new AdminAccessRequestPendingNotification($accessRequest));
+                } catch (\Throwable $e) {
+                    Log::error('Failed to notify reviewer about access request', [
+                        'reviewer_id' => $reviewer->id,
+                        'reviewer_email' => $reviewer->email,
+                        'reference' => $accessRequest->reference,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
+            Log::info('Admin access request reviewers notified', [
+                'reference' => $accessRequest->reference,
+                'reviewers_count' => $reviewers->count(),
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Failed to query or notify access request reviewers', [
+                'reference' => $accessRequest->reference,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
     /**
      * Envoie l'email d'invitation avec le lien d'activation au back-office.
      */

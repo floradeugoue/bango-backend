@@ -21,20 +21,33 @@ class LegalDocumentService
         $normalizedSlug = strtolower(trim($slug));
         $targetLocale = $locale ? strtolower(trim($locale)) : self::DEFAULT_LOCALE;
 
+        $slugs = LegalDocument::slugVariants($normalizedSlug);
+
         $query = LegalDocument::query()
-            ->published()
-            ->where('slug', $normalizedSlug);
+            ->where('is_published', true)
+            ->whereIn('slug', $slugs);
 
         if ($version !== null && $version !== '') {
             $query->where('version', $version);
         }
 
-        // 1. Recherche dans la langue demandée
+        // 1. Recherche dans la langue demandée (documents déjà en vigueur)
         $document = (clone $query)
+            ->where('effective_date', '<=', now())
             ->where('locale', $targetLocale)
             ->orderByDesc('effective_date')
             ->orderByDesc('id')
             ->first();
+
+        // 1b. Si aucun document n'est encore entré en vigueur pour ce slug mais que la version officielle 1.0 est prête
+        if ($document === null) {
+            $document = (clone $query)
+                ->where('version', '1.0')
+                ->where('locale', $targetLocale)
+                ->orderByDesc('effective_date')
+                ->orderByDesc('id')
+                ->first();
+        }
 
         if ($document !== null) {
             return $document;
@@ -42,11 +55,23 @@ class LegalDocumentService
 
         // 2. Fallback vers la langue par défaut ('fr') si différente
         if ($targetLocale !== self::DEFAULT_LOCALE) {
-            return (clone $query)
+            $fallback = (clone $query)
+                ->where('effective_date', '<=', now())
                 ->where('locale', self::DEFAULT_LOCALE)
                 ->orderByDesc('effective_date')
                 ->orderByDesc('id')
                 ->first();
+
+            if ($fallback === null) {
+                $fallback = (clone $query)
+                    ->where('version', '1.0')
+                    ->where('locale', self::DEFAULT_LOCALE)
+                    ->orderByDesc('effective_date')
+                    ->orderByDesc('id')
+                    ->first();
+            }
+
+            return $fallback;
         }
 
         return null;
@@ -57,10 +82,13 @@ class LegalDocumentService
      */
     public function getMandatoryTermsVersion(): string
     {
+        $slugs = LegalDocument::slugVariants(self::TERMS_SLUG);
+
         $doc = LegalDocument::query()
-            ->published()
-            ->where('slug', self::TERMS_SLUG)
+            ->where('is_published', true)
+            ->whereIn('slug', $slugs)
             ->where('is_mandatory', true)
+            ->where('effective_date', '<=', now())
             ->orderByDesc('effective_date')
             ->orderByDesc('id')
             ->first();
@@ -69,15 +97,29 @@ class LegalDocumentService
             return $doc->version;
         }
 
-        // Fallback sur la dernière version publiée des CGU
-        $latest = LegalDocument::query()
-            ->published()
-            ->where('slug', self::TERMS_SLUG)
+        // Si aucun document en vigueur n'existe, rechercher la version 1.0 officielle publiée
+        $docV1 = LegalDocument::query()
+            ->where('is_published', true)
+            ->whereIn('slug', $slugs)
+            ->where('is_mandatory', true)
+            ->where('version', '1.0')
             ->orderByDesc('effective_date')
             ->orderByDesc('id')
             ->first();
 
-        return $latest?->version ?? '1.0.0';
+        if ($docV1 !== null) {
+            return $docV1->version;
+        }
+
+        // Fallback sur la dernière version publiée des CGU
+        $latest = LegalDocument::query()
+            ->where('is_published', true)
+            ->whereIn('slug', $slugs)
+            ->orderByDesc('effective_date')
+            ->orderByDesc('id')
+            ->first();
+
+        return $latest?->version ?? '1.0';
     }
 
     /**
@@ -154,15 +196,7 @@ class LegalDocumentService
     {
         $mandatoryVersion = $this->getMandatoryTermsVersion();
 
-        if ($user->accepted_terms_version === $mandatoryVersion && $user->terms_accepted_at !== null) {
-            return true;
-        }
-
-        return TermsAcceptance::query()
-            ->where('user_id', $user->id)
-            ->where('document_slug', self::TERMS_SLUG)
-            ->where('version', $mandatoryVersion)
-            ->exists();
+        return $this->hasUserAcceptedVersion($user, $mandatoryVersion, self::TERMS_SLUG);
     }
 
     /**

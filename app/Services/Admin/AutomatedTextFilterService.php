@@ -3,6 +3,7 @@
 namespace App\Services\Admin;
 
 use App\Enums\Listing\ListingStatus;
+use App\Enums\Page\PageStatus;
 use App\Enums\Support\AppealStatus;
 use App\Models\Listing\Listing;
 use App\Models\Message\Message;
@@ -11,6 +12,8 @@ use App\Models\Reel\Reel;
 use App\Models\Reel\ReelComment;
 use App\Models\Square\Post;
 use App\Models\Square\PostComment;
+use App\Models\Story\Story;
+use App\Models\Story\StorySlide;
 use App\Models\Support\ModerationAppeal;
 use App\Models\Support\ModerationFilterLog;
 use App\Models\Support\Report;
@@ -34,6 +37,7 @@ class AutomatedTextFilterService
         'off_platform' => '/(whatsapp|wa\.me|telegram|t\.me|monetbil\s*direct|orange\s*money\s*direct|mtn\s*momo\s*direct|western\s*union|moneygram|virement\s*direct|envoi\s*cash|contactez?[- ]moi\s*sur\s*whatsapp|whatsapp\s*au\s*:\s*[0-9]+|\b(?:6[5-9]\d[\s.\-]*\d{2}[\s.\-]*\d{2}[\s.\-]*\d{2})\b|(\+?237|00237|\+?225|00225|\+?221|00221)?\s*[62307]\s*[0-9](\s*[0-9]){7})/i',
         'spam' => '/(bit\.ly\/[a-z0-9]+|tinyurl\.com\/[a-z0-9]+|promo\s*flash\s*100%|promo\s*exceptionnelle|cliquez?\s*ici|gagnez?\s*de\s*l[\'\s]*argent|cliquez?\s*sur\s*mon\s*lien\s*en\s*bio|gagnez?\s*des\s*abonn[eé]s|pub\s*gratuite\s*ici|(?:https?:\/\/\S+.*){2,}|(.)\1{9,})/i',
         'offensive' => '/\b(sale\s*race|va\s*crever|je\s*vais\s*te\s*tuer|mort\s*aux|bande\s*de\s*chiens|escroc\s*de\s*merde|batard|b[aâ]tard|connard|salaud|imb[eé]cile)\b/i',
+        'discrimination' => '/(pas\s*d[\'e]\s*(?:bamil[eé]k[eé]s?|bassa|b[eé]tis?|haoussas?|peuls?|ewondos?|doualas?|bakweris?|sawas?|bamouns?|pygm[eé]es?|anglo(?:phones?)?|franco(?:phones?)?|musulmans?|chr[eé]tiens?|catholiques?|protestants?|noirs?|blancs?|juifs?|arabes?|[eé]trangers?|handicap[eé]s?|infirmes?|aveugles?|sourds?|malades?|s[eé]ropositifs?|vih|sida)|interdit\s*aux\s*(?:bamil[eé]k[eé]s?|bassa|b[eé]tis?|haoussas?|peuls?|ewondos?|doualas?|bakweris?|sawas?|bamouns?|pygm[eé]es?|anglo(?:phones?)?|franco(?:phones?)?|musulmans?|chr[eé]tiens?|catholiques?|protestants?|noirs?|blancs?|juifs?|arabes?|[eé]trangers?|handicap[eé]s?|infirmes?|malades?|s[eé]ropositifs?)|r[eé]serv[eé]\s*aux\s*(?:seuls?\s*)?(?:bamil[eé]k[eé]s?|bassa|b[eé]tis?|haoussas?|peuls?|ewondos?|doualas?|bakweris?|sawas?|bamouns?|pygm[eé]es?|anglo(?:phones?)?|franco(?:phones?)?|musulmans?|chr[eé]tiens?|catholiques?|protestants?|camerounais|autochtones)|sale\s*(?:bamil[eé]k[eé]|bassa|b[eé]ti|haoussa|peul|ewondo|douala|anglo|franco|noir|blanc|juif|arabe|musulman|chr[eé]tien|[eé]tranger|handicap[eé]|malade)|tribu\s*(?:de\s*merde|maudite|sauvage|inf[eé]rieure)|tribalisme|outrage\s*aux\s*tribus|haine\s*(?:tribale|raciale|ethnique|religieuse))/iu',
     ];
 
     /**
@@ -44,6 +48,7 @@ class AutomatedTextFilterService
         'off_platform' => 'Contournement de la plateforme ou partage de coordonnées',
         'spam' => 'Spam ou publicité non sollicitée',
         'offensive' => 'Propos offensants ou inappropriés',
+        'discrimination' => 'Discrimination (ethnie, tribu, religion, nationalité, handicap, état de santé)',
     ];
 
     /**
@@ -324,6 +329,7 @@ class AutomatedTextFilterService
             'off_platform' => 0,
             'spam' => 0,
             'offensive' => 0,
+            'discrimination' => 0,
         ];
 
         $dailyBuckets = [];
@@ -585,7 +591,14 @@ class AutomatedTextFilterService
     protected function removeFlaggedContent(string $contentType, string|int $contentId, string $justification): void
     {
         $content = $this->findContentModel($contentType, $contentId);
-        if (! $content || $content instanceof User) {
+        if (! $content) {
+            return;
+        }
+
+        if ($content instanceof User) {
+            $content->bio = null;
+            $content->save();
+
             return;
         }
 
@@ -594,6 +607,27 @@ class AutomatedTextFilterService
             $content->rejection_reason = $justification;
             $content->withdrawn_by_bango = true;
             $content->save();
+
+            return;
+        }
+
+        if ($content instanceof Page) {
+            $content->status = PageStatus::Suspended;
+            $meta = is_array($content->metadata) ? $content->metadata : [];
+            $meta['suspension'] = [
+                'suspended_at' => now()->toIso8601String(),
+                'reason' => $justification,
+                'source' => 'automated_filter',
+            ];
+            $content->metadata = $meta;
+            $content->save();
+
+            return;
+        }
+
+        if ($content instanceof StorySlide) {
+            $content->story?->delete();
+            $content->delete();
 
             return;
         }
@@ -644,6 +678,8 @@ class AutomatedTextFilterService
             'listing', 'listings' => Listing::class,
             'message', 'messages' => Message::class,
             'page', 'pages' => Page::class,
+            'story', 'stories' => Story::class,
+            'story_slide', 'story_slides' => StorySlide::class,
             'user', 'users', 'account', 'profile' => User::class,
             default => Report::resolveReportableClass($contentType),
         };

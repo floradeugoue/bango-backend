@@ -11,6 +11,7 @@ use App\Http\Resources\Listing\ListingDetailResource;
 use App\Http\Resources\Listing\ListingResource;
 use App\Models\Listing\Listing;
 use App\Models\Listing\ListingDailyMetric;
+use App\Models\Message\Conversation;
 use App\Policies\ListingPolicy;
 use App\Services\Delegation\DelegationService;
 use App\Services\Listing\ListingSearchService;
@@ -294,6 +295,41 @@ class ListingController extends Controller
             'success' => true,
             'shares_count' => $result['shares_count'],
             'listing_id' => $listing->id,
+        ]);
+    }
+
+    /**
+     * Alerte de fausse annonce pour l'écran SUP-18.
+     * GET /listings/{id}/fraud-alert
+     */
+    public function fraudAlert(Request $request, string $id): JsonResponse
+    {
+        /** @var Listing $listing */
+        $listing = Listing::withTrashed()->findOrFail($id);
+
+        $viewer = $request->user() ?? $request->user('api') ?? auth('sanctum')->user();
+        $conversation = null;
+
+        if ($viewer) {
+            $conversation = Conversation::where('listing_id', $listing->id)
+                ->whereHas('members', fn ($q) => $q->where('user_id', $viewer->id))
+                ->first();
+        }
+
+        $removedAt = ($listing->withdrawn_by_bango_at ?? $listing->deleted_at ?? $listing->updated_at)?->toIso8601String();
+
+        return response()->json([
+            'listing_id' => (string) $listing->id,
+            'title' => (string) $listing->title,
+            'listing_title' => (string) $listing->title,
+            'removed_at' => $removedAt,
+            'date_de_retrait' => $removedAt,
+            'conversation_id' => $conversation?->id ? (string) $conversation->id : null,
+            'conversation' => $conversation ? [
+                'id' => (string) $conversation->id,
+                'listing_id' => (string) $listing->id,
+                'created_at' => $conversation->created_at?->toIso8601String(),
+            ] : null,
         ]);
     }
 }

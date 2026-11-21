@@ -26,6 +26,7 @@ class Reel extends Model
         'user_id',
         'page_id',
         'sound_id',
+        'is_muted',
         'caption',
         'language',
         'topic',
@@ -61,6 +62,7 @@ class Reel extends Model
         return [
             'status' => ReelStatus::class,
             'duration' => 'integer',
+            'is_muted' => 'boolean',
             'width' => 'integer',
             'height' => 'integer',
             'allow_download' => 'boolean',
@@ -220,5 +222,32 @@ class Reel extends Model
     public function campaigns(): MorphMany
     {
         return $this->morphMany(Campaign::class, 'boostable');
+    }
+
+    protected static function booted(): void
+    {
+        static::saved(function (Reel $reel): void {
+            if ($reel->wasChanged('sound_id')) {
+                $oldSoundId = $reel->getOriginal('sound_id');
+                if ($oldSoundId) {
+                    Sound::where('id', $oldSoundId)->update([
+                        'uses_count' => Reel::where('sound_id', $oldSoundId)->count(),
+                    ]);
+                }
+                if ($reel->sound_id) {
+                    Sound::where('id', $reel->sound_id)->update([
+                        'uses_count' => Reel::where('sound_id', $reel->sound_id)->count(),
+                    ]);
+                }
+            }
+        });
+
+        static::deleted(function (Reel $reel): void {
+            if ($reel->sound_id) {
+                Sound::where('id', $reel->sound_id)->update([
+                    'uses_count' => Reel::where('sound_id', $reel->sound_id)->count(),
+                ]);
+            }
+        });
     }
 }

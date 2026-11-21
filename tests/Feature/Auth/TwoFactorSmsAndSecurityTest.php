@@ -78,7 +78,7 @@ test('2. Connexion avec 2FA SMS : déclenche le challenge et envoie le SMS via Z
 
     // Vérifier l'envoi effectif via la passerelle Zomloa
     expect($sentPhone)->toBe('237699112233')
-        ->and($sentSmsBody)->toContain('Votre code BANGO est :');
+        ->and($sentSmsBody)->toContain('Ton code BANGO est :');
 
     // Vérifier l'enregistrement OTP en BDD
     $otpRecord = Otp::where('identifier', '+237699112233')

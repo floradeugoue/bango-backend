@@ -19,6 +19,8 @@ class CancelVisitRequest extends FormRequest
     {
         return [
             'reason' => ['nullable', 'string', 'max:500'],
+            'refund_method' => ['nullable', 'string', 'in:bango_credit,original_payment_method,cash,mobile_money'],
+            'refund_to_original_method' => ['nullable', 'boolean'],
         ];
     }
 }

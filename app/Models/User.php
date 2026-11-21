@@ -9,6 +9,7 @@ use App\Enums\Gender;
 use App\Enums\Listing\ListingStatus;
 use App\Enums\Reel\ReelStatus;
 use App\Models\Auth\OAuthAccount;
+use App\Models\Auth\Otp;
 use App\Models\Auth\Role;
 use App\Models\Boost\Campaign;
 use App\Models\Boost\CreditTransaction;
@@ -53,7 +54,11 @@ use App\Models\Support\SupportTicket;
 use App\Models\Support\UserAccountSanction;
 use App\Models\Support\UserAnonymizationRequest;
 use App\Models\Visit\VisitReservation;
+use App\Notifications\Auth\WelcomeEmailVerificationNotification;
+use Carbon\CarbonInterface;
 use Database\Factories\UserFactory;
+use Illuminate\Contracts\Auth\MustVerifyEmail;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -61,11 +66,12 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Passport\HasApiTokens;
 
-class User extends Authenticatable
+class User extends Authenticatable implements MustVerifyEmail
 {
     /** @use HasFactory<UserFactory> */
     use HasApiTokens, HasFactory, Notifiable, SoftDeletes;
@@ -81,6 +87,7 @@ class User extends Authenticatable
         'bio',
         'website',
         'birth_date',
+        'birthday_visibility',
         'gender',
         'gender_hidden',
         'phone',
@@ -91,6 +98,7 @@ class User extends Authenticatable
         'city_id',
         'neighbourhood',
         'neighbourhood_id',
+        'neighbourhood_verified_at',
         'locale',
         'account_type',
         'is_verified',
@@ -160,6 +168,7 @@ class User extends Authenticatable
             'restricted_until' => 'datetime',
             'terms_accepted_at' => 'datetime',
             'last_seen_at' => 'datetime',
+            'neighbourhood_verified_at' => 'datetime',
         ];
     }
 
@@ -219,9 +228,48 @@ class User extends Authenticatable
         return $this->isAdmin() || in_array($this->role?->slug, ['support', 'moderator', 'agent_support'], true);
     }
 
+    /**
+     * Rôles sensibles du back-office pour lesquels la double authentification (TOTP) est obligatoire.
+     *
+     * @var array<int, string>
+     */
+    public const MANDATORY_2FA_ROLES = [
+        'verification',
+        'kyc',
+        'support',
+        'finance',
+        'direction',
+        'admin',
+    ];
+
     public function isInternalOperator(): bool
     {
         return in_array($this->role?->slug, ['admin', 'direction', 'moderation', 'support', 'finance', 'verification'], true);
+    }
+
+    /**
+     * Vérifie si un slug de rôle exige obligatoirement la double authentification (TOTP).
+     */
+    public static function roleRequiresTwoFactor(?string $roleSlug): bool
+    {
+        return in_array(strtolower((string) $roleSlug), self::MANDATORY_2FA_ROLES, true);
+    }
+
+    /**
+     * Indique si cet opérateur occupe un rôle sensible exigeant obligatoirement le TOTP.
+     */
+    public function requiresMandatoryTwoFactor(): bool
+    {
+        return self::roleRequiresTwoFactor($this->role?->slug);
+    }
+
+    /**
+     * Indique si l'opérateur possède un secret TOTP actif configuré.
+     */
+    public function hasActiveTotp(): bool
+    {
+        return ! empty($this->two_factor_secret)
+            && ! in_array($this->two_factor_method, ['off', 'none'], true);
     }
 
     /**
@@ -251,8 +299,44 @@ class User extends Authenticatable
 
     public function isSuspended(): bool
     {
-        return ($this->status ?? null) === 'suspended'
-            || ($this->suspended_until !== null && $this->suspended_until->isFuture());
+        if ($this->suspended_until !== null) {
+            return $this->suspended_until->isFuture();
+        }
+
+        return ($this->status ?? null) === 'suspended';
+    }
+
+    /**
+     * Lève la suspension si la date de fin (suspended_until) est passée.
+     * Remet le statut à 'active' et nettoie les métadonnées de suspension.
+     */
+    public function liftExpiredSuspension(): bool
+    {
+        if ($this->suspended_until !== null && $this->suspended_until->isPast()) {
+            $this->update([
+                'status' => 'active',
+                'suspension_reason' => null,
+                'suspended_from' => null,
+                'suspended_until' => null,
+            ]);
+
+            UserAccountSanction::where('user_id', $this->id)
+                ->where('type', 'suspension')
+                ->where('is_active', true)
+                ->where(function ($query) {
+                    $query->whereNull('ends_at')
+                        ->orWhere('ends_at', '<=', now());
+                })
+                ->update([
+                    'is_active' => false,
+                    'lifted_at' => now(),
+                    'lift_reason' => 'Fin de suspension temporaire échue.',
+                ]);
+
+            return true;
+        }
+
+        return false;
     }
 
     public function isBlocked(): bool
@@ -305,6 +389,60 @@ class User extends Authenticatable
         return $this->belongsTo(Neighbourhood::class);
     }
 
+    /**
+     * Retourne le libellé texte brut de la ville sans déclencher la relation city().
+     */
+    public function cityName(): ?string
+    {
+        $raw = $this->attributes['city'] ?? null;
+
+        if (! is_string($raw) || trim($raw) === '') {
+            return null;
+        }
+
+        return trim($raw);
+    }
+
+    /**
+     * Retourne le libellé texte brut du quartier sans déclencher la relation neighbourhood().
+     */
+    public function neighbourhoodName(): ?string
+    {
+        $raw = $this->attributes['neighbourhood'] ?? null;
+
+        if (! is_string($raw) || trim($raw) === '') {
+            return null;
+        }
+
+        return trim($raw);
+    }
+
+    /**
+     * Indique si le quartier du compte a été prouvé par la position.
+     */
+    public function hasVerifiedNeighbourhood(): bool
+    {
+        return $this->neighbourhoodName() !== null && $this->neighbourhood_verified_at !== null;
+    }
+
+    /**
+     * Indique si le compte a déclaré un quartier qui reste à confirmer par sa position.
+     */
+    public function needsNeighbourhoodVerification(): bool
+    {
+        return $this->neighbourhoodName() !== null && $this->neighbourhood_verified_at === null;
+    }
+
+    /**
+     * Filtre uniquement les comptes dont le quartier a été prouvé par la position.
+     */
+    public function scopeWithVerifiedNeighbourhood(Builder $query): Builder
+    {
+        return $query->whereNotNull('neighbourhood_verified_at')
+            ->whereNotNull('neighbourhood')
+            ->where('neighbourhood', '!=', '');
+    }
+
     public function creditTransactions(): HasMany
     {
         return $this->hasMany(CreditTransaction::class);
@@ -326,6 +464,70 @@ class User extends Authenticatable
     {
         return $this->belongsToMany(User::class, 'follows', 'follower_id', 'following_id')
             ->withTimestamps();
+    }
+
+    /**
+     * Abonnés réciproques (utilisateurs suivis qui suivent également ce compte).
+     */
+    public function mutualFollowers(): BelongsToMany
+    {
+        return $this->following()
+            ->whereIn('users.id', function ($query): void {
+                $query->select('follower_id')
+                    ->from('follows')
+                    ->where('following_id', $this->id);
+            });
+    }
+
+    /**
+     * Vérifie si un utilisateur est un abonné réciproque.
+     */
+    public function isMutualWith(User|int|string $user): bool
+    {
+        $targetId = $user instanceof User ? $user->id : (int) $user;
+
+        return $this->isFollowing($targetId) && $this->followers()->where('users.id', $targetId)->exists();
+    }
+
+    /**
+     * Retourne le prénom de l'utilisateur (premier mot du display_name ou name).
+     */
+    public function firstName(): string
+    {
+        $fullName = trim((string) ($this->display_name ?: $this->name));
+        if ($fullName === '') {
+            return 'ami·e';
+        }
+
+        $parts = preg_split('/\s+/', $fullName);
+
+        return $parts[0] ?? $fullName;
+    }
+
+    /**
+     * Détermine si la date donnée correspond à l'anniversaire de l'utilisateur,
+     * en prenant en compte la règle du 29 février (célébré le 28 février les années non bissextiles).
+     */
+    public function isBirthdayOnDate(CarbonInterface $date): bool
+    {
+        if (! $this->birth_date) {
+            return false;
+        }
+
+        $birthMonth = (int) $this->birth_date->month;
+        $birthDay = (int) $this->birth_date->day;
+
+        $targetMonth = (int) $date->month;
+        $targetDay = (int) $date->day;
+
+        if ($birthMonth === 2 && $birthDay === 29) {
+            $celebrationMonth = 2;
+            $celebrationDay = $date->isLeapYear() ? 29 : 28;
+
+            return $targetMonth === $celebrationMonth && $targetDay === $celebrationDay;
+        }
+
+        return $targetMonth === $birthMonth && $targetDay === $birthDay;
     }
 
     /**
@@ -434,6 +636,14 @@ class User extends Authenticatable
         $id = $user instanceof User ? $user->id : (int) $user;
 
         return $this->blockedByUsers()->where('blocker_id', $id)->exists();
+    }
+
+    /**
+     * Activités quotidiennes enregistrées pour cet utilisateur.
+     */
+    public function dailyActivities(): HasMany
+    {
+        return $this->hasMany(UserDailyActivity::class);
     }
 
     /**
@@ -1111,5 +1321,79 @@ class User extends Authenticatable
             $this->certified_at = null;
             $this->save();
         }
+    }
+
+    /**
+     * Résout le fuseau horaire du compte utilisateur (par défaut Africa/Douala).
+     */
+    public function resolveTimezone(): string
+    {
+        $city = mb_strtolower((string) ($this->cityName() ?? ''));
+        if (in_array($city, ['douala', 'yaounde', 'yaoundé', 'bafoussam', 'garoua', 'bamenda', 'maroua', 'kribi', 'limbe', 'buea'], true)) {
+            return 'Africa/Douala';
+        }
+        if (in_array($city, ['abidjan', 'yamoussoukro', 'bouake', 'bouaké', 'san-pedro', 'san pedro'], true)) {
+            return 'Africa/Abidjan';
+        }
+        if (in_array($city, ['dakar', 'thies', 'thiès', 'saint-louis', 'touba'], true)) {
+            return 'Africa/Dakar';
+        }
+        if (in_array($city, ['libreville', 'port-gentil'], true)) {
+            return 'Africa/Libreville';
+        }
+        if (in_array($city, ['brazzaville', 'pointe-noire'], true)) {
+            return 'Africa/Brazzaville';
+        }
+        if (in_array($city, ['kinshasa', 'lubumbashi', 'goma'], true)) {
+            return 'Africa/Kinshasa';
+        }
+        if (in_array($city, ['paris', 'lyon', 'marseille'], true)) {
+            return 'Europe/Paris';
+        }
+
+        $countryCode = strtoupper((string) ($this->country_code ?? ''));
+
+        return match ($countryCode) {
+            'CM' => 'Africa/Douala',
+            'CI' => 'Africa/Abidjan',
+            'SN' => 'Africa/Dakar',
+            'GA' => 'Africa/Libreville',
+            'CG' => 'Africa/Brazzaville',
+            'CD' => 'Africa/Kinshasa',
+            'FR' => 'Europe/Paris',
+            default => 'Africa/Douala',
+        };
+    }
+
+    /**
+     * Envoie l'e-mail de bienvenue et de confirmation d'adresse e-mail.
+     */
+    public function sendWelcomeEmailVerificationNotification(?string $code = null): void
+    {
+        $code = $code ?: (string) random_int(100000, 999999);
+
+        Otp::updateOrCreate(
+            [
+                'identifier' => $this->email,
+                'channel' => 'email',
+                'context' => 'email_verification',
+            ],
+            [
+                'code' => Hash::make($code),
+                'attempts' => 0,
+                'locked_until' => null,
+                'expires_at' => Carbon::now()->addHours(24),
+            ]
+        );
+
+        $this->notify(new WelcomeEmailVerificationNotification($code));
+    }
+
+    /**
+     * Implémentation du contrat MustVerifyEmail.
+     */
+    public function sendEmailVerificationNotification(): void
+    {
+        $this->sendWelcomeEmailVerificationNotification();
     }
 }

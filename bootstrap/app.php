@@ -10,11 +10,14 @@ use App\Http\Middleware\EnsureActiveSubscription;
 use App\Http\Middleware\EnsureAdminPermission;
 use App\Http\Middleware\EnsureAdminSession;
 use App\Http\Middleware\EnsureTermsAccepted;
+use App\Http\Middleware\RecordUserDailyActivity;
 use App\Http\Middleware\ResolveOptionalApiUser;
 use App\Http\Middleware\SetPageContext;
+use App\Http\Middleware\TrustCloudflareHeaders;
 use App\Http\Middleware\UpdateUserLastSeen;
 use App\Http\Middleware\ValidateUploadLimits;
 use App\Services\System\IncidentTrackerService;
+use App\Support\CloudflareIps;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -24,6 +27,7 @@ use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Exceptions\PostTooLargeException;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
+use Sentry\Laravel\Integration;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
@@ -38,6 +42,18 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->trustProxies(
+            at: CloudflareIps::all(),
+            headers: Request::HEADER_X_FORWARDED_FOR |
+                Request::HEADER_X_FORWARDED_HOST |
+                Request::HEADER_X_FORWARDED_PORT |
+                Request::HEADER_X_FORWARDED_PROTO |
+                Request::HEADER_X_FORWARDED_PREFIX |
+                Request::HEADER_X_FORWARDED_AWS_ELB
+        );
+
+        $middleware->append(TrustCloudflareHeaders::class);
+
         $middleware->prepend(ValidateUploadLimits::class);
 
         $middleware->encryptCookies(except: [
@@ -48,6 +64,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->appendToGroup('api', [
             ResolveOptionalApiUser::class,
             UpdateUserLastSeen::class,
+            RecordUserDailyActivity::class,
             SetPageContext::class,
         ]);
 
@@ -57,9 +74,12 @@ return Application::configure(basePath: dirname(__DIR__))
             'admin.permission' => EnsureAdminPermission::class,
             'subscribed' => EnsureActiveSubscription::class,
             'terms.accepted' => EnsureTermsAccepted::class,
+            'record.activity' => RecordUserDailyActivity::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        Integration::handles($exceptions);
+
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->is('admin/*') || $request->expectsJson(),
         );

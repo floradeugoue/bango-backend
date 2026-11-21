@@ -25,16 +25,16 @@ class PaymentFailedReminderNotification extends Notification implements ShouldQu
      */
     public function toMail(object $notifiable): MailMessage
     {
-        $productName = $this->subscription->product->name ?? 'votre abonnement';
+        $productName = $this->subscription->product->name ?? 'ton abonnement';
         $amount = number_format((float) $this->failedTransaction->total_amount, 0, ',', ' ').' '.$this->failedTransaction->currency;
 
         return (new MailMessage)
-            ->subject("Échec de paiement : Relance pour votre abonnement {$productName}")
+            ->subject("Échec de paiement : Relance pour ton abonnement {$productName}")
             ->greeting("Bonjour {$notifiable->name},")
             ->line("Une tentative de paiement de {$amount} pour {$productName} n'a pas pu aboutir.")
-            ->line('Pour éviter la suspension de votre badge et de vos avantages, nous vous invitons à réitérer votre paiement via le parcours de renouvellement manuel.')
+            ->line('Pour éviter la suspension de ton badge et de tes avantages, nous t\'invitons à réitérer ton paiement via le parcours de renouvellement manuel.')
             ->action('Régulariser mon abonnement', url("/subscriptions/{$this->subscription->id}/renewal"))
-            ->line("Aucun montant n'a été prélevé sur votre compte.");
+            ->line("Aucun montant n'a été prélevé sur ton compte.");
     }
 
     /**

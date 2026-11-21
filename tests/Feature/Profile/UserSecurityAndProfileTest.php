@@ -126,8 +126,8 @@ it('sends an email when requesting email change', function () {
 it('allows updating bio and detailed location with city and neighbourhood', function () {
     $currency = Currency::create(['name' => 'Franc CFA', 'code' => 'XAF']);
     $country = Country::create(['name' => 'Cameroun', 'code' => 'CM', 'iso2' => 'CM', 'iso3' => 'CMR', 'currency_id' => $currency->id]);
-    $city = City::create(['name' => 'Douala', 'slug' => 'douala', 'country_id' => $country->id]);
-    $neighbourhood = Neighbourhood::create(['name' => 'Akwa', 'slug' => 'akwa', 'city_id' => $city->id]);
+    $city = City::create(['name' => 'Douala', 'slug' => 'douala', 'country_id' => $country->id, 'lat' => 4.0511, 'lng' => 9.7679]);
+    $neighbourhood = Neighbourhood::create(['name' => 'Akwa', 'slug' => 'akwa', 'city_id' => $city->id, 'lat' => 4.0520, 'lng' => 9.7010]);
 
     $user = User::factory()->create();
     Passport::actingAs($user);
@@ -136,11 +136,14 @@ it('allows updating bio and detailed location with city and neighbourhood', func
     $bioResponse = putJson('/api/profile/bio', ['bio' => 'Nouvelle bio utilisateur']);
     $bioResponse->assertStatus(200)->assertJson(['success' => true]);
 
-    // Update location
+    // Update location (with geolocation proof within 3 km of Akwa)
     $locResponse = putJson('/api/profile/location', [
         'countryCode' => 'CM',
         'cityId' => $city->id,
         'neighbourhoodId' => $neighbourhood->id,
+        'latitude' => 4.0525,
+        'longitude' => 9.7015,
+        'accuracy' => 15,
     ]);
     $locResponse->assertStatus(200)->assertJson(['success' => true]);
 
@@ -148,6 +151,7 @@ it('allows updating bio and detailed location with city and neighbourhood', func
     expect($user->bio)->toBe('Nouvelle bio utilisateur');
     expect($user->city_id)->toBe($city->id);
     expect($user->neighbourhood_id)->toBe($neighbourhood->id);
+    expect($user->neighbourhood_verified_at)->not->toBeNull();
 });
 
 it('allows user to disconnect a specific session device', function () {

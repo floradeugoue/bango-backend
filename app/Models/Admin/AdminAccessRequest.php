@@ -13,6 +13,8 @@ class AdminAccessRequest extends Model
 
     protected $table = 'admin_access_requests';
 
+    protected $appends = ['reference'];
+
     protected $fillable = [
         'first_name',
         'last_name',
@@ -40,5 +42,10 @@ class AdminAccessRequest extends Model
     public function reviewer(): BelongsTo
     {
         return $this->belongsTo(User::class, 'reviewed_by');
+    }
+
+    public function getReferenceAttribute(): string
+    {
+        return "ACC-{$this->id}";
     }
 }

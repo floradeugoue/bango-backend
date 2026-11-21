@@ -240,15 +240,43 @@ class ProspectVisitController extends Controller
     {
         $reservation = VisitReservation::findOrFail($id);
 
+        $refundMethod = $request->validated('refund_method')
+            ?: ($request->boolean('refund_to_original_method') ? 'original_payment_method' : null);
+
         $cancelled = $this->reservationService->cancelVisit(
             reservation: $reservation,
             actor: $request->user(),
-            reason: $request->validated('reason')
+            reason: $request->validated('reason'),
+            refundMethod: $refundMethod
         );
 
         return response()->json([
             'message' => 'Visite annulée avec succès.',
             'data' => new VisitReservationResource($cancelled),
+        ]);
+    }
+
+    /**
+     * Demander le remboursement en argent sur le moyen de paiement d'origine d'une visite annulée/déclinée.
+     * POST /api/visits/{id}/refund-to-source
+     */
+    public function refundToSource(Request $request, string $id): JsonResponse
+    {
+        $reservation = VisitReservation::findOrFail($id);
+
+        $validated = $request->validate([
+            'phone' => ['nullable', 'string', 'max:20'],
+        ]);
+
+        $refunded = $this->reservationService->requestCashRefundToOriginalMethod(
+            reservation: $reservation,
+            actor: $request->user(),
+            phone: $validated['phone'] ?? null
+        );
+
+        return response()->json([
+            'message' => 'Remboursement en argent exécuté avec succès sur le moyen de paiement d\'origine.',
+            'data' => new VisitReservationResource($refunded),
         ]);
     }
 

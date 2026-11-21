@@ -120,3 +120,40 @@ test('les URLs des sons musicaux se diffusent sans erreur 403 de disque prive', 
     $audioResponse->assertStatus(200)
         ->assertHeader('Content-Type', 'audio/mpeg');
 });
+
+test('les sons affichent le nombre reel de reels sans base_uses invente', function () {
+    $sound = Sound::find('coupe-decale');
+    expect($sound)->not->toBeNull();
+    expect($sound->base_uses)->toBe(0);
+
+    // Initialement 0 vidéo
+    $response = $this->getJson('/api/reels/sounds/coupe-decale');
+    $response->assertStatus(200)
+        ->assertJsonPath('data.uses_count', 0)
+        ->assertJsonPath('data.uses', '0 vidéos');
+
+    // Création de 2 reels utilisant ce son
+    $reel1 = Reel::factory()->create([
+        'user_id' => $this->user->id,
+        'sound_id' => 'coupe-decale',
+        'status' => ReelStatus::Ready,
+    ]);
+    $reel2 = Reel::factory()->create([
+        'user_id' => $this->user->id,
+        'sound_id' => 'coupe-decale',
+        'status' => ReelStatus::Ready,
+    ]);
+
+    $responseWithReels = $this->getJson('/api/reels/sounds/coupe-decale');
+    $responseWithReels->assertStatus(200)
+        ->assertJsonPath('data.uses_count', 2)
+        ->assertJsonPath('data.uses', '2 vidéos');
+
+    // Suppression d'un reel
+    $reel1->delete();
+
+    $responseAfterDelete = $this->getJson('/api/reels/sounds/coupe-decale');
+    $responseAfterDelete->assertStatus(200)
+        ->assertJsonPath('data.uses_count', 1)
+        ->assertJsonPath('data.uses', '1 vidéos');
+});

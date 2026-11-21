@@ -65,4 +65,33 @@ class SecurityController extends Controller
 
         return response()->json(['success' => true]);
     }
+
+    /**
+     * Action « Ce n'était pas moi » (ST-13) :
+     * Déconnecte immédiatement la session spécifiée et révoque le jeton d'accès.
+     */
+    public function notMe(Request $request, ?string $id = null)
+    {
+        $user = $request->user();
+        $sessionId = $id ?: ($request->input('session_id') ?: $request->input('id'));
+
+        if (! $sessionId) {
+            return response()->json(['message' => 'Identifiant de session manquant.'], 422);
+        }
+
+        $token = $user->tokens()->where('id', $sessionId)->first();
+
+        if ($token) {
+            $token->delete();
+        }
+
+        Cache::forget('session.ack.'.$sessionId);
+        Cache::forget('session.meta.'.$sessionId);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Cette session a été déconnectée avec succès.',
+            'revoked_session_id' => (string) $sessionId,
+        ]);
+    }
 }

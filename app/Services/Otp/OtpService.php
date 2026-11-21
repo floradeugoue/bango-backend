@@ -60,7 +60,7 @@ class OtpService
                 $this->emailService->send($identifier, $code);
             } elseif ($channel === OtpChannel::Sms) {
                 Log::info('OTP SMS send requested', ['phone' => $identifier, 'context' => $context]);
-                $this->smsService->send($identifier, "Votre code BANGO est : {$code}. Il expire dans {$ttlMinutes} minutes.");
+                $this->smsService->send($identifier, "Ton code BANGO est : {$code}. Il expire dans {$ttlMinutes} minutes.");
             }
         } catch (Exception $e) {
             Otp::where('identifier', $identifier)

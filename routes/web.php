@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Geo\GenderController;
 use App\Http\Controllers\Search\PeopleSearchController;
+use App\Http\Controllers\Web\PublicAccountDeletionController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -10,6 +11,16 @@ Route::get('/', function () {
 
 // Route publique des genres (AU-07)
 Route::get('/genders', [GenderController::class, 'index'])->name('web.genders');
+
+// Page publique de suppression de compte & conformité Google Play (Suppression des données)
+Route::get('/supprimer-mon-compte', [PublicAccountDeletionController::class, 'show'])->defaults('locale', 'fr')->name('web.account.delete.fr');
+Route::get('/en/delete-account', [PublicAccountDeletionController::class, 'show'])->defaults('locale', 'en')->name('web.account.delete.en');
+Route::post('/supprimer-mon-compte/request-otp', [PublicAccountDeletionController::class, 'requestOtp'])->name('web.account.delete.request-otp');
+Route::post('/en/delete-account/request-otp', [PublicAccountDeletionController::class, 'requestOtp'])->defaults('locale', 'en')->name('web.account.delete.request-otp.en');
+Route::post('/supprimer-mon-compte', [PublicAccountDeletionController::class, 'deleteAccount'])->name('web.account.delete.submit');
+Route::post('/en/delete-account', [PublicAccountDeletionController::class, 'deleteAccount'])->defaults('locale', 'en')->name('web.account.delete.submit.en');
+Route::post('/supprimer-mon-compte/partial-data', [PublicAccountDeletionController::class, 'deletePartialData'])->name('web.account.delete.partial');
+Route::post('/en/delete-account/partial-data', [PublicAccountDeletionController::class, 'deletePartialData'])->defaults('locale', 'en')->name('web.account.delete.partial.en');
 
 // Suggestions d'habitants et voisins (SQ-01, AU-19) - support direct sans préfixe /api
 Route::get('/people/suggestions', [PeopleSearchController::class, 'suggestions'])->middleware('api')->name('web.people.suggestions');

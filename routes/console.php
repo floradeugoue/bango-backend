@@ -241,3 +241,21 @@ Schedule::command('pricing:apply-scheduled')
     ->daily()
     ->withoutOverlapping()
     ->onOneServer();
+
+// --------------------------------------------------------------------------
+// PLANIFICATEUR DE LEVÉE DES SUSPENSIONS ÉCHUES
+// --------------------------------------------------------------------------
+// 15. Levée quotidienne des suspensions temporaires de compte arrivées à échéance
+Schedule::command('users:lift-expired-suspensions')
+    ->daily()
+    ->withoutOverlapping()
+    ->onOneServer();
+
+// --------------------------------------------------------------------------
+// PLANIFICATEUR DES NOTIFICATIONS D'ANNIVERSAIRE (Fuseau du pays du compte)
+// --------------------------------------------------------------------------
+// 16. Envoi quotidien à 9h dans le fuseau du compte des souhaits d'anniversaire et alertes amis réciproques
+Schedule::command('birthdays:notify')
+    ->hourly()
+    ->withoutOverlapping()
+    ->onOneServer();

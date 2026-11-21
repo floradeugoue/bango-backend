@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Subscription;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\Payment\PaymentTransactionResource;
 use App\Http\Resources\SubscriptionResource;
 use App\Models\Subscription\Subscription;
 use App\Models\Subscription\SubscriptionPrice;
@@ -14,6 +15,7 @@ use App\Services\Subscription\SubscriptionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Validation\ValidationException;
 
 class SubscriptionController extends Controller
 {
@@ -263,6 +265,64 @@ class SubscriptionController extends Controller
         return response()->json([
             'success' => true,
             'data' => $calculation,
+        ]);
+    }
+
+    /**
+     * Confirme le changement de formule : encaisse le prorata en crédits BANGO puis bascule l'abonnement.
+     */
+    public function confirmChangePlan(Request $request, int $id, SubscriptionService $service): JsonResponse
+    {
+        $validated = $request->validate([
+            'new_cadence' => ['required', 'string', 'in:monthly,yearly'],
+            'idempotency_key' => ['required', 'string', 'max:128'],
+        ]);
+
+        /** @var User $user */
+        $user = $request->user();
+
+        $subscription = $user->subscriptions()->with('product')->find($id);
+
+        if (! $subscription) {
+            return response()->json(['message' => 'Abonnement introuvable.'], 404);
+        }
+
+        if ($subscription->state !== 'active' || ! $subscription->current_period_end?->isFuture()) {
+            return response()->json([
+                'message' => 'Seul un abonnement actif peut changer de formule.',
+                'error' => 'SUBSCRIPTION_NOT_ACTIVE',
+            ], 422);
+        }
+
+        $newPrice = $subscription->product->activePrices()->where('cadence', $validated['new_cadence'])->first();
+
+        if (! $newPrice) {
+            return response()->json(['message' => 'Le tarif demandé n\'est pas disponible pour cette offre.'], 422);
+        }
+
+        if ($subscription->price_id === $newPrice->id) {
+            return response()->json(['message' => 'Vous êtes déjà sur cette cadence de facturation.'], 422);
+        }
+
+        try {
+            $result = $service->confirmPlanChange($user, $subscription, $newPrice, $validated['idempotency_key']);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'error' => 'INSUFFICIENT_CREDIT',
+                'required' => (int) round((float) $service->calculatePlanChange($subscription, $newPrice)['amount_to_pay_xaf']),
+                'balance' => (int) ($user->creditWallet?->balance ?? 0),
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'subscription' => new SubscriptionResource($result['subscription']),
+                'transaction' => new PaymentTransactionResource($result['transaction']),
+                'calculation' => $result['calculation'],
+                'replayed' => $result['replayed'],
+            ],
         ]);
     }
 

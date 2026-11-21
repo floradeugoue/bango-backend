@@ -7,11 +7,13 @@ use App\Enums\Boost\CampaignStatus;
 use App\Enums\Boost\CreditTransactionType;
 use App\Enums\Listing\ListingStatus;
 use App\Enums\Page\PageStatus;
+use App\Enums\Support\ReportReason;
 use App\Enums\Support\ReportStatus;
 use App\Models\Admin\AdminAuditLog;
 use App\Models\Auth\Role;
 use App\Models\Boost\Campaign;
 use App\Models\Listing\Listing;
+use App\Models\Message\Conversation;
 use App\Models\Message\Message;
 use App\Models\Page\Page;
 use App\Models\Reel\Reel;
@@ -23,10 +25,12 @@ use App\Models\Support\ModerationDecision;
 use App\Models\Support\Report;
 use App\Models\Support\UserAccountSanction;
 use App\Models\User;
+use App\Notifications\Listing\ListingFraudAlertNotification;
 use App\Notifications\Support\ModerationDecisionNotification;
 use App\Services\Boost\CampaignService;
 use App\Services\Boost\CreditWalletService;
 use App\Services\Page\PageService;
+use App\Services\Reel\SoundService;
 use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
@@ -252,11 +256,15 @@ class ModerationQueueService
         }
 
         // 8. Tri contrôlé (liste blanche stricte)
+        // Les dossiers "child_safety" (Mineur en danger) sont PRIORITAIRES et placés en tête de file
         $allowedSorts = ['created_at', 'priority', 'status', 'reference', 'id'];
         $sortBy = in_array($filters['sort_by'] ?? $filters['sort'] ?? '', $allowedSorts, true) ? ($filters['sort_by'] ?? $filters['sort']) : 'created_at';
         $sortDir = strtolower($filters['sort_dir'] ?? $filters['dir'] ?? 'desc') === 'asc' ? 'asc' : 'desc';
 
-        $paginated = $query->orderBy($sortBy, $sortDir)->paginate($perPage);
+        $paginated = $query
+            ->orderByRaw("CASE WHEN reason = 'child_safety' THEN 0 ELSE 1 END")
+            ->orderBy($sortBy, $sortDir)
+            ->paginate($perPage);
 
         // Préchargement groupé des cibles polymorphiques pour éviter les requêtes N+1
         $this->eagerLoadTargets($paginated->getCollection());
@@ -584,9 +592,49 @@ class ModerationQueueService
                         $ruleBody = $metadata['rule_body'] ?? ($lockedReport->reason instanceof ReportReason ? $lockedReport->reason->label() : $justification);
 
                         // 2. Action sur le contenu
+                        if ($content instanceof Listing) {
+                            $reasonVal = $lockedReport->reason instanceof ReportReason ? $lockedReport->reason->value : (string) $lockedReport->reason;
+                            $isFakeListing = in_array($reasonVal, [ReportReason::FakeListing->value, ReportReason::Fraud->value, 'fake_listing', 'fraud'], true)
+                                || str_contains(strtolower($justification), 'fausse annonce')
+                                || str_contains(strtolower($justification), 'fraude')
+                                || str_contains(strtolower($justification), 'arnaque');
+
+                            if ($isFakeListing) {
+                                $content->withdrawn_by_bango = true;
+                                $content->withdrawn_by_bango_at = now();
+                                $content->bango_withdrawal_reason = $justification;
+                                $content->save();
+
+                                // Notifier chaque compte qui a une conversation liée à l'annonce (SUP-18)
+                                $conversations = Conversation::where('listing_id', $content->id)->with('users')->get();
+                                foreach ($conversations as $conversation) {
+                                    foreach ($conversation->users as $participant) {
+                                        if ($participant->id !== $content->owner_id) {
+                                            try {
+                                                $participant->notify(new ListingFraudAlertNotification($content, (string) $conversation->id));
+                                            } catch (\Throwable $e) {
+                                                Log::warning("Échec notification alerte fausse annonce pour l'utilisateur {$participant->id} : ".$e->getMessage());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         if ($action === 'remove') {
                             if (! ($content instanceof User) && ! ($content instanceof Page) && method_exists($content, 'delete')) {
                                 $content->delete();
+                            }
+
+                            if ($content instanceof Reel) {
+                                $reasonVal = $lockedReport->reason instanceof ReportReason ? $lockedReport->reason->value : (string) $lockedReport->reason;
+                                $isCopyright = ($reasonVal === ReportReason::Copyright->value)
+                                    || str_contains(strtolower($justification), 'copyright')
+                                    || str_contains(strtolower($justification), 'droit');
+
+                                if ($isCopyright) {
+                                    app(SoundService::class)->handleOriginalSoundCopyrightInfringement($content, $operator, $justification);
+                                }
                             }
                         } else {
                             if ($content instanceof Listing) {

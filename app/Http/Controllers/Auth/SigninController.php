@@ -61,7 +61,18 @@ class SigninController extends Controller
             return response()->json(['kind' => 'blocked'], 403);
         }
 
-        if ($user->status === 'suspended' || $user->status === 'deleted') {
+        // Si la suspension temporaire est échue, on remet le statut à active et on laisse entrer
+        if ($user->status === 'suspended') {
+            if ($user->suspended_until !== null && $user->suspended_until->isPast()) {
+                $user->liftExpiredSuspension();
+            } else {
+                return response()->json(['kind' => 'suspended'], 403);
+            }
+        } elseif ($user->isSuspended()) {
+            return response()->json(['kind' => 'suspended'], 403);
+        }
+
+        if ($user->status === 'deleted') {
             return response()->json(['kind' => $user->status], 403);
         }
 

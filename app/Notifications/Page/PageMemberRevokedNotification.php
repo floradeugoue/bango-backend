@@ -30,7 +30,7 @@ class PageMemberRevokedNotification extends Notification implements ShouldQueue
 
         return (new MailMessage)
             ->subject("Révocation d'accès à la page {$pageName}")
-            ->line("Vos accès et droits de gestion sur la page {$pageName} ont été révoqués.");
+            ->line("Tes accès et droits de gestion sur la page {$pageName} ont été révoqués.");
     }
 
     /**
@@ -42,7 +42,6 @@ class PageMemberRevokedNotification extends Notification implements ShouldQueue
 
         return [
             'type' => 'page_member_revoked',
-            'page_id' => $this->member->page_id,
             'page_name' => $this->member->page->name ?? 'Page',
             'member_id' => $this->member->id,
             'title' => trans('notifications.page_member_revoked.title', [], $locale),

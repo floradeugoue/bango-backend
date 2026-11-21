@@ -61,6 +61,8 @@ class AdminInvitationController extends Controller
             default => ucfirst((string) $invitation->role),
         };
 
+        $isTotpRequired = User::roleRequiresTwoFactor($invitation->role);
+
         return response()->json([
             'status' => 'valid',
             'is_valid' => true,
@@ -68,6 +70,8 @@ class AdminInvitationController extends Controller
             'name' => $name,
             'role' => $invitation->role,
             'roleTitle' => $roleTitle,
+            'two_factor_required' => $isTotpRequired,
+            'twoFactorRequired' => $isTotpRequired,
             'city' => 'Dakar',
             'invitedBy' => $invitation->inviter?->name ?? 'Direction BANGO',
             'expiresAt' => $invitation->expires_at->toIso8601String(),
@@ -235,6 +239,15 @@ class AdminInvitationController extends Controller
             }
 
             $hasTotp = ! empty($pending['totp_verified']) && ! empty($pending['totp_secret']);
+
+            if (User::roleRequiresTwoFactor($role->slug) && ! $hasTotp) {
+                return response()->json([
+                    'code' => 'totp_required',
+                    'message' => 'La configuration de la double authentification (TOTP) est obligatoire pour ce rôle sensible.',
+                    'two_factor_required' => true,
+                    'success' => false,
+                ], 422);
+            }
 
             $userData = [
                 'password' => Hash::make((string) $password),

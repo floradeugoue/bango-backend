@@ -22,6 +22,8 @@ class PrivacyController extends Controller
         'ads_decided_at' => null,
         'showNeighbourhood' => true,
         'showFollowing' => true,
+        'birthday_visibility' => 'none',
+        'birthdayVisibility' => 'none',
     ];
 
     /**
@@ -35,6 +37,8 @@ class PrivacyController extends Controller
         $saved = $user->privacy_settings ?? [];
         $settings = array_merge(self::DEFAULT_PRIVACY, $saved, [
             'privateAccount' => (bool) $user->is_private,
+            'birthday_visibility' => $user->birthday_visibility ?? 'none',
+            'birthdayVisibility' => $user->birthday_visibility ?? 'none',
         ]);
 
         return response()->json($settings);
@@ -56,6 +60,8 @@ class PrivacyController extends Controller
             'ads_personalization' => ['sometimes', 'boolean'],
             'showNeighbourhood' => ['sometimes', 'boolean'],
             'showFollowing' => ['sometimes', 'boolean'],
+            'birthday_visibility' => ['sometimes', 'in:none,mutuals'],
+            'birthdayVisibility' => ['sometimes', 'in:none,mutuals'],
         ]);
 
         /** @var User $user */
@@ -72,6 +78,13 @@ class PrivacyController extends Controller
         if ($request->has('privateAccount')) {
             $user->is_private = $request->boolean('privateAccount');
             $updatedSettings['privateAccount'] = $user->is_private;
+        }
+
+        $visibility = $request->input('birthday_visibility') ?? $request->input('birthdayVisibility');
+        if ($visibility !== null) {
+            $user->birthday_visibility = $visibility;
+            $updatedSettings['birthday_visibility'] = $visibility;
+            $updatedSettings['birthdayVisibility'] = $visibility;
         }
 
         $user->privacy_settings = $updatedSettings;

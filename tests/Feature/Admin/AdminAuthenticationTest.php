@@ -17,7 +17,7 @@ beforeEach(function () {
 });
 
 it('issues a 2FA challenge upon valid operator credentials without granting privileged session', function () {
-    $role = Role::where('slug', 'moderation')->first();
+    $role = Role::where('slug', 'verification')->first();
     $operator = User::factory()->create([
         'email' => 'mod@bango.app',
         'password' => Hash::make('StrongPassword123!'),
@@ -150,7 +150,7 @@ it('validates 2FA and establishes authenticated session with HttpOnly and CSRF c
         'challenge_token' => $challengeToken,
         'code' => '123456',
     ]);
-    $fakeCodeResponse->assertStatus(422);
+    $fakeCodeResponse->assertStatus(401);
 
     // 2. Validation 2FA avec le vrai code TOTP calculé cryptographiquement
     $validCode = $totpService->calculateTotpForStep($rawSecret, (int) floor(time() / 30));
@@ -180,7 +180,7 @@ it('validates 2FA and establishes authenticated session with HttpOnly and CSRF c
         'challenge_token' => $challengeToken,
         'code' => $validCode,
     ]);
-    $replayResponse->assertStatus(400);
+    $replayResponse->assertStatus(401);
 });
 
 it('allows 2FA recovery via single-use backup code', function () {
@@ -228,5 +228,5 @@ it('allows 2FA recovery via single-use backup code', function () {
         'challenge_token' => $newChallengeToken,
         'recovery_code' => $validRecoveryCode,
     ]);
-    $reuseResponse->assertStatus(422);
+    $reuseResponse->assertStatus(401);
 });

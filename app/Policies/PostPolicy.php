@@ -59,10 +59,15 @@ class PostPolicy
 
         // Audience 'neighbourhood'
         if ($post->audience === PostAudience::Neighbourhood || $post->audience === 'neighbourhood') {
-            if ($post->place_neighbourhood && $user->neighbourhood && $post->place_neighbourhood === $user->neighbourhood) {
+            if (
+                $post->place_neighbourhood
+                && $user->hasVerifiedNeighbourhood()
+                && $post->place_neighbourhood === $user->neighbourhoodName()
+                && (! $post->place_city || ! $user->cityName() || $post->place_city === $user->cityName())
+            ) {
                 return true;
             }
-            if ($post->place_city && $user->city && $post->place_city === $user->city) {
+            if (! $post->place_neighbourhood && $post->place_city && $user->cityName() && $post->place_city === $user->cityName()) {
                 return true;
             }
         }

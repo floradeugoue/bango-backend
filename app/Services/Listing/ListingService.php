@@ -20,6 +20,7 @@ use App\Models\User;
 use App\Models\Visit\VisitSlot;
 use App\Rules\ListingCurrencyRule;
 use App\Services\Admin\AdminListingControlService;
+use App\Services\Admin\AutomatedTextFilterService;
 use App\Services\Media\MediaStorageService;
 use App\Services\Subscription\BadgeResolutionService;
 use App\Services\Visit\VisitSlotService;
@@ -511,6 +512,12 @@ class ListingService
 
             $listing->save();
 
+            // Filtre textuel automatique (anti-fraude, anti-discrimination, modération)
+            $textToScan = trim(($listing->title ?? '').' '.($listing->description ?? ''));
+            if ($textToScan !== '') {
+                app(AutomatedTextFilterService::class)->scanText($textToScan, 'listing', $listing->id, $user);
+            }
+
             // Si une vidéo existe déjà rattachée à cette annonce, synchroniser également ses métadonnées
             if (! empty($videoSettings)) {
                 $mainVideo = $listing->videos()->first();
@@ -558,7 +565,7 @@ class ListingService
             }
         }
 
-        return DB::transaction(function () use ($listing, $patch, $isOwner) {
+        return DB::transaction(function () use ($listing, $patch, $isOwner, $actor) {
             if (isset($patch['title'])) {
                 $listing->title = mb_substr(trim((string) $patch['title']), 0, 100);
             }
@@ -629,6 +636,12 @@ class ListingService
 
             $listing->attributes = $this->composeAttributes($listing);
             $listing->save();
+
+            // Filtre textuel automatique (anti-fraude, anti-discrimination, modération)
+            $textToScan = trim(($listing->title ?? '').' '.($listing->description ?? ''));
+            if ($textToScan !== '') {
+                app(AutomatedTextFilterService::class)->scanText($textToScan, 'listing', $listing->id, $actor);
+            }
 
             if (! empty($videoSettings)) {
                 $mainVideo = $listing->videos()->first();

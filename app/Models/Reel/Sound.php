@@ -96,11 +96,11 @@ class Sound extends Model
     }
 
     /**
-     * Total calculé des utilisations (base_uses + uses_count).
+     * Total calculé des utilisations (nombre réel de reels).
      */
     public function getTotalUsesAttribute(): int
     {
-        return $this->base_uses + $this->uses_count;
+        return (int) ($this->reels_count ?? $this->reels()->count());
     }
 
     /**

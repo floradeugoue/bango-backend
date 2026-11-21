@@ -84,15 +84,27 @@ class PostSearchService
                     $sub->where('audience', PostAudience::Neighbourhood)
                         ->where(function ($placeQuery) use ($viewer) {
                             $hasCondition = false;
-                            if ($viewer->neighbourhood) {
-                                $placeQuery->where('posts.place_neighbourhood', $viewer->neighbourhood);
+                            $viewerNeighbourhood = $viewer->hasVerifiedNeighbourhood() ? $viewer->neighbourhoodName() : null;
+                            $viewerCity = $viewer->cityName();
+
+                            if ($viewerNeighbourhood) {
+                                $placeQuery->where(function ($nbQuery) use ($viewerNeighbourhood, $viewerCity) {
+                                    $nbQuery->where('posts.place_neighbourhood', $viewerNeighbourhood);
+                                    if ($viewerCity) {
+                                        $nbQuery->where('posts.place_city', $viewerCity);
+                                    }
+                                });
                                 $hasCondition = true;
                             }
-                            if ($viewer->city) {
+                            if ($viewerCity) {
+                                $cityConstraint = function ($cityQuery) use ($viewerCity) {
+                                    $cityQuery->where(fn ($empty) => $empty->whereNull('posts.place_neighbourhood')->orWhere('posts.place_neighbourhood', ''))
+                                        ->where('posts.place_city', $viewerCity);
+                                };
                                 if ($hasCondition) {
-                                    $placeQuery->orWhere('posts.place_city', $viewer->city);
+                                    $placeQuery->orWhere($cityConstraint);
                                 } else {
-                                    $placeQuery->where('posts.place_city', $viewer->city);
+                                    $placeQuery->where($cityConstraint);
                                 }
                                 $hasCondition = true;
                             }

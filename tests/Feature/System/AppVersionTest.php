@@ -10,7 +10,7 @@ beforeEach(function () {
     Config::set('system.versions.android', [
         'min_version' => '1.5.0',
         'latest_version' => '2.0.0',
-        'store_url' => 'https://play.google.com/store/apps/details?id=com.bango.app',
+        'store_url' => 'https://play.google.com/store/apps/details?id=com.bangoapp.app',
     ]);
 
     Config::set('system.versions.ios', [
@@ -30,7 +30,7 @@ test('it returns version requirements for android with default platform', functi
                 'min_version' => '1.5.0',
                 'latest_version' => '2.0.0',
                 'force_update' => false,
-                'store_url' => 'https://play.google.com/store/apps/details?id=com.bango.app',
+                'store_url' => 'https://play.google.com/store/apps/details?id=com.bangoapp.app',
             ],
         ]);
 });
@@ -167,4 +167,21 @@ test('it returns incident_banner when set in system configuration and null when 
     $resExpired->assertOk()
         ->assertJsonPath('data.incident_banner', null)
         ->assertJsonPath('incident_banner', null);
+});
+
+test('config/system.php and config/services.php expose com.bangoapp.app, bangoapp.com and 1.0.0 defaults', function () {
+    $systemConfig = require base_path('config/system.php');
+    $servicesConfig = require base_path('config/services.php');
+
+    expect($systemConfig['versions']['android']['min_version'])->toBe('1.0.0')
+        ->and($systemConfig['versions']['android']['latest_version'])->toBe('1.0.0')
+        ->and($systemConfig['versions']['android']['store_url'])->toBe('https://play.google.com/store/apps/details?id=com.bangoapp.app')
+        ->and($systemConfig['versions']['ios']['min_version'])->toBe('1.0.0')
+        ->and($systemConfig['versions']['ios']['latest_version'])->toBe('1.0.0')
+        ->and($systemConfig['versions']['ios']['store_url'])->toBe('https://apps.apple.com/app/bango/id000000000')
+        ->and($systemConfig['versions']['web']['min_version'])->toBe('1.0.0')
+        ->and($systemConfig['versions']['web']['latest_version'])->toBe('1.0.0')
+        ->and($systemConfig['versions']['web']['store_url'])->toBe('https://bangoapp.com')
+        ->and($servicesConfig['apple']['client_id'])->toBe('com.bangoapp.app')
+        ->and($servicesConfig['apple']['client_ids'])->toContain('com.bangoapp.app');
 });

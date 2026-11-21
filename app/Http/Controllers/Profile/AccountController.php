@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Profile;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Notifications\Auth\AccountDeletionRequestedNotification;
+use App\Services\Boost\CreditWalletService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 
@@ -52,15 +54,34 @@ class AccountController extends Controller
             return response()->json(['kind' => 'bad-confirmation'], 400);
         }
 
+        // Remboursement automatique du solde de crédit BANGO en argent sur le moyen de paiement d'origine avant suppression
+        $creditRefund = app(CreditWalletService::class)->refundBalanceBeforeAccountDeletion(
+            user: $user,
+            phone: $request->input('phone'),
+            operator: $request->input('operator')
+        );
+
         // Set deletion date and save before soft deleting (or update directly)
-        $user->scheduled_for_deletion_at = now()->addDays(30);
+        $scheduledDeletionDate = now()->addDays(30);
+        $user->scheduled_for_deletion_at = $scheduledDeletionDate;
         $user->save();
 
         // Soft deletes the user
         $user->delete();
         $user->tokens()->delete();
 
-        return response()->json(['success' => true]);
+        if (! empty($user->email)) {
+            try {
+                $user->notify(new AccountDeletionRequestedNotification($scheduledDeletionDate, $user->locale ?? 'fr'));
+            } catch (\Throwable) {
+                // Ne pas bloquer la réponse en cas d'erreur de transport SMTP
+            }
+        }
+
+        return response()->json([
+            'success' => true,
+            'credit_refund' => $creditRefund,
+        ]);
     }
 
     /**

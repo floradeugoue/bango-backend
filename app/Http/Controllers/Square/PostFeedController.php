@@ -15,13 +15,48 @@ class PostFeedController extends Controller
      */
     public function index(Request $request, PostFeedService $service): AnonymousResourceCollection
     {
-        $feed = $service->getFeed($request->user(), [
-            'tab' => $request->query('tab', 'discover'),
+        $tab = (string) $request->query('tab', 'discover');
+        $user = $request->user();
+
+        $feed = $service->getFeed($user, [
+            'tab' => $tab,
             'author_id' => $request->query('author_id') ? (int) $request->query('author_id') : null,
             'archived' => $request->boolean('archived'),
             'per_page' => $request->query('per_page') ? (int) $request->query('per_page') : 15,
         ]);
 
-        return PostResource::collection($feed);
+        $collection = PostResource::collection($feed);
+
+        $activePage = $request->attributes->get('active_page');
+        if ($tab === 'neighbourhood' && $user && ! $activePage && ! $request->query('author_id')) {
+            $isVerified = $user->hasVerifiedNeighbourhood();
+            $declaredNeighbourhood = $user->neighbourhoodName();
+            $declaredCity = $user->cityName();
+            $locale = $user->locale ?? 'fr';
+
+            $message = null;
+            if (! $isVerified) {
+                $bodyKey = $declaredNeighbourhood
+                    ? 'notifications.neighbourhood_confirmation_required.body_with_place'
+                    : 'notifications.neighbourhood_confirmation_required.body';
+                $message = trans($bodyKey, [
+                    'neighbourhood' => $declaredNeighbourhood ?? '',
+                    'city' => $declaredCity ?? '',
+                ], $locale);
+            }
+
+            $collection->additional([
+                'neighbourhood_verification' => [
+                    'required' => ! $isVerified,
+                    'code' => $isVerified ? null : 'NEIGHBOURHOOD_CONFIRMATION_REQUIRED',
+                    'has_declared_neighbourhood' => $declaredNeighbourhood !== null,
+                    'city' => $declaredCity,
+                    'neighbourhood' => $declaredNeighbourhood,
+                    'message' => $message,
+                ],
+            ]);
+        }
+
+        return $collection;
     }
 }

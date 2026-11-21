@@ -5,6 +5,7 @@ namespace App\Http\Resources\Reel;
 use App\Enums\Reel\ReelReactionType;
 use App\Models\Page\Page;
 use App\Models\Reel\Reel;
+use App\Models\Reel\Sound;
 use App\Models\User;
 use App\Services\Media\MediaStorageService;
 use Illuminate\Http\Request;
@@ -65,16 +66,20 @@ class ReelResource extends JsonResource
         $authorDisplayName = $page ? $page->name : ($author?->display_name ?: ($author?->name ?? 'Utilisateur'));
 
         $soundLabel = 'Son original';
-        $soundRemoved = false;
+        $soundRemoved = (bool) ($this->is_muted ?? false);
         if ($this->sound) {
             if ($this->sound->is_original) {
                 $soundLabel = "Son original · {$authorDisplayName}";
             } else {
                 $soundLabel = "{$this->sound->artist} · {$this->sound->title}";
             }
-            $soundRemoved = (bool) $this->sound->is_removed;
+            $soundRemoved = $soundRemoved || (bool) $this->sound->is_removed;
         } elseif ($this->sound_id && str_starts_with($this->sound_id, 'orig:')) {
             $soundLabel = "Son original · {$authorDisplayName}";
+            $soundModel = Sound::find($this->sound_id);
+            if ($soundModel && $soundModel->is_removed) {
+                $soundRemoved = true;
+            }
         }
 
         // Formatage de la date de publication
@@ -156,6 +161,8 @@ class ReelResource extends JsonResource
             'sound_id' => $this->sound_id ?? "orig:{$this->id}",
             'soundRemoved' => $soundRemoved,
             'sound_removed' => $soundRemoved,
+            'is_muted' => (bool) ($this->is_muted || $soundRemoved),
+            'isMuted' => (bool) ($this->is_muted || $soundRemoved),
             'publishedAt' => $publishedAtFormatted,
             'published_at' => $this->published_at?->toIso8601String(),
             'captions' => $this->subtitles,

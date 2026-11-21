@@ -44,4 +44,16 @@ class UserFactory extends Factory
             'email_verified_at' => null,
         ]);
     }
+
+    /**
+     * Configure le compte avec un quartier prouvé par sa position.
+     */
+    public function withVerifiedNeighbourhood(string $city = 'Douala', string $neighbourhood = 'Bonapriso'): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'city' => $city,
+            'neighbourhood' => $neighbourhood,
+            'neighbourhood_verified_at' => now(),
+        ]);
+    }
 }

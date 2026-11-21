@@ -26,10 +26,10 @@ class SoundResource extends JsonResource
             $isFavourite = $this->favouritedBy()->where('users.id', $user->id)->exists();
         }
 
-        $totalUses = $this->base_uses + $this->uses_count;
-        $usesLabel = $totalUses >= 1000
-            ? round($totalUses / 1000, 1).' k vidéos'
-            : "{$totalUses} vidéos";
+        $realUses = $this->reels_count ?? $this->reels()->count();
+        $usesLabel = $realUses >= 1000
+            ? round($realUses / 1000, 1).' k vidéos'
+            : "{$realUses} vidéos";
 
         return [
             'id' => $this->id,
@@ -40,7 +40,8 @@ class SoundResource extends JsonResource
             'duration' => $this->duration_seconds,
             'duration_seconds' => $this->duration_seconds,
             'uses' => $usesLabel,
-            'uses_count' => $totalUses,
+            'uses_count' => (int) $realUses,
+            'base_uses' => 0,
             'original' => (bool) $this->is_original,
             'original_reel_id' => $this->original_reel_id,
             'available' => ! $this->is_removed && (bool) $this->is_published && $this->rights_status === 'verified',

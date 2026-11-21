@@ -46,8 +46,9 @@ class AdminSoundService
             ->when(isset($filters['is_published']), fn (Builder $q) => $q->where('is_published', (bool) $filters['is_published']))
             ->when(isset($filters['is_removed']), fn (Builder $q) => $q->where('is_removed', (bool) $filters['is_removed']))
             ->when(isset($filters['is_original']), fn (Builder $q) => $q->where('is_original', (bool) $filters['is_original']))
+            ->withCount('reels')
             ->when(($filters['sort_by'] ?? 'latest') === 'popular', function (Builder $q) {
-                $q->orderByRaw('(base_uses + uses_count) DESC');
+                $q->orderByDesc('reels_count');
             }, function (Builder $q) {
                 $q->orderByDesc('created_at');
             })

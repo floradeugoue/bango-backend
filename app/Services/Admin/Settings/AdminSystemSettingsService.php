@@ -4,13 +4,13 @@ namespace App\Services\Admin\Settings;
 
 use App\Models\Admin\AdminAuditLog;
 use App\Models\Admin\SystemConfiguration;
+use App\Models\Boost\Campaign;
 use App\Models\Geo\City;
 use App\Models\Geo\Neighbourhood;
 use App\Models\Geo\Operator;
 use App\Models\Legal\LegalDocument;
 use App\Models\Legal\TermsAcceptance;
 use App\Models\Listing\Listing;
-use App\Models\Payment\PaymentTransaction;
 use App\Models\Profile\Interest;
 use App\Models\Subscription\PricingChangeProposal;
 use App\Models\Subscription\Subscription;
@@ -749,7 +749,7 @@ class AdminSystemSettingsService
 
         $totalUsers = User::count();
         $totalBadged = User::whereNotNull('badge')->count() ?: $totalUsers;
-        $totalBoostBuyers = PaymentTransaction::where('purpose', 'boost')->distinct('user_id')->count('user_id') ?: $totalUsers;
+        $totalBoostBuyers = Campaign::distinct('user_id')->count('user_id') ?: $totalUsers;
 
         $acceptances = TermsAcceptance::select(['user_id', 'legal_document_id', 'document_slug', 'version'])->get();
         $usersWithVersion = User::whereNotNull('accepted_terms_version')->pluck('accepted_terms_version', 'id');

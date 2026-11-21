@@ -26,6 +26,7 @@ class StoreDoubleChargeClaimRequest extends FormRequest
             'claimant_phone' => ['required', 'string', 'regex:/^[0-9+\s]{6,20}$/'],
             'reason' => ['required', 'string', 'min:5', 'max:2000'],
             'currency' => ['nullable', 'string', 'size:3'],
+            'refund_method' => ['nullable', 'string', 'in:original_payment_method,bango_credit,cash,mobile_money'],
         ];
     }
 

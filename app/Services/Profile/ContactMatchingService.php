@@ -8,12 +8,15 @@ use Illuminate\Validation\ValidationException;
 
 class ContactMatchingService
 {
-    public const MAX_BATCH_SIZE = 500;
+    /**
+     * Limite maximale d'empreintes par appel (2 000 entrées pour couvrir un carnet complet tout en bloquant l'énumération).
+     */
+    public const MAX_BATCH_SIZE = 2000;
 
     /**
      * Compute legacy JavaScript 32-bit polynomial hash for mobile client compatibility.
      *
-     * Matches `let hash = 0; for (let i = 0; i < digits.length; i++) hash = (hash * 31 + charCode) | 0; return hash.toString(16);`
+     * @deprecated Empreinte 32 bits non sécurisée (retrouvable en quelques secondes). Remplacée par SHA-256 des 8 derniers chiffres.
      */
     public static function computeLegacyJsHash(string $digits): string
     {
@@ -55,10 +58,16 @@ class ContactMatchingService
             $last8 = substr($digits, -8);
             $signatures[] = $last8;
             $signatures[] = hash('sha256', $last8);
-            $signatures[] = self::computeLegacyJsHash($last8);
+
+            // Empreinte 32-bit legacy retirée des signatures par défaut (facilement réversible).
+            if (config('services.contact_matching.enable_legacy_hash', false)) {
+                $signatures[] = self::computeLegacyJsHash($last8);
+            }
         }
 
-        $signatures[] = self::computeLegacyJsHash($digits);
+        if (config('services.contact_matching.enable_legacy_hash', false)) {
+            $signatures[] = self::computeLegacyJsHash($digits);
+        }
 
         if (! empty($salt)) {
             $signatures[] = hash_hmac('sha256', $digits, $salt);
