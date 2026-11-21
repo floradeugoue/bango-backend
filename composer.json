@@ -15,7 +15,8 @@
         "laravel/passport": "*",
         "laravel/tinker": "^3.0",
         "league/flysystem-aws-s3-v3": "^3.0",
-        "resend/resend-laravel": "^1.6"
+        "resend/resend-laravel": "^1.6",
+        "sentry/sentry-laravel": "^4.31"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",

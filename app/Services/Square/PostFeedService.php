@@ -79,14 +79,15 @@ class PostFeedService
                     if ($isFollowing) {
                         $q->orWhere('audience', PostAudience::Followers->value);
                     }
-                    if ($user && ($user->neighbourhood || $user->city)) {
-                        $q->orWhere(function (Builder $loc) use ($user) {
-                            $loc->where('audience', PostAudience::Neighbourhood->value);
-                            if ($user->neighbourhood) {
-                                $loc->where('place_neighbourhood', $user->neighbourhood);
-                            }
-                            if ($user->city) {
-                                $loc->where('place_city', $user->city);
+                    if ($user && $user->hasVerifiedNeighbourhood()) {
+                        $userNeighbourhood = $user->neighbourhoodName();
+                        $userCity = $user->cityName();
+
+                        $q->orWhere(function (Builder $loc) use ($userNeighbourhood, $userCity) {
+                            $loc->where('audience', PostAudience::Neighbourhood->value)
+                                ->where('place_neighbourhood', $userNeighbourhood);
+                            if ($userCity) {
+                                $loc->where('place_city', $userCity);
                             }
                         });
                     }
@@ -103,6 +104,8 @@ class PostFeedService
         // Flux général : masquer les posts archivés
         $query->where('is_archived', false);
 
+        $skipAdInjection = false;
+
         if ($tab === 'following' && $user) {
             // Uniquement les créateurs suivis + soi-même
             $followingIds = Follow::where('follower_id', $user->id)
@@ -111,14 +114,24 @@ class PostFeedService
                 ->all();
 
             $query->whereIn('user_id', $followingIds);
-        } elseif ($tab === 'neighbourhood' && $user) {
+        } elseif ($tab === 'neighbourhood') {
             $activePage = request()?->attributes?->get('active_page');
-            // Mon quartier uniquement (et la même ville) ; à défaut de lieu sur la publication, le quartier de la page ou du profil de l'auteur
-            $neighbourhood = $activePage ? $activePage->neighbourhood : $user->getRawOriginal('neighbourhood');
-            $city = $activePage ? $activePage->city : $user->getRawOriginal('city');
+            // Mon quartier uniquement (et la même ville) ; à défaut de lieu sur la publication, le quartier de la page ou du profil vérifié de l'auteur.
+            // Seuls les comptes dont le quartier est prouvé (neighbourhood_verified_at) sont pris en compte.
+            if ($activePage) {
+                $neighbourhood = $activePage->neighbourhood;
+                $city = $activePage->city;
+            } elseif ($user && $user->hasVerifiedNeighbourhood()) {
+                $neighbourhood = $user->neighbourhoodName();
+                $city = $user->cityName();
+            } else {
+                $neighbourhood = null;
+                $city = null;
+            }
 
             if (! $neighbourhood) {
                 $query->whereRaw('1 = 0');
+                $skipAdInjection = true;
             } else {
                 $query->where(function (Builder $q) use ($neighbourhood, $city) {
                     $q->where(function (Builder $placed) use ($neighbourhood, $city) {
@@ -129,7 +142,8 @@ class PostFeedService
                     })->orWhere(function (Builder $unplaced) use ($neighbourhood, $city) {
                         $unplaced->where(fn (Builder $empty) => $empty->whereNull('place_neighbourhood')->orWhere('place_neighbourhood', ''))
                             ->whereHas('user', function (Builder $author) use ($neighbourhood, $city) {
-                                $author->where('neighbourhood', $neighbourhood);
+                                $author->withVerifiedNeighbourhood()
+                                    ->where('neighbourhood', $neighbourhood);
                                 if ($city) {
                                     $author->where('city', $city);
                                 }
@@ -139,7 +153,7 @@ class PostFeedService
             }
         } elseif ($tab === 'city' && $user) {
             // Toute ma ville : lieu de la publication, ou ville du profil de l'auteur à défaut de lieu
-            $city = $user->getRawOriginal('city');
+            $city = $user->cityName();
 
             if (! $city) {
                 $query->whereRaw('1 = 0');
@@ -167,8 +181,8 @@ class PostFeedService
         $policy = app(PostPolicy::class);
         $paginator->setCollection($paginator->getCollection()->filter(fn ($post) => $policy->view($user, $post))->values());
 
-        // Injection publicitaire BO (onglets découverte ou neighbourhood, exclusion des profils auteurs)
-        if (! $authorId && $tab !== 'following') {
+        // Injection publicitaire BO (onglets découverte ou neighbourhood vérifié, exclusion des profils auteurs)
+        if (! $authorId && $tab !== 'following' && ! $skipAdInjection) {
             $paginator = app(AdDeliveryService::class)->injectIntoPostFeed($paginator, $user, $filters);
         }
 

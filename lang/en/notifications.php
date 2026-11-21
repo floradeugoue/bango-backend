@@ -97,6 +97,10 @@ return [
         'merge' => 'Your listing ":title" has been merged with a similar listing. Reason: :reason',
         'default' => 'Update on your listing ":title".',
     ],
+    'listing_fraud' => [
+        'title' => 'Fake listing alert',
+        'body' => 'The listing ":title" you contacted has been removed as a fake listing. Do not send any money.',
+    ],
 
     // KYC
     'kyc_submitted' => [
@@ -142,7 +146,7 @@ return [
     ],
     'page_member_accepted' => [
         'title' => 'Member accepted',
-        'body' => 'A user accepted the invitation to join the Page.',
+        'body' => ':user accepted the invitation to join the Page.',
     ],
     'page_member_declined' => [
         'title' => 'Invitation declined',
@@ -215,13 +219,32 @@ return [
     ],
 
     // Auth & Security
+    'neighbourhood_confirmation_required' => [
+        'title' => 'Confirm your neighbourhood',
+        'body' => 'Confirm your neighbourhood using your current location to access the Square Neighbourhood tab and show the Neighbour badge.',
+        'body_with_place' => 'Confirm your neighbourhood (:neighbourhood) using your current location to access the Square Neighbourhood tab and show the Neighbour badge.',
+    ],
     'unknown_device_reported' => [
         'title' => 'Security alert',
         'body' => 'Your account has been secured and locked following an unknown device report.',
     ],
+    'unknown_login' => [
+        'title' => 'New login detected',
+        'body' => 'Your account was just signed in on :device near :city at :time. If this wasn\'t you, sign out that session.',
+    ],
     'device_verification_code' => [
         'title' => 'Confirmation code',
         'body' => 'Your device verification code is :code.',
+    ],
+
+    // Birthday
+    'birthday_self' => [
+        'title' => 'Happy birthday!',
+        'body' => 'Happy birthday, :name! The entire BANGO team wishes you a wonderful day.',
+    ],
+    'birthday_friend' => [
+        'title' => 'Birthday',
+        'body' => 'It\'s :name\'s birthday today. Wish them a happy birthday!',
     ],
 
     // Push Notification Categories
@@ -236,6 +259,7 @@ return [
         'subscription' => 'Payment & Subscription',
         'page' => 'Professional page',
         'delegation' => 'Real estate delegation',
+        'birthday' => 'Birthday',
         'default' => 'BANGO',
     ],
 ];

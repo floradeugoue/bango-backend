@@ -42,6 +42,7 @@ use App\Http\Controllers\Admin\Shell\AdminPreferenceController;
 use App\Http\Controllers\Admin\Shell\AdminSearchController;
 use App\Http\Controllers\Admin\Shell\AdminShellController;
 use App\Http\Controllers\Admin\Shell\AdminWorkspaceController;
+use App\Http\Controllers\Admin\Stats\AdminActivityStatsController;
 use App\Http\Controllers\Admin\Stats\AdminStrategicStatsController;
 use App\Http\Controllers\Admin\SubscriptionCatalogController;
 use App\Http\Controllers\Admin\SubscriptionManagementController;
@@ -1035,15 +1036,25 @@ Route::middleware(['admin.session'])->group(function () {
             ->middleware('admin.permission:kyc:action')
             ->name('requests.decision');
 
+        // Indicateur « vérification manuelle » sans biométrie (posé par le support / vérificateur)
+        Route::post('/requests/{id}/manual-verification', [AdminKycQueueController::class, 'setManualVerification'])
+            ->middleware('admin.permission:kyc:action')
+            ->name('requests.manual-verification');
+
         // Escalade hiérarchique (A.6)
         Route::post('/requests/{id}/escalate', [AdminKycQueueController::class, 'escalate'])
             ->middleware('admin.permission:kyc:escalate')
             ->name('requests.escalate');
 
         // Consultation et traçabilité des pièces d'identité (A.7)
-        Route::post('/requests/{id}/documents/{docId}/open', [AdminKycDocumentController::class, 'open'])
+        Route::match(['get', 'post'], '/requests/{id}/documents/{docId}/open', [AdminKycDocumentController::class, 'open'])
             ->middleware('admin.permission:kyc:documents')
             ->name('requests.documents.open');
+
+        // Enregistrement explicite de consultation du selfie au back-office
+        Route::post('/requests/{id}/selfie/view', [AdminKycDocumentController::class, 'logSelfieView'])
+            ->middleware('admin.permission:kyc:documents')
+            ->name('requests.selfie.view');
     });
 
     // ------------------------------------------------------------------
@@ -1438,6 +1449,11 @@ Route::middleware(['admin.session'])->group(function () {
     // SECTION 6 : STATISTIQUES STRATÉGIQUES & PILOTAGE
     // ------------------------------------------------------------------
     Route::prefix('stats')->name('stats.')->group(function () {
+        // Activité globale de l'application (MAU/WAU/DAU, séries journalières, rétention, entonnoir)
+        Route::get('/activity', [AdminActivityStatsController::class, 'index'])
+            ->middleware('admin.permission:stats.read')
+            ->name('activity');
+
         // Vue d'ensemble des indicateurs de performance clés (KPI globaux)
         Route::get('/overview', [AdminStrategicStatsController::class, 'overview'])
             ->middleware('admin.permission:stats:view')

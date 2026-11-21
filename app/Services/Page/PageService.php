@@ -15,6 +15,7 @@ use App\Models\Square\Post;
 use App\Models\Support\Report;
 use App\Models\User;
 use App\Notifications\Page\PageSuspendedNotification;
+use App\Services\Admin\AutomatedTextFilterService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -102,6 +103,12 @@ class PageService
                 'accepted_at' => now(),
             ]);
 
+            // Filtre textuel automatique (modération proactive à la création)
+            $textToScan = trim(($page->name ?? '').' '.($page->description ?? ''));
+            if ($textToScan !== '') {
+                app(AutomatedTextFilterService::class)->scanText($textToScan, 'page', $page->id, $owner);
+            }
+
             return $page->load(['owner', 'activeMembers.user']);
         });
     }
@@ -170,6 +177,12 @@ class PageService
             }
 
             $lockedPage->save();
+
+            // Filtre textuel automatique (modération proactive à la modification)
+            $textToScan = trim(($lockedPage->name ?? '').' '.($lockedPage->description ?? ''));
+            if ($textToScan !== '') {
+                app(AutomatedTextFilterService::class)->scanText($textToScan, 'page', $lockedPage->id, $lockedPage->owner);
+            }
 
             return $lockedPage->fresh(['owner', 'activeMembers.user']);
         });

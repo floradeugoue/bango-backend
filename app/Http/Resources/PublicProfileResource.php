@@ -36,9 +36,19 @@ class PublicProfileResource extends JsonResource
         $isBlockedBy = $currentUser ? $currentUser->isBlockedBy($this->resource) : false;
         $canViewContent = $currentUser ? $currentUser->canViewContentOf($this->resource) : ! $this->is_private;
 
+        $isMutual = $isFollowing && $isFollowedBy;
+        $isOwner = $currentUser && (int) $currentUser->id === (int) $this->id;
+        $canViewBirthday = $isOwner || ($this->birthday_visibility === 'mutuals' && $isMutual && ! $isBlocked && ! $isBlockedBy);
+        $todayInTargetTimezone = now()->setTimezone($this->resource->resolveTimezone());
+        $isBirthdayToday = $canViewBirthday && $this->resource->isBirthdayOnDate($todayInTargetTimezone);
+        $birthdayDayMonth = ($canViewBirthday && $this->birth_date) ? $this->birth_date->format('d/m') : null;
+
         $showNeighbourhood = (bool) data_get($this->privacy_settings, 'showNeighbourhood', true);
-        $neighbourhood = $showNeighbourhood ? $this->neighbourhood : null;
-        $place = collect([$neighbourhood, $this->city])->filter()->join(', ');
+        $rawCity = $this->resource->cityName();
+        $rawNeighbourhood = $this->resource->neighbourhoodName();
+        $neighbourhood = $showNeighbourhood ? $rawNeighbourhood : null;
+        $neighbourhoodVerified = $showNeighbourhood && $this->resource->hasVerifiedNeighbourhood();
+        $place = collect([$neighbourhood, $rawCity])->filter()->join(', ');
 
         return [
             'id' => $this->id,
@@ -47,8 +57,10 @@ class PublicProfileResource extends JsonResource
             'avatarUrl' => $this->avatar_url,
             'place' => $place,
             'countryCode' => $this->country_code,
-            'city' => $this->city,
+            'city' => $rawCity,
             'neighbourhood' => $neighbourhood,
+            'neighbourhood_verified' => $neighbourhoodVerified,
+            'neighbourhoodVerified' => $neighbourhoodVerified,
             'bio' => $this->bio ?? '',
             'website' => $this->website,
             'badge' => $badge,
@@ -76,6 +88,9 @@ class PublicProfileResource extends JsonResource
             'canComment' => $this->resource->canBeCommentedBy($currentUser),
             'canMessage' => $this->resource->canBeMessagedBy($currentUser),
             'canTag' => $this->resource->canBeTaggedBy($currentUser),
+            'is_birthday_today' => $isBirthdayToday,
+            'isBirthdayToday' => $isBirthdayToday,
+            'birthday' => $birthdayDayMonth,
         ];
     }
 }

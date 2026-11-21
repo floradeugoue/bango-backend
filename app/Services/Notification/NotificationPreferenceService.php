@@ -28,10 +28,14 @@ class NotificationPreferenceService
         $type = strtolower($this->extractType($typeOrNotification));
         $className = is_object($typeOrNotification) ? strtolower(class_basename($typeOrNotification)) : '';
 
-        // 1. Sécurité : code appareil, appareil inconnu, 2FA, OTP, mot de passe, alertes sécurité
+        // 1. Sécurité : code appareil, appareil inconnu, 2FA, OTP, mot de passe, alertes sécurité, fraude annonce
         $securityKeywords = [
             'deviceverification',
             'unknowndevice',
+            'unknownlogin',
+            'unknown_login',
+            'listing_fraud',
+            'listingfraud',
             'security',
             'auth',
             '2fa',
@@ -151,6 +155,11 @@ class NotificationPreferenceService
             str_contains($className, 'boost')
         ) {
             return 'marketing';
+        }
+
+        // Anniversaires
+        if (str_contains($type, 'birthday') || str_contains($className, 'birthday')) {
+            return 'birthdays';
         }
 
         return null;

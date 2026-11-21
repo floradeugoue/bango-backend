@@ -7,6 +7,7 @@ use App\Models\Geo\Country;
 use App\Models\Geo\Currency;
 use App\Models\Geo\Neighbourhood;
 use App\Models\Geo\Operator;
+use App\Services\Geo\NeighbourhoodCoordinatesCatalog;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Str;
 
@@ -242,30 +243,7 @@ class GeoSeeder extends Seeder
             ['name' => 'Paris', 'country_id' => $france->id, 'lat' => 48.8566, 'lng' => 2.3522]
         );
 
-        // 4. Neighbourhoods
-        $knownQuartersCoords = [
-            'Dakar/Almadies' => ['lat' => 14.7442, 'lng' => -17.5164],
-            'Dakar/Dakar Plateau' => ['lat' => 14.6690, 'lng' => -17.4363],
-            'Dakar/Ouakam' => ['lat' => 14.7253, 'lng' => -17.4906],
-            'Dakar/Mermoz' => ['lat' => 14.7042, 'lng' => -17.4739],
-            'Dakar/Ngor' => ['lat' => 14.7550, 'lng' => -17.5150],
-            'Douala/Bonapriso' => ['lat' => 4.0256, 'lng' => 9.7022],
-            'Douala/Akwa' => ['lat' => 4.0520, 'lng' => 9.7010],
-            'Douala/Bonanjo' => ['lat' => 4.0435, 'lng' => 9.6890],
-            'Douala/Bali' => ['lat' => 4.0380, 'lng' => 9.6930],
-            'Douala/Deido' => ['lat' => 4.0670, 'lng' => 9.7120],
-            'Douala/Makepe' => ['lat' => 4.0840, 'lng' => 9.7430],
-            'Douala/Kotto' => ['lat' => 4.0950, 'lng' => 9.7560],
-            'Yaoundé/Bastos' => ['lat' => 3.8900, 'lng' => 11.5130],
-            'Yaoundé/Omnisports' => ['lat' => 3.8780, 'lng' => 11.5340],
-            'Cotonou/Haie Vive' => ['lat' => 6.3570, 'lng' => 2.4170],
-            'Cotonou/Cadjèhoun' => ['lat' => 6.3620, 'lng' => 2.4080],
-            'Cotonou/Fidjrossè' => ['lat' => 6.3680, 'lng' => 2.3730],
-            'Lomé/Tokoin' => ['lat' => 6.1550, 'lng' => 1.2220],
-            'Lomé/Bè' => ['lat' => 6.1400, 'lng' => 1.2460],
-            'Lomé/Adidogomé' => ['lat' => 6.1850, 'lng' => 1.1680],
-        ];
-
+        // 4. Neighbourhoods (avec coordonnées vérifiées issues du catalogue géographique)
         $citiesAndQuartiers = [
             [$douala, ['Bonapriso', 'Akwa', 'Bonanjo', 'Deido', 'Makepe', 'Kotto', 'Bali']],
             [$yaounde, ['Bastos', 'Biyem-Assi', 'Mokolo', 'Omnisports', 'Santa Barbara', 'Emana']],
@@ -289,7 +267,8 @@ class GeoSeeder extends Seeder
                     ? Str::slug($cityModel->slug.'-'.$q)
                     : $baseSlug;
 
-                $coords = $knownQuartersCoords["{$cityModel->name}/{$q}"] ?? null;
+                $coords = NeighbourhoodCoordinatesCatalog::lookup($cityModel->name, $q)
+                    ?? NeighbourhoodCoordinatesCatalog::lookup($cityModel->slug, $slug);
 
                 Neighbourhood::updateOrCreate(
                     ['slug' => $slug],

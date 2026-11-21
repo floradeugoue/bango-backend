@@ -21,6 +21,7 @@ use App\Models\Story\StoryStickerAnswer;
 use App\Models\Story\StoryView;
 use App\Models\User;
 use App\Notifications\Social\SocialNotification;
+use App\Services\Admin\AutomatedTextFilterService;
 use App\Services\Media\MediaStorageService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
@@ -139,17 +140,28 @@ class StoryService
                         $mediaInfo = $this->mediaStorageService->storeStoryMedia($slideFile, $user);
                         $storedPaths[] = $mediaInfo['path'];
 
-                        $slideThumbFile = $slideData['thumbnail'] ?? ($files['slides'][$index]['thumbnail'] ?? null);
+                        $slideThumbFile = $slideData['thumbnail']
+                            ?? ($files['slides'][$index]['thumbnail']
+                            ?? ($slideData['preview']
+                            ?? ($files['slides'][$index]['preview']
+                            ?? ($slideData['capture']
+                            ?? ($files['slides'][$index]['capture'] ?? null)))));
+
+                        $slideThumbUrlInput = $slideData['thumbnail_url']
+                            ?? ($slideData['preview_url']
+                            ?? ($slideData['capture_url'] ?? null));
+
                         $slideThumbPath = $mediaInfo['path'];
                         $slideThumbUrl = $mediaInfo['url'];
+
                         if ($slideThumbFile instanceof UploadedFile) {
                             $thumbInfo = $this->mediaStorageService->storeStoryMedia($slideThumbFile, $user);
                             $storedPaths[] = $thumbInfo['path'];
                             $slideThumbPath = $thumbInfo['path'];
                             $slideThumbUrl = $thumbInfo['url'];
-                        } elseif (! empty($slideData['thumbnail_url'])) {
-                            $slideThumbPath = $slideData['thumbnail_url'];
-                            $slideThumbUrl = $slideData['thumbnail_url'];
+                        } elseif (! empty($slideThumbUrlInput)) {
+                            $slideThumbPath = $slideThumbUrlInput;
+                            $slideThumbUrl = $slideThumbUrlInput;
                         }
 
                         $slide = StorySlide::create([
@@ -193,17 +205,28 @@ class StoryService
                     $mediaInfo = $this->mediaStorageService->storeStoryMedia($file, $user);
                     $storedPaths[] = $mediaInfo['path'];
 
-                    $thumbFile = $files['thumbnail'] ?? ($data['thumbnail'] ?? null);
+                    $thumbFile = $files['thumbnail']
+                        ?? ($data['thumbnail']
+                        ?? ($files['preview']
+                        ?? ($data['preview']
+                        ?? ($files['capture']
+                        ?? ($data['capture'] ?? null)))));
+
+                    $thumbUrlInput = $data['thumbnail_url']
+                        ?? ($data['preview_url']
+                        ?? ($data['capture_url'] ?? null));
+
                     $thumbPath = $mediaInfo['path'];
                     $thumbUrl = $mediaInfo['url'];
+
                     if ($thumbFile instanceof UploadedFile) {
                         $thumbInfo = $this->mediaStorageService->storeStoryMedia($thumbFile, $user);
                         $storedPaths[] = $thumbInfo['path'];
                         $thumbPath = $thumbInfo['path'];
                         $thumbUrl = $thumbInfo['url'];
-                    } elseif (! empty($data['thumbnail_url'])) {
-                        $thumbPath = $data['thumbnail_url'];
-                        $thumbUrl = $data['thumbnail_url'];
+                    } elseif (! empty($thumbUrlInput)) {
+                        $thumbPath = $thumbUrlInput;
+                        $thumbUrl = $thumbUrlInput;
                     }
 
                     $slide = StorySlide::create([
@@ -233,6 +256,50 @@ class StoryService
                     if (! empty($data['stickers']) && is_array($data['stickers'])) {
                         $this->attachStickers($slide, $data['stickers']);
                     }
+                }
+
+                // Filtre textuel automatique (anti-discrimination, propos offensants, etc.)
+                $textsToScan = [];
+                if (! empty($data['caption'])) {
+                    $textsToScan[] = $data['caption'];
+                }
+                if (! empty($data['stickers']) && is_array($data['stickers'])) {
+                    foreach ($data['stickers'] as $st) {
+                        if (! empty($st['text'])) {
+                            $textsToScan[] = $st['text'];
+                        }
+                        if (! empty($st['data']['text'])) {
+                            $textsToScan[] = $st['data']['text'];
+                        }
+                        if (! empty($st['question'])) {
+                            $textsToScan[] = $st['question'];
+                        }
+                    }
+                }
+                if (! empty($data['slides']) && is_array($data['slides'])) {
+                    foreach ($data['slides'] as $sl) {
+                        if (! empty($sl['caption'])) {
+                            $textsToScan[] = $sl['caption'];
+                        }
+                        if (! empty($sl['stickers']) && is_array($sl['stickers'])) {
+                            foreach ($sl['stickers'] as $st) {
+                                if (! empty($st['text'])) {
+                                    $textsToScan[] = $st['text'];
+                                }
+                                if (! empty($st['data']['text'])) {
+                                    $textsToScan[] = $st['data']['text'];
+                                }
+                                if (! empty($st['question'])) {
+                                    $textsToScan[] = $st['question'];
+                                }
+                            }
+                        }
+                    }
+                }
+
+                $combinedText = trim(implode(' ', array_filter($textsToScan)));
+                if ($combinedText !== '') {
+                    app(AutomatedTextFilterService::class)->scanText($combinedText, 'story', $story->id, $user);
                 }
 
                 return $story->load(['slides.stickers', 'user']);
@@ -753,15 +820,17 @@ class StoryService
         }
 
         // Snapshot de la carte d'aperçu Story pour la future messagerie
-        $firstSlide = $story->slides->first();
+        $targetSlide = ($slideId ? $story->slides->firstWhere('id', $slideId) : null) ?? $story->slides->first();
+        $thumbnailUrl = $targetSlide?->thumbnail_url ?: $targetSlide?->media_url;
         $storyPreviewCard = [
             'story_id' => (string) $story->id,
+            'story_slide_id' => $targetSlide?->id ? (string) $targetSlide->id : null,
             'author_handle' => $story->user->handle,
             'author_name' => $story->user->display_name ?? $story->user->name,
-            'media_url' => $firstSlide?->media_url,
-            'thumbnail_url' => $firstSlide?->thumbnail_url,
-            'caption' => $firstSlide?->caption,
-            'filter' => $firstSlide?->filter,
+            'media_url' => $targetSlide?->media_url,
+            'thumbnail_url' => $thumbnailUrl,
+            'caption' => $targetSlide?->caption,
+            'filter' => $targetSlide?->filter,
             'published_at' => $story->published_at?->toIso8601String(),
         ];
 
@@ -844,10 +913,16 @@ class StoryService
             abort(404, 'Story introuvable.');
         }
 
+        $normalizedReason = match ($reason) {
+            'minor', 'child', 'child_safety' => 'child_safety',
+            'sexual', 'nudity', 'sexual_content' => 'sexual_content',
+            default => $reason,
+        };
+
         return StoryReport::create([
             'story_id' => $story->id,
             'reporter_id' => $reporter->id,
-            'reason' => $reason,
+            'reason' => $normalizedReason,
             'details' => $details,
             'status' => 'pending',
         ]);

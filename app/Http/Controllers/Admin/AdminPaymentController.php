@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Controllers\Payment\Concerns\FormatsPaymentResponses;
 use App\Models\Payment\PaymentDispute;
 use App\Models\Payment\PaymentTransaction;
+use App\Services\Payment\Gateways\MonetbilGateway;
 use App\Services\Payment\PaymentEngineService;
 use DomainException;
 use Illuminate\Database\Eloquent\Model;
@@ -574,6 +575,38 @@ class AdminPaymentController extends Controller
             actor: $request->user(),
             decision: $validated['decision']
         );
+
+        if ($validated['status'] === 'resolved' && $dispute->type === 'double_charge') {
+            $meta = $dispute->metadata ?? [];
+            $refundMethod = $request->input('refund_method', $meta['refund_method'] ?? 'original_payment_method');
+
+            if (in_array($refundMethod, ['original_payment_method', 'cash', 'mobile_money'], true) && empty($meta['cash_refund'])) {
+                $phone = (string) ($dispute->claimant_phone ?: $dispute->user?->phone ?: '+237690000000');
+                $operator = $meta['operator'] ?? null;
+                $amount = (float) $dispute->disputed_amount;
+
+                $disburse = app(MonetbilGateway::class)->disburseToMobileMoney(
+                    phone: $phone,
+                    amount: $amount,
+                    currency: $dispute->currency ?: 'XAF',
+                    reference: 'REFUND-DBL-'.$dispute->reference,
+                    operator: is_string($operator) ? $operator : null
+                );
+
+                $meta['refund_method'] = 'original_payment_method';
+                $meta['refund_channel'] = 'original_payment_method';
+                $meta['cash_refund'] = [
+                    'amount_refunded' => $amount,
+                    'currency' => $dispute->currency ?: 'XAF',
+                    'phone' => $disburse['phone'],
+                    'operator' => $disburse['operator'],
+                    'external_reference' => $disburse['external_reference'],
+                    'refunded_at' => now()->toIso8601String(),
+                ];
+                $dispute->metadata = $meta;
+                $dispute->save();
+            }
+        }
 
         return $this->paymentSuccess(
             data: $dispute,

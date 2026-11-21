@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin\Kyc;
 
+use App\Enums\Kyc\KycDocKind;
 use App\Http\Controllers\Controller;
 use App\Models\Kyc\KycSubmission;
 use App\Services\Admin\AdminKycService;
@@ -31,6 +32,7 @@ class AdminKycQueueController extends Controller
             'age',
             'awaiting',
             'country',
+            'is_manual_verification',
         ]);
         $perPage = $request->integer('per_page', 20);
 
@@ -135,6 +137,7 @@ class AdminKycQueueController extends Controller
                 'propertyArea' => null,
                 'managerName' => null,
                 'status' => $status,
+                'is_manual_verification' => (bool) $sub->isManualVerification(),
                 'escalatedTo' => $sub->escalatedTo ? [
                     'id' => (string) $sub->escalatedTo->id,
                     'name' => $sub->escalatedTo->name,
@@ -433,6 +436,7 @@ class AdminKycQueueController extends Controller
                 'position' => $position,
                 'profile_category' => $sub->profile_category,
                 'status' => $sub->status->value,
+                'is_manual_verification' => (bool) $sub->isManualVerification(),
                 'full_name' => $sub->full_name,
                 'id_type' => $sub->id_type,
                 'id_number' => $sub->id_number,
@@ -463,11 +467,17 @@ class AdminKycQueueController extends Controller
                 ] : null,
                 'escalation_reason' => $sub->escalation_reason,
                 'escalated_at' => $sub->escalated_at?->toISOString(),
-                'access_logs' => $sub->accessLogs->map(function ($log) {
+                'access_logs' => $sub->accessLogs()->with(['operator:id,name', 'document:id,kind,original_name'])->latest('created_at')->get()->map(function ($log) {
+                    $isSelfie = $log->action === 'view_selfie' || $log->document?->kind === KycDocKind::Selfie;
+
                     return [
+                        'id' => $log->id,
                         'operator_id' => $log->operator_id,
                         'operator_name' => $log->operator?->name,
                         'action' => $log->action,
+                        'is_selfie' => $isSelfie,
+                        'document_kind' => $log->document?->kind?->value,
+                        'document_name' => $log->document?->original_name,
                         'created_at' => $log->created_at->toISOString(),
                     ];
                 }),
@@ -550,6 +560,38 @@ class AdminKycQueueController extends Controller
                 ],
                 'escalation_reason' => $updated->escalation_reason,
                 'escalated_at' => $updated->escalated_at?->toISOString(),
+            ],
+        ]);
+    }
+
+    /**
+     * Active ou désactive l'indicateur de vérification manuelle sans biométrie (posé par le support).
+     */
+    public function setManualVerification(Request $request, string $id): JsonResponse
+    {
+        $validated = $request->validate([
+            'is_manual_verification' => ['required', 'boolean'],
+            'reason' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $submission = $this->findSubmission($id);
+
+        $updated = $this->kycService->setManualVerification(
+            submission: $submission,
+            operator: $request->user(),
+            manual: (bool) $validated['is_manual_verification'],
+            reason: $validated['reason'] ?? null
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => $updated->is_manual_verification
+                ? 'Dossier passé en vérification manuelle sans biométrie.'
+                : 'Vérification manuelle désactivée.',
+            'data' => [
+                'id' => $updated->id,
+                'reference' => $updated->reference,
+                'is_manual_verification' => (bool) $updated->is_manual_verification,
             ],
         ]);
     }

@@ -203,6 +203,30 @@ class PushNotificationService
             $formatted['listing_id'] = (string) $data['listing_id'];
         }
 
+        if (isset($data['listing_title'])) {
+            $formatted['listing_title'] = (string) $data['listing_title'];
+        }
+
+        if (isset($data['session_id'])) {
+            $formatted['session_id'] = (string) $data['session_id'];
+        }
+
+        if (isset($data['device'])) {
+            $formatted['device'] = (string) $data['device'];
+        }
+
+        if (isset($data['city'])) {
+            $formatted['city'] = (string) $data['city'];
+        }
+
+        if (isset($data['time'])) {
+            $formatted['time'] = (string) $data['time'];
+        }
+
+        if (isset($data['user_id'])) {
+            $formatted['user_id'] = (string) $data['user_id'];
+        }
+
         if (isset($data['post_id'])) {
             $formatted['post_id'] = (string) $data['post_id'];
         }
@@ -229,6 +253,14 @@ class PushNotificationService
 
         if (isset($data['page_id'])) {
             $formatted['page_id'] = (string) $data['page_id'];
+        }
+
+        if (isset($data['action'])) {
+            $formatted['action'] = (string) $data['action'];
+        }
+
+        if (isset($data['deep_link'])) {
+            $formatted['deep_link'] = (string) $data['deep_link'];
         }
 
         // Intégration des sous-métadonnées si présentes (ex: metadata venant de SocialNotification)

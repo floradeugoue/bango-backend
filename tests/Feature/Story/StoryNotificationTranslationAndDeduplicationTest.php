@@ -19,7 +19,7 @@ test('SocialNotification generates translated title and body for story_like, sto
     $notifLikeFr = new SocialNotification('story_like', $viewer, ['story_id' => 'story-123']);
     $dataLikeFr = $notifLikeFr->toArray($authorFr);
     expect($dataLikeFr['title'])->toBe('Nouveau j\'aime')
-        ->and($dataLikeFr['message'])->toBe('Sophie a aimé votre story.')
+        ->and($dataLikeFr['message'])->toBe('Sophie a aimé ta story.')
         ->and($dataLikeFr['title'])->not->toContain('notifications.');
 
     // 2. Story Like EN
@@ -35,8 +35,8 @@ test('SocialNotification generates translated title and body for story_like, sto
         'text' => 'Douala',
     ]);
     $dataAnswerFr = $notifAnswerFr->toArray($authorFr);
-    expect($dataAnswerFr['title'])->toBe('Réponse à votre question')
-        ->and($dataAnswerFr['message'])->toBe('Sophie a répondu à votre question : "Douala"')
+    expect($dataAnswerFr['title'])->toBe('Réponse à ta question')
+        ->and($dataAnswerFr['message'])->toBe('Sophie a répondu à ta question : "Douala"')
         ->and($dataAnswerFr['title'])->not->toContain('notifications.');
 
     // 4. Question Answer EN
@@ -92,7 +92,7 @@ test('liking a story sends story_like notification and unliking then reliking do
     expect($author->notifications()->count())->toBe(1);
     $notif1 = $author->notifications()->first();
     expect($notif1->data['type'])->toBe('story_like')
-        ->and($notif1->data['message'])->toBe('Marc a aimé votre story.')
+        ->and($notif1->data['message'])->toBe('Marc a aimé ta story.')
         ->and($notif1->data['title'])->toBe('Nouveau j\'aime');
 
     // 2. Unlike
@@ -144,6 +144,6 @@ test('answering a story question sticker sends story_question_answer notificatio
 
     $notif = $author->notifications()->where('data->type', 'story_question_answer')->first();
     expect($notif)->not->toBeNull()
-        ->and($notif->data['title'])->toBe('Réponse à votre question')
-        ->and($notif->data['message'])->toBe('Bob a répondu à votre question : "Excellent !"');
+        ->and($notif->data['title'])->toBe('Réponse à ta question')
+        ->and($notif->data['message'])->toBe('Bob a répondu à ta question : "Excellent !"');
 });

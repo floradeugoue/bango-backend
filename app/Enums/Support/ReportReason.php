@@ -12,6 +12,8 @@ enum ReportReason: string
     case FakeListing = 'fake_listing';
     case Violence = 'violence';
     case HateSpeech = 'hate_speech';
+    case ChildSafety = 'child_safety';
+    case SexualContent = 'sexual_content';
     case Other = 'other';
 
     public function label(): string
@@ -25,6 +27,8 @@ enum ReportReason: string
             self::FakeListing => 'Fausse annonce immobilière',
             self::Violence => 'Incitation à la violence',
             self::HateSpeech => 'Propos haineux ou discriminatoires',
+            self::ChildSafety => 'Mineur en danger / Protection des mineurs',
+            self::SexualContent => 'Nudité ou contenu sexuel',
             self::Other => 'Autre motif',
         };
     }

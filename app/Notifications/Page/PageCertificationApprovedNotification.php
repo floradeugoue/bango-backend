@@ -26,11 +26,11 @@ class PageCertificationApprovedNotification extends Notification implements Shou
 
     public function toMail(object $notifiable): MailMessage
     {
-        $pageName = $this->certification->page->name ?? 'votre page';
+        $pageName = $this->certification->page->name ?? 'ta page';
 
         return (new MailMessage)
-            ->subject("Félicitations ! Votre page {$pageName} est désormais certifiée")
-            ->line("Le dossier de certification de {$pageName} a été approuvé. Votre badge de certification officielle est actif.")
+            ->subject("Félicitations ! Ta page {$pageName} est désormais certifiée")
+            ->line("Le dossier de certification de {$pageName} a été approuvé. Ton badge de certification officielle est actif.")
             ->action('Voir ma page', url('/my-pages'));
     }
 

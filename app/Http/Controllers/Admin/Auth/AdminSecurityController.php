@@ -35,14 +35,17 @@ class AdminSecurityController extends Controller
 
         $confirmedAt = $user->two_factor_confirmed_at;
         $backupCodesCount = is_array($user->backup_codes) ? count($user->backup_codes) : 0;
+        $isRequired = $user->requiresMandatoryTwoFactor();
 
         return response()->json([
             'two_factor_enabled' => $isEnabled,
+            'two_factor_required' => $isRequired,
             'two_factor_method' => $isEnabled ? ($user->two_factor_method ?? 'totp') : 'off',
             'two_factor_confirmed_at' => $confirmedAt?->toIso8601String(),
             'enabled_at' => $confirmedAt?->toIso8601String(),
             'confirmedAt' => $confirmedAt?->toIso8601String(),
             'twoFactorEnabled' => $isEnabled,
+            'twoFactorRequired' => $isRequired,
             'twoFactorMethod' => $isEnabled ? ($user->two_factor_method ?? 'totp') : 'off',
             'has_backup_codes' => $backupCodesCount > 0,
             'remaining_backup_codes' => $backupCodesCount,
@@ -163,6 +166,13 @@ class AdminSecurityController extends Controller
     {
         /** @var User $user */
         $user = $request->user();
+
+        if ($user->requiresMandatoryTwoFactor()) {
+            return response()->json([
+                'code' => 'two_factor_mandatory',
+                'message' => 'La double authentification (TOTP) est obligatoire pour votre rôle et ne peut pas être désactivée.',
+            ], 403);
+        }
 
         $request->validate([
             'password' => ['nullable', 'string'],

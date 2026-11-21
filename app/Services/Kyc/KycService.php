@@ -146,19 +146,34 @@ class KycService
                 }
             }
 
-            // Exécution de la vérification de vivacité et de concordance faciale
-            $verificationResult = $this->faceVerificationService->verify(
-                idCardFront: $idFrontFile,
-                selfieFront: $selfieFile,
-                livenessFrames: $livenessFiles
-            );
+            $isManualVerification = (bool) ($data['is_manual_verification'] ?? $data['manual_verification'] ?? false);
+            $submission->is_manual_verification = $isManualVerification;
 
-            $currentMetadata = $submission->metadata ?? [];
-            $submission->metadata = array_merge($currentMetadata, [
-                'face_match' => $verificationResult['face_match'],
-                'liveness' => $verificationResult['liveness'],
-            ]);
-            $submission->save();
+            if ($isManualVerification) {
+                // Vérification manuelle sans biométrie : on n'appelle pas FaceVerificationService
+                $currentMetadata = $submission->metadata ?? [];
+                $submission->metadata = array_merge($currentMetadata, [
+                    'is_manual_verification' => true,
+                    'manual_verification_reason' => $data['manual_verification_reason'] ?? 'Refus de la comparaison automatique / vérification manuelle demandée',
+                    'face_match' => null,
+                    'liveness' => null,
+                ]);
+                $submission->save();
+            } else {
+                // Exécution de la vérification de vivacité et de concordance faciale
+                $verificationResult = $this->faceVerificationService->verify(
+                    idCardFront: $idFrontFile,
+                    selfieFront: $selfieFile,
+                    livenessFrames: $livenessFiles
+                );
+
+                $currentMetadata = $submission->metadata ?? [];
+                $submission->metadata = array_merge($currentMetadata, [
+                    'face_match' => $verificationResult['face_match'],
+                    'liveness' => $verificationResult['liveness'],
+                ]);
+                $submission->save();
+            }
 
             try {
                 $user->notify(new KycSubmittedNotification($submission));
@@ -456,24 +471,35 @@ class KycService
                 $updates['expires_on'] = $data['expires_on'];
             }
 
-            // Si de nouveaux selfies ou recto de pièce ont été fournis, relancer la vérification faciale
-            if ($idFrontFile !== null || $selfieFile !== null || ! empty($livenessFiles)) {
-                $verificationResult = $this->faceVerificationService->verify(
-                    idCardFront: $idFrontFile,
-                    selfieFront: $selfieFile,
-                    livenessFrames: $livenessFiles
-                );
+            $isManualVerification = $submission->isManualVerification() || (bool) ($data['is_manual_verification'] ?? $data['manual_verification'] ?? false);
 
+            if ($isManualVerification) {
+                $updates['is_manual_verification'] = true;
                 $meta = $submission->metadata ?? [];
-                $updates['metadata'] = array_merge($meta, [
-                    'face_match' => $verificationResult['face_match'],
-                    'liveness' => $verificationResult['liveness'],
-                    'supplement_submitted_at' => now()->toIso8601String(),
-                ]);
-            } else {
-                $meta = $submission->metadata ?? [];
+                $meta['is_manual_verification'] = true;
                 $meta['supplement_submitted_at'] = now()->toIso8601String();
+                $meta['manual_verification_reason'] = $data['manual_verification_reason'] ?? ($meta['manual_verification_reason'] ?? 'Instruction manuelle sans biométrie');
                 $updates['metadata'] = $meta;
+            } else {
+                // Si de nouveaux selfies ou recto de pièce ont été fournis, relancer la vérification faciale
+                if ($idFrontFile !== null || $selfieFile !== null || ! empty($livenessFiles)) {
+                    $verificationResult = $this->faceVerificationService->verify(
+                        idCardFront: $idFrontFile,
+                        selfieFront: $selfieFile,
+                        livenessFrames: $livenessFiles
+                    );
+
+                    $meta = $submission->metadata ?? [];
+                    $updates['metadata'] = array_merge($meta, [
+                        'face_match' => $verificationResult['face_match'],
+                        'liveness' => $verificationResult['liveness'],
+                        'supplement_submitted_at' => now()->toIso8601String(),
+                    ]);
+                } else {
+                    $meta = $submission->metadata ?? [];
+                    $meta['supplement_submitted_at'] = now()->toIso8601String();
+                    $updates['metadata'] = $meta;
+                }
             }
 
             $submission->update($updates);

@@ -3,10 +3,12 @@
 namespace App\Services\Auth;
 
 use App\Models\User;
+use App\Notifications\Auth\UnknownLoginNotification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Laravel\Passport\Token;
 
 class SessionService
@@ -109,6 +111,35 @@ class SessionService
         ?string $deviceId = null,
         ?string $deviceName = null
     ): array {
+        // 0. Vérifier si l'utilisateur possède déjà des sessions et si l'appareil ou le lieu est inconnu (ST-13)
+        $hasPriorSessions = $user->tokens()->exists();
+        $isKnownDevice = false;
+
+        if ($hasPriorSessions) {
+            if ($deviceId) {
+                $isKnownDevice = $user->tokens()->where(function ($query) use ($deviceId, $deviceName) {
+                    $query->where('name', 'like', "%::{$deviceId}")
+                        ->orWhere('name', $deviceName);
+                })->exists();
+            } elseif ($deviceName) {
+                $isKnownDevice = $user->tokens()->where('name', $deviceName)->exists();
+            }
+        }
+
+        // Lieux habituels du compte
+        $habitualCities = array_filter([$user->city]);
+        $habitualCountries = array_filter([$user->country?->name]);
+        foreach ($user->tokens as $prevToken) {
+            if (! empty($prevToken->city)) {
+                $habitualCities[] = $prevToken->city;
+            }
+            if (! empty($prevToken->country)) {
+                $habitualCountries[] = $prevToken->country;
+            }
+        }
+        $habitualCitiesLower = array_map(fn ($c) => strtolower(trim($c)), array_unique($habitualCities));
+        $habitualCountriesLower = array_map(fn ($c) => strtolower(trim($c)), array_unique($habitualCountries));
+
         // 1. Révoquer les anciens jetons de ce même appareil
         if ($deviceId) {
             $user->tokens()->where(function ($query) use ($deviceId, $deviceName) {
@@ -145,6 +176,31 @@ class SessionService
             'place' => $location['place'],
             'created_at' => $tokenModel->created_at?->toIso8601String(),
         ], now()->addDays(90));
+
+        // 5. Alerte de connexion inhabituelle / nouvel appareil (ST-13)
+        $cityMatches = empty($location['city']) || empty($habitualCitiesLower) || in_array(strtolower(trim($location['city'])), $habitualCitiesLower, true);
+        $countryMatches = empty($location['country']) || empty($habitualCountriesLower) || in_array(strtolower(trim($location['country'])), $habitualCountriesLower, true);
+        $isUnusualLocation = (! $cityMatches || ! $countryMatches);
+
+        if ($hasPriorSessions && (! $isKnownDevice || $isUnusualLocation)) {
+            try {
+                $tz = method_exists($user, 'resolveTimezone') ? $user->resolveTimezone() : 'Africa/Douala';
+                $formattedTime = now()->setTimezone($tz)->format('H:i');
+                $displayDevice = $deviceName ?: 'Application mobile';
+                $displayCity = $location['city'] ?: ($user->city ?: 'Douala');
+
+                $user->notify(new UnknownLoginNotification(
+                    sessionId: (string) $tokenModel->id,
+                    device: $displayDevice,
+                    city: $displayCity,
+                    time: $formattedTime,
+                    country: $location['country'],
+                    place: $location['place']
+                ));
+            } catch (\Throwable $e) {
+                Log::warning('Échec notification connexion inhabituelle : '.$e->getMessage());
+            }
+        }
 
         return [
             'token' => $tokenResult->accessToken,

@@ -13,6 +13,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Passport\Passport;
 
@@ -147,6 +148,14 @@ it('POST /payments/initiate accepts align_with, applies prorata and sets matchin
 
     $landlordProduct = SubscriptionProduct::where('code', 'landlord')->first();
     $landlordPrice = $landlordProduct->activePrices()->where('cadence', 'monthly')->first();
+
+    Http::fake([
+        'https://api.monetbil.com/payment/v1/placePayment' => Http::response([
+            'status' => 'REQUEST_ACCEPTED',
+            'paymentId' => 'mb_mock_align_123',
+            'channel_ussd' => '#150*50#',
+        ], 200),
+    ]);
 
     // Initiates payment with align_with
     $response = postJson('/api/payments/initiate', [

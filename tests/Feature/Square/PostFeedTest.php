@@ -60,7 +60,7 @@ it('filtre le fil sur les créateurs suivis dans l onglet following', function (
 });
 
 it('filtre les publications par quartier ou ville dans l onglet neighbourhood', function () {
-    $user = User::factory()->create(['city' => 'Douala', 'neighbourhood' => 'Bonapriso']);
+    $user = User::factory()->withVerifiedNeighbourhood('Douala', 'Bonapriso')->create();
     Passport::actingAs($user);
 
     $pNeighbour = Post::create([
@@ -89,11 +89,11 @@ it('filtre les publications par quartier ou ville dans l onglet neighbourhood', 
 });
 
 it('limite l onglet neighbourhood a mon quartier et retombe sur le quartier de l auteur sans lieu', function () {
-    $user = User::factory()->create(['city' => 'Douala', 'neighbourhood' => 'Bonapriso']);
+    $user = User::factory()->withVerifiedNeighbourhood('Douala', 'Bonapriso')->create();
     Passport::actingAs($user);
 
-    $neighbourAuthor = User::factory()->create(['city' => 'Douala', 'neighbourhood' => 'Bonapriso']);
-    $otherAuthor = User::factory()->create(['city' => 'Douala', 'neighbourhood' => 'Akwa']);
+    $neighbourAuthor = User::factory()->withVerifiedNeighbourhood('Douala', 'Bonapriso')->create();
+    $otherAuthor = User::factory()->withVerifiedNeighbourhood('Douala', 'Akwa')->create();
 
     $sameNeighbourhood = Post::create(['user_id' => $otherAuthor->id, 'body' => 'a', 'place_city' => 'Douala', 'place_neighbourhood' => 'Bonapriso', 'audience' => 'public']);
     $sameCityOnly = Post::create(['user_id' => $neighbourAuthor->id, 'body' => 'b', 'place_city' => 'Douala', 'place_neighbourhood' => 'Akwa', 'audience' => 'public']);

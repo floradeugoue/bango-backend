@@ -30,7 +30,7 @@ class ProcessSubscriptionLifecycleCommand extends Command
 
         $stats = $renewalService->processLifecycle();
 
-        $this->info("Abonnements passés en période de grâce : {$stats['entered_grace']} | Abonnements définitivement expirés : {$stats['expired']}");
+        $this->info("Abonnements renouvelés automatiquement : {$stats['renewed_auto']} | Passés en période de grâce : {$stats['entered_grace']} | Définitivement expirés : {$stats['expired']}");
 
         return Command::SUCCESS;
     }

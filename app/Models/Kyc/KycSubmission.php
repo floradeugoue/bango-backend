@@ -45,6 +45,7 @@ class KycSubmission extends Model
         'reference',
         'user_id',
         'status',
+        'is_manual_verification',
         'profile_category',
         'full_name',
         'id_type',
@@ -77,11 +78,20 @@ class KycSubmission extends Model
     {
         return [
             'status' => KycStatus::class,
+            'is_manual_verification' => 'boolean',
             'expires_on' => 'date',
             'decided_at' => 'datetime',
             'escalated_at' => 'datetime',
             'metadata' => 'array',
         ];
+    }
+
+    /**
+     * Indique si ce dossier est instruit manuellement sans comparaison automatique de vivacité.
+     */
+    public function isManualVerification(): bool
+    {
+        return (bool) ($this->is_manual_verification || ($this->metadata['is_manual_verification'] ?? false));
     }
 
     public function user(): BelongsTo

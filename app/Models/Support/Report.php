@@ -13,6 +13,7 @@ use App\Models\Reel\ReelComment;
 use App\Models\Square\Post;
 use App\Models\Square\PostComment;
 use App\Models\User;
+use App\Notifications\Support\ChildSafetyAlertNotification;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -69,7 +70,39 @@ class Report extends Model
                 $random = strtoupper(Str::random(6));
                 $report->reference = "MOD-{$year}-{$random}";
             }
+
+            $reasonVal = $report->reason instanceof ReportReason ? $report->reason->value : (string) $report->reason;
+            if ($reasonVal === ReportReason::ChildSafety->value) {
+                $report->priority = 'urgent';
+            }
         });
+
+        static::created(function (Report $report) {
+            $reasonVal = $report->reason instanceof ReportReason ? $report->reason->value : (string) $report->reason;
+            if ($reasonVal === ReportReason::ChildSafety->value) {
+                $report->sendChildSafetyAlert();
+            }
+        });
+    }
+
+    /**
+     * Envoie une alerte immédiate aux opérateurs et administrateurs habilités pour tout signalement lié à la protection des mineurs.
+     */
+    public function sendChildSafetyAlert(): void
+    {
+        $operators = User::query()
+            ->whereHas('role', function ($query) {
+                $query->whereIn('slug', ['admin', 'direction', 'moderation', 'moderator']);
+            })
+            ->get();
+
+        foreach ($operators as $operator) {
+            try {
+                $operator->notify(new ChildSafetyAlertNotification($this));
+            } catch (\Throwable) {
+                // Ignore individual delivery failure
+            }
+        }
     }
 
     public function reporter(): BelongsTo

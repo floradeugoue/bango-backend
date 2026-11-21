@@ -332,10 +332,7 @@ test('6. Saved and liked reels are scoped to the page when X-Bango-Page is sent'
 });
 
 test('7. Feed neighbourhood uses page neighbourhood when X-Bango-Page is sent', function () {
-    $owner = User::factory()->create([
-        'city' => 'Douala',
-        'neighbourhood' => 'Bonanjo',
-    ]);
+    $owner = User::factory()->withVerifiedNeighbourhood('Douala', 'Bonanjo')->create();
 
     $page = Page::create([
         'owner_id' => $owner->id,

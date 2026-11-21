@@ -2,22 +2,30 @@
 
 namespace App\Services\Subscription;
 
+use App\Enums\Payment\PaymentChannel;
+use App\Enums\Payment\PaymentProvider;
 use App\Enums\Payment\PaymentServiceType;
 use App\Enums\Payment\PaymentStatus;
+use App\Models\Boost\CreditWallet;
 use App\Models\Payment\PaymentTransaction;
 use App\Models\Subscription\Subscription;
 use App\Models\Subscription\SubscriptionEvent;
 use App\Models\Subscription\SubscriptionReminder;
 use App\Notifications\Subscription\PaymentFailedReminderNotification;
 use App\Notifications\Subscription\RenewalUpcomingReminderNotification;
+use App\Services\Boost\CreditWalletService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class SubscriptionRenewalService
 {
     public function __construct(
-        protected SubscriptionService $subscriptionService
-    ) {}
+        protected SubscriptionService $subscriptionService,
+        protected ?CreditWalletService $creditWalletService = null
+    ) {
+        $this->creditWalletService ??= app(CreditWalletService::class);
+    }
 
     /**
      * Envoie les rappels planifiés avant échéance (J-7, J-3, J-1).
@@ -209,28 +217,56 @@ class SubscriptionRenewalService
 
     /**
      * Traite le cycle de vie des abonnements de manière idempotente :
-     * 1. Bascule en période de grâce (7 jours) les abonnements actifs échus.
-     * 2. Expire les abonnements dont la période de grâce est dépassée.
+     * 1. Renouvelle automatiquement à l'échéance par crédit BANGO si auto_renew est actif et que le solde suffit.
+     * 2. Bascule en période de grâce (7 jours) les abonnements actifs échus sans prélèvement (failed_attempts = 0).
+     * 3. Expire les abonnements dont la période de grâce est dépassée.
      *
-     * @return array{entered_grace: int, expired: int}
+     * @return array{renewed_auto: int, entered_grace: int, expired: int}
      */
     public function processLifecycle(?Carbon $referenceDate = null): array
     {
         $now = $referenceDate ?: now();
         $graceDays = config('subscription.grace_period_days', 7);
 
-        $results = ['entered_grace' => 0, 'expired' => 0];
+        $results = ['renewed_auto' => 0, 'entered_grace' => 0, 'expired' => 0];
 
-        // 1. Passage en Grâce : abonnements dont current_period_end est passé
-        $dueSubscriptions = Subscription::where('state', 'active')
+        // 1. Passage en Grâce ou renouvellement par crédit : abonnements actifs échus
+        $dueSubscriptions = Subscription::with(['user.creditWallet', 'product.prices', 'price'])
+            ->where('state', 'active')
             ->where('current_period_end', '<=', $now)
             ->get();
 
         foreach ($dueSubscriptions as $subscription) {
-            // Ne pas passer en grâce si une transaction est déjà confirmée en attente de traitement
+            // Tenter le prélèvement automatique à l'échéance si auto_renew est activé et si le solde de crédit BANGO suffit
+            if ($subscription->auto_renew && $this->canRenewWithCredit($subscription)) {
+                try {
+                    $renewed = $this->renewWithCredit($subscription);
+                    if ($renewed) {
+                        $results['renewed_auto']++;
+
+                        continue;
+                    }
+                } catch (\Throwable $e) {
+                    Log::error("Échec du prélèvement du crédit BANGO à l'échéance pour l'abonnement #{$subscription->id}: ".$e->getMessage());
+
+                    // Échec avéré de prélèvement : incrémenter failed_attempts
+                    $this->subscriptionService->enterGracePeriod(
+                        subscription: $subscription,
+                        failureReason: "Échec du prélèvement à l'échéance",
+                        incrementFailedAttempts: true
+                    );
+                    $results['entered_grace']++;
+
+                    continue;
+                }
+            }
+
+            // Aucun prélèvement tenté (pas d'auto_renew ou solde de crédit insuffisant) :
+            // Laisser failed_attempts à 0 et consigner 'Échéance passée sans renouvellement'
             $this->subscriptionService->enterGracePeriod(
                 subscription: $subscription,
-                failureReason: 'Échéance dépassée — Début de la période de grâce de '.$graceDays.' jours'
+                failureReason: 'Échéance passée sans renouvellement',
+                incrementFailedAttempts: false
             );
             $results['entered_grace']++;
         }
@@ -250,5 +286,125 @@ class SubscriptionRenewalService
         }
 
         return $results;
+    }
+
+    /**
+     * Vérifie si un abonnement échu peut être renouvelé automatiquement avec le solde de crédits BANGO.
+     */
+    public function canRenewWithCredit(Subscription $subscription): bool
+    {
+        $user = $subscription->user;
+        if (! $user) {
+            return false;
+        }
+
+        $price = $subscription->price ?? $subscription->product?->activePrices()->where('cadence', $subscription->cadence)->first();
+        if (! $price) {
+            return false;
+        }
+
+        $amount = (float) ($price->price_amount ?? $subscription->amount);
+        $requiredCredits = (int) round($amount);
+
+        if ($requiredCredits <= 0) {
+            return false;
+        }
+
+        $wallet = $this->creditWalletService->getOrCreateWallet($user);
+
+        return $wallet->canAfford($requiredCredits);
+    }
+
+    /**
+     * Renouvelle automatiquement l'abonnement à l'échéance en débitant le portefeuille de crédits BANGO.
+     */
+    public function renewWithCredit(Subscription $subscription): bool
+    {
+        $user = $subscription->user;
+        if (! $user) {
+            return false;
+        }
+
+        $price = $subscription->price ?? $subscription->product?->activePrices()->where('cadence', $subscription->cadence)->first();
+        if (! $price) {
+            return false;
+        }
+
+        $amount = (float) ($price->price_amount ?? $subscription->amount);
+        $requiredCredits = (int) round($amount);
+
+        if ($requiredCredits <= 0) {
+            return false;
+        }
+
+        $wallet = $this->creditWalletService->getOrCreateWallet($user);
+
+        return DB::transaction(function () use ($subscription, $user, $price, $wallet, $requiredCredits, $amount) {
+            /** @var CreditWallet $lockedWallet */
+            $lockedWallet = CreditWallet::where('id', $wallet->id)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $lockedWallet || ! $lockedWallet->canAfford($requiredCredits)) {
+                return false;
+            }
+
+            $periodKey = $subscription->current_period_end?->format('YmdHis') ?: now()->format('YmdHis');
+            $idempotencyKey = 'auto_renew_sub_'.$subscription->id.'_'.$periodKey;
+
+            // 1. Débit atomique du portefeuille de crédits BANGO
+            $creditTx = $this->creditWalletService->debit(
+                account: $lockedWallet,
+                amount: $requiredCredits,
+                source: 'subscription',
+                reference: $idempotencyKey,
+                description: sprintf('Renouvellement automatique abonnement %s (#%d)', $subscription->product?->name ?? 'BANGO', $subscription->id),
+                idempotencyKey: $idempotencyKey
+            );
+
+            // 2. Création de la transaction officielle (canal Portefeuille de crédits)
+            $paymentTx = PaymentTransaction::create([
+                'user_id' => $user->id,
+                'service_type' => PaymentServiceType::Subscription,
+                'product_id' => $price->product_id,
+                'price_id' => $price->id,
+                'subscription_id' => $subscription->id,
+                'provider' => PaymentProvider::Wallet,
+                'channel' => PaymentChannel::CreditWallet,
+                'currency' => $price->currency ?: 'XAF',
+                'amount' => (string) $amount,
+                'fee_amount' => '0.00',
+                'tax_amount' => '0.00',
+                'total_amount' => (string) $amount,
+                'credit_used' => (string) $requiredCredits,
+                'amount_charged' => (string) $amount,
+                'status' => PaymentStatus::Confirmed,
+                'confirmed_at' => now(),
+                'idempotency_key' => $idempotencyKey,
+                'external_reference' => $creditTx->reference ?? $idempotencyKey,
+                'metadata' => [
+                    'context' => 'auto_renewal_credit',
+                    'previous_period_end' => $subscription->current_period_end?->toIso8601String(),
+                    'wallet_transaction_id' => $creditTx->id,
+                ],
+            ]);
+
+            // 3. Activation du renouvellement sur l'abonnement
+            $this->subscriptionService->activateSubscription(
+                user: $user,
+                price: $price,
+                paymentReference: $paymentTx->reference,
+                metadata: [
+                    'subscription_id' => $subscription->id,
+                    'page_id' => $subscription->page_id,
+                    'payment_transaction_id' => $paymentTx->id,
+                    'provider' => 'wallet',
+                    'amount_paid' => $amount,
+                    'context' => 'auto_renewal_credit',
+                ]
+            );
+
+            return true;
+        });
     }
 }

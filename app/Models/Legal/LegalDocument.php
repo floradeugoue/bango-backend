@@ -2,7 +2,7 @@
 
 namespace App\Models\Legal;
 
-use App\Models\Payment\PaymentTransaction;
+use App\Models\Boost\Campaign;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -141,7 +141,7 @@ class LegalDocument extends Model
         $normalized = self::normalizeSlug($this->slug);
 
         return match ($normalized) {
-            'boosts' => PaymentTransaction::where('purpose', 'boost')->distinct('user_id')->count('user_id') ?: User::count(),
+            'boosts' => Campaign::distinct('user_id')->count('user_id') ?: User::count(),
             'badges' => User::whereNotNull('badge')->count() ?: User::count(),
             'imprint' => 0,
             default => User::count(),

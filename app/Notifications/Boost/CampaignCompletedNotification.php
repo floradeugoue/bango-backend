@@ -27,8 +27,8 @@ class CampaignCompletedNotification extends Notification implements ShouldQueue
     public function toMail(object $notifiable): MailMessage
     {
         return (new MailMessage)
-            ->subject('Votre campagne de boost est terminée')
-            ->line('Votre campagne publicitaire est arrivée à son terme. Consultez votre rapport de performance.')
+            ->subject('Ta campagne de boost est terminée')
+            ->line('Ta campagne publicitaire est arrivée à son terme. Consulte ton rapport de performance.')
             ->action('Voir les résultats', url("/boost/campaigns/{$this->campaign->id}"));
     }
 

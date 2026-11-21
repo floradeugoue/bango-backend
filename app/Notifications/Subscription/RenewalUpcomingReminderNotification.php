@@ -24,18 +24,21 @@ class RenewalUpcomingReminderNotification extends Notification implements Should
      */
     public function toMail(object $notifiable): MailMessage
     {
-        $productName = $this->subscription->product->name ?? 'votre formule BANGO';
-        $expiryDate = $this->subscription->current_period_end?->format('d/m/Y') ?? 'prochainement';
+        $productName = $this->subscription->product->name ?? 'ta formule BANGO';
+        $timezone = method_exists($notifiable, 'resolveTimezone')
+            ? $notifiable->resolveTimezone()
+            : ($notifiable->timezone ?? 'Africa/Douala');
+        $expiryDate = $this->subscription->current_period_end?->copy()->setTimezone($timezone)->format('d/m/Y') ?? 'prochainement';
         $amount = number_format((float) $this->subscription->amount, 0, ',', ' ').' '.$this->subscription->currency;
 
         return (new MailMessage)
-            ->subject("Rappel : Votre abonnement {$productName} expire dans {$this->daysRemaining} jour(s)")
+            ->subject("Rappel : Ton abonnement {$productName} expire dans {$this->daysRemaining} jour(s)")
             ->greeting("Bonjour {$notifiable->name},")
-            ->line("Votre abonnement {$productName} arrive à échéance le {$expiryDate}.")
+            ->line("Ton abonnement {$productName} arrive à échéance le {$expiryDate}.")
             ->line("Tarif de renouvellement : {$amount}.")
-            ->line("Pour conserver vos avantages et votre badge sans interruption, vous pouvez initier votre renouvellement directement depuis l'application.")
+            ->line("Pour conserver tes avantages et ton badge sans interruption, tu peux initier ton renouvellement directement depuis l'application.")
             ->action('Renouveler mon abonnement', url("/subscriptions/{$this->subscription->id}/renewal"))
-            ->line("Attention : Aucun prélèvement automatique n'est effectué. Le renouvellement requiert votre confirmation explicite.");
+            ->line("Attention : Aucun prélèvement automatique n'est effectué. Le renouvellement requiert ta confirmation explicite.");
     }
 
     /**
@@ -48,7 +51,10 @@ class RenewalUpcomingReminderNotification extends Notification implements Should
         $locale = $notifiable->locale ?? 'fr';
         $productName = $this->subscription->product->name ?? 'Abonnement BANGO';
         $expiryDate = $this->subscription->current_period_end?->toIso8601String();
-        $dateFormatted = $this->subscription->current_period_end?->format('d/m/Y') ?? '';
+        $timezone = method_exists($notifiable, 'resolveTimezone')
+            ? $notifiable->resolveTimezone()
+            : ($notifiable->timezone ?? 'Africa/Douala');
+        $dateFormatted = $this->subscription->current_period_end?->copy()->setTimezone($timezone)->format('d/m/Y') ?? '';
         $amount = (float) $this->subscription->amount;
 
         return [

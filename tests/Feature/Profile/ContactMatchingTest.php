@@ -57,7 +57,7 @@ test('it matches active users by plain phone number or last 8 digits', function 
         ->and(array_key_exists('email', $suggestions[0]))->toBeFalse();
 });
 
-test('it matches users via sha256 fingerprints and legacy js hash', function () {
+test('it matches users via sha256 fingerprints and retires legacy js hash by default', function () {
     $me = User::factory()->create();
     $user1 = User::factory()->create([
         'status' => 'active',
@@ -72,14 +72,16 @@ test('it matches users via sha256 fingerprints and legacy js hash', function () 
     $sha256Hash1 = hash('sha256', $digits1);
 
     $digits2 = substr(preg_replace('/\D/', '', '+237699112233'), -8);
+    $sha256Hash2 = hash('sha256', $digits2);
     $legacyJsHash2 = ContactMatchingService::computeLegacyJsHash($digits2);
 
     Passport::actingAs($me);
 
+    // 1. Avec la configuration par défaut (enable_legacy_hash = false) : SHA-256 match, legacy hash ne match pas
     $response = $this->postJson('/api/friends/match-fingerprints', [
         'fingerprints' => [
             $sha256Hash1,
-            $legacyJsHash2,
+            $sha256Hash2,
             'unknown_hash_1234567890abcdef',
         ],
     ]);
@@ -92,6 +94,22 @@ test('it matches users via sha256 fingerprints and legacy js hash', function () 
     $ids = collect($response->json('suggestions'))->pluck('id')->all();
     expect($ids)->toContain((string) $user1->id)
         ->and($ids)->toContain((string) $user2->id);
+
+    // Si on n'envoie que le legacyJsHash2 sans sha256, il n'est plus reconnu par défaut
+    RateLimiter::clear('contact_matching:daily:'.$me->id);
+    $legacyResponse = $this->postJson('/api/friends/match-fingerprints', [
+        'fingerprints' => [$legacyJsHash2],
+    ]);
+    expect($legacyResponse->json('matched_count'))->toBe(0);
+
+    // Mais si activé temporairement par configuration
+    config(['services.contact_matching.enable_legacy_hash' => true]);
+    RateLimiter::clear('contact_matching:daily:'.$me->id);
+    $legacyActiveResponse = $this->postJson('/api/friends/match-fingerprints', [
+        'fingerprints' => [$legacyJsHash2],
+    ]);
+    expect($legacyActiveResponse->json('matched_count'))->toBe(1);
+    config(['services.contact_matching.enable_legacy_hash' => false]);
 });
 
 test('it never suggests the current user to themselves', function () {
@@ -193,11 +211,11 @@ test('it strictly respects mutual blocks', function () {
     expect($suggestions[0]['id'])->toBe((string) $normalFriend->id);
 });
 
-test('it rejects batches exceeding 500 items with 422', function () {
+test('it rejects batches exceeding 2000 items with 422', function () {
     $me = User::factory()->create();
     Passport::actingAs($me);
 
-    $excessive = array_map(fn ($i) => '+22177000'.str_pad((string) $i, 4, '0', STR_PAD_LEFT), range(1, 501));
+    $excessive = array_map(fn ($i) => '+22177000'.str_pad((string) $i, 6, '0', STR_PAD_LEFT), range(1, 2001));
 
     $response = $this->postJson('/api/friends/match-fingerprints', [
         'phones' => $excessive,
@@ -206,22 +224,22 @@ test('it rejects batches exceeding 500 items with 422', function () {
     $response->assertStatus(422);
 });
 
-test('it rate-limits requests exceeding 10 per minute with 429', function () {
+test('it rate-limits requests exceeding 3 per day with 429', function () {
     $me = User::factory()->create();
     Passport::actingAs($me);
 
-    $rateKey = 'contact_matching:'.$me->id;
+    $rateKey = 'contact_matching:daily:'.$me->id;
     RateLimiter::clear($rateKey);
 
-    // Hit 10 times successfully
-    for ($i = 0; $i < 10; $i++) {
+    // Hit 3 times successfully
+    for ($i = 0; $i < 3; $i++) {
         $response = $this->postJson('/api/friends/match-fingerprints', [
             'phones' => ['+221779998877'],
         ]);
         $response->assertOk();
     }
 
-    // 11th time must be rate-limited
+    // 4th time must be rate-limited (429)
     $response = $this->postJson('/api/friends/match-fingerprints', [
         'phones' => ['+221779998877'],
     ]);

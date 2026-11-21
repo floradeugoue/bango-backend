@@ -78,6 +78,7 @@ class SendPushOnNotificationSent
             str_starts_with($type, 'subscription_'), str_starts_with($type, 'renewal_'), str_starts_with($type, 'payment_') => 'subscription',
             str_starts_with($type, 'page_'), str_contains($type, 'PageMember') => 'page',
             str_starts_with($type, 'agent_'), str_starts_with($type, 'delegation_') => 'delegation',
+            str_starts_with($type, 'birthday') => 'birthday',
             default => 'default',
         };
 
@@ -91,6 +92,6 @@ class SendPushOnNotificationSent
      */
     protected function resolveBody(object $notification, array $data): string
     {
-        return (string) ($data['message'] ?? $data['body'] ?? $data['preview'] ?? $data['content'] ?? 'Vous avez reçu une nouvelle notification sur BANGO.');
+        return (string) ($data['message'] ?? $data['body'] ?? $data['preview'] ?? $data['content'] ?? 'Tu as reçu une nouvelle notification sur BANGO.');
     }
 }

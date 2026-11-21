@@ -234,15 +234,15 @@ class AdminAccountOperationsService
         })
             ->orWhere(function (Builder $q) use ($user) {
                 $q->whereIn('reportable_type', [Post::class, 'post', 'posts'])
-                    ->whereIn('reportable_id', Post::where('user_id', $user->id)->select('id'));
+                    ->whereIn('reportable_id', Post::where('user_id', $user->id)->selectRaw('CAST(id AS TEXT)'));
             })
             ->orWhere(function (Builder $q) use ($user) {
                 $q->whereIn('reportable_type', [Reel::class, 'reel', 'reels'])
-                    ->whereIn('reportable_id', Reel::where('user_id', $user->id)->select('id'));
+                    ->whereIn('reportable_id', Reel::where('user_id', $user->id)->selectRaw('CAST(id AS TEXT)'));
             })
             ->orWhere(function (Builder $q) use ($user) {
                 $q->whereIn('reportable_type', [Listing::class, 'listing', 'listings'])
-                    ->whereIn('reportable_id', Listing::where('owner_id', $user->id)->select('id'));
+                    ->whereIn('reportable_id', Listing::where('owner_id', $user->id)->selectRaw('CAST(id AS TEXT)'));
             })
             ->count();
 
@@ -332,7 +332,7 @@ class AdminAccountOperationsService
         return Report::where('reporter_id', $user->id)
             ->orWhere(function (Builder $q) use ($user) {
                 $q->whereIn('reportable_type', [User::class, 'user', 'User', (new User)->getMorphClass()])
-                    ->where('reportable_id', $user->id);
+                    ->where('reportable_id', (string) $user->id);
             })
             ->with(['reporter:id,name', 'operator:id,name'])
             ->orderByDesc('created_at')

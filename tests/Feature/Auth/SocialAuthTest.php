@@ -5,6 +5,7 @@ use App\Models\User;
 use App\Services\Auth\AppleTokenVerifier;
 use App\Services\Auth\GoogleTokenVerifier;
 use App\Services\Auth\JwtVerifierHelper;
+use App\Services\Otp\OtpEmailService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Config;
@@ -57,8 +58,8 @@ beforeEach(function () {
     Config::set('services.google.client_id', 'test-google-client-id');
     Config::set('services.google.client_ids', ['test-google-client-id']);
 
-    Config::set('services.apple.client_id', 'com.bango.app');
-    Config::set('services.apple.client_ids', ['com.bango.app']);
+    Config::set('services.apple.client_id', 'com.bangoapp.app');
+    Config::set('services.apple.client_ids', ['com.bangoapp.app']);
 });
 
 afterEach(function () {
@@ -132,7 +133,7 @@ test('it logs in an existing user already linked to Google without re-creating',
 test('it creates a new user with Apple Sign In and handles apple relay email', function () {
     $token = forgeTestJwt([
         'iss' => 'https://appleid.apple.com',
-        'aud' => 'com.bango.app',
+        'aud' => 'com.bangoapp.app',
         'sub' => 'apple-sub-998877',
         'email' => 'anon123@privaterelay.appleid.com',
         'email_verified' => 'true',
@@ -314,6 +315,10 @@ test('it rejects linking when provider account is already linked to someone else
 });
 
 test('it handles account with 2FA by issuing second-factor challenge instead of direct token', function () {
+    $emailMock = Mockery::mock(OtpEmailService::class);
+    $emailMock->shouldReceive('send')->once();
+    app()->instance(OtpEmailService::class, $emailMock);
+
     $user = User::factory()->create([
         'email' => 'twofactor@bango.app',
         'two_factor_method' => 'email',

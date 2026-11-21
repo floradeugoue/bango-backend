@@ -28,8 +28,8 @@ class CampaignSuspendedNotification extends Notification implements ShouldQueue
     public function toMail(object $notifiable): MailMessage
     {
         return (new MailMessage)
-            ->subject('Votre campagne de boost a été suspendue')
-            ->line("Votre campagne publicitaire a été suspendue pour le motif suivant : {$this->reason}.")
+            ->subject('Ta campagne de boost a été suspendue')
+            ->line("Ta campagne publicitaire a été suspendue pour le motif suivant : {$this->reason}.")
             ->action('Gérer mes campagnes', url("/boost/campaigns/{$this->campaign->id}"));
     }
 

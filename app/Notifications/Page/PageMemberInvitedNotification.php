@@ -30,7 +30,7 @@ class PageMemberInvitedNotification extends Notification implements ShouldQueue
 
         return (new MailMessage)
             ->subject("Invitation à rejoindre l'équipe de {$pageName}")
-            ->line("Vous avez été invité à rejoindre la page {$pageName} avec le rôle {$this->member->role->label()}.")
+            ->line("Tu as été invité·e à rejoindre la page {$pageName} avec le rôle {$this->member->role->label()}.")
             ->action('Voir mes invitations', url('/my-pages'));
     }
 
@@ -45,7 +45,6 @@ class PageMemberInvitedNotification extends Notification implements ShouldQueue
         return [
             'type' => 'page_invitation',
             'member_id' => $this->member->id,
-            'page_id' => $this->member->page_id,
             'page_name' => $pageName,
             'role' => $this->member->role->value,
             'role_label' => $this->member->role->label(),

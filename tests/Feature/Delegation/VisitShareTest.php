@@ -18,6 +18,15 @@ uses(RefreshDatabase::class);
 test('Visit shares negotiation: landlord and agent can propose and accept percentages', function () {
     $landlord = User::factory()->create();
     $agent = User::factory()->create(['badge' => 'agent', 'is_verified' => true]);
+    $listing = Listing::factory()->create(['owner_id' => $landlord->id]);
+
+    Delegation::create([
+        'bailleur_id' => $landlord->id,
+        'agent_id' => $agent->id,
+        'listing_id' => $listing->id,
+        'status' => DelegationStatus::Active,
+        'invited_at' => now(),
+    ]);
 
     // 1. Bailleur propose 20%
     Passport::actingAs($landlord);
@@ -52,6 +61,88 @@ test('Visit shares negotiation: landlord and agent can propose and accept percen
     ])->assertStatus(200);
 
     expect((float) $res3->json('data.agreed_percent'))->toEqual(35.0);
+});
+
+test('propose and accept are refused with 403 NO_ACTIVE_DELEGATION if no delegation exists', function () {
+    $landlord = User::factory()->create();
+    $agent = User::factory()->create(['badge' => 'agent', 'is_verified' => true]);
+
+    Passport::actingAs($landlord);
+    $res = $this->postJson('/api/delegations/visit-share', [
+        'agent_id' => $agent->id,
+        'percent' => 20,
+    ])->assertStatus(403);
+
+    expect($res->json('code'))->toBe('NO_ACTIVE_DELEGATION');
+
+    // Tentative d'acceptation par l'agent
+    Passport::actingAs($agent);
+    $resAccept = $this->postJson('/api/delegations/visit-share/accept', [
+        'bailleur_id' => $landlord->id,
+    ])->assertStatus(403);
+
+    expect($resAccept->json('code'))->toBe('NO_ACTIVE_DELEGATION');
+});
+
+test('propose and accept are refused with 403 NO_ACTIVE_DELEGATION if delegation is revoked', function () {
+    $landlord = User::factory()->create();
+    $agent = User::factory()->create(['badge' => 'agent', 'is_verified' => true]);
+    $listing = Listing::factory()->create(['owner_id' => $landlord->id]);
+
+    Delegation::create([
+        'bailleur_id' => $landlord->id,
+        'agent_id' => $agent->id,
+        'listing_id' => $listing->id,
+        'status' => DelegationStatus::Revoked,
+        'invited_at' => now()->subDays(5),
+        'revoked_at' => now()->subDay(),
+        'revoked_by_id' => $landlord->id,
+    ]);
+
+    // L'agent révoqué tente de proposer un partage
+    Passport::actingAs($agent);
+    $res = $this->postJson('/api/delegations/visit-share', [
+        'bailleur_id' => $landlord->id,
+        'percent' => 25,
+    ])->assertStatus(403);
+
+    expect($res->json('code'))->toBe('NO_ACTIVE_DELEGATION');
+
+    // Une offre existante ne peut pas non plus être acceptée par l'agent révoqué
+    VisitShare::create([
+        'landlord_id' => $landlord->id,
+        'agent_id' => $agent->id,
+        'offer_percent' => 20,
+        'offer_by' => 'landlord',
+        'offer_at' => now()->subDays(2),
+    ]);
+
+    $resAccept = $this->postJson('/api/delegations/visit-share/accept', [
+        'bailleur_id' => $landlord->id,
+    ])->assertStatus(403);
+
+    expect($resAccept->json('code'))->toBe('NO_ACTIVE_DELEGATION');
+});
+
+test('propose is allowed if delegation is pending (not yet accepted)', function () {
+    $landlord = User::factory()->create();
+    $agent = User::factory()->create(['badge' => 'agent', 'is_verified' => true]);
+    $listing = Listing::factory()->create(['owner_id' => $landlord->id]);
+
+    Delegation::create([
+        'bailleur_id' => $landlord->id,
+        'agent_id' => $agent->id,
+        'listing_id' => $listing->id,
+        'status' => DelegationStatus::Pending,
+        'invited_at' => now(),
+        'expires_at' => now()->addDays(7),
+    ]);
+
+    Passport::actingAs($agent);
+    $this->postJson('/api/delegations/visit-share', [
+        'bailleur_id' => $landlord->id,
+        'percent' => 30,
+    ])->assertStatus(200);
 });
 
 test('Agent invitation accept is blocked with 409 while agent proposal is pending, and accepted otherwise', function () {

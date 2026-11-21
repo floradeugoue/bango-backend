@@ -36,7 +36,19 @@ class EnsureAdminPermission
             $normalizedPermission = str_replace('.', ':', $permission);
             $dotPermission = str_replace(':', '.', $permission);
 
-            if (! $user->hasPermission($permission) && ! $user->hasPermission($normalizedPermission) && ! $user->hasPermission($dotPermission)) {
+            $hasAccess = $user->hasPermission($permission)
+                || $user->hasPermission($normalizedPermission)
+                || $user->hasPermission($dotPermission);
+
+            // Équivalence souple pour les statistiques : stats.read <-> stats.view
+            if (! $hasAccess && in_array($permission, ['stats.read', 'stats:read', 'stats.view', 'stats:view'], true)) {
+                $hasAccess = $user->hasPermission('stats:view')
+                    || $user->hasPermission('stats.view')
+                    || $user->hasPermission('stats:read')
+                    || $user->hasPermission('stats.read');
+            }
+
+            if (! $hasAccess) {
                 return response()->json([
                     'code' => $isContractClient ? 'forbidden' : 'ADMIN_PERMISSION_DENIED',
                     'message' => "Accès refusé. La permission '{$permission}' est requise pour cette opération.",

@@ -3,6 +3,7 @@
 namespace App\Notifications\Delegation;
 
 use App\Models\Delegation\Delegation;
+use App\Models\Delegation\VisitShare;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
@@ -43,6 +44,11 @@ class AgentInvitationNotification extends Notification implements ShouldQueue
     {
         $locale = $notifiable->locale ?? 'fr';
 
+        $visitShare = VisitShare::where('landlord_id', $this->delegation->bailleur_id)
+            ->where('agent_id', $this->delegation->agent_id)
+            ->first();
+        $visitSharePercent = $visitShare?->offer_percent !== null ? (float) $visitShare->offer_percent : null;
+
         return [
             'type' => 'agent_invitation',
             'delegation_id' => $this->delegation->id,
@@ -51,6 +57,7 @@ class AgentInvitationNotification extends Notification implements ShouldQueue
             'bailleur_name' => $this->delegation->bailleur->display_name ?: ($this->delegation->bailleur->name ?? 'Bailleur'),
             'listing_title' => $this->delegation->listing->title ?? 'Bien',
             'capabilities' => $this->delegation->capabilities,
+            'visit_share_percent' => $visitSharePercent,
             'expires_at' => $this->delegation->expires_at?->toIso8601String(),
             'title' => trans('notifications.agent_invitation.title', [], $locale),
             'message' => trans('notifications.agent_invitation.body', [], $locale),

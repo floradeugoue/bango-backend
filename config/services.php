@@ -59,12 +59,12 @@ return [
     ],
 
     'apple' => [
-        'client_id' => env('APPLE_CLIENT_ID', 'com.bango.app'),
+        'client_id' => env('APPLE_CLIENT_ID', 'com.bangoapp.app'),
         'team_id' => env('APPLE_TEAM_ID'),
         'key_id' => env('APPLE_KEY_ID'),
         'private_key' => env('APPLE_PRIVATE_KEY'),
         'client_ids' => array_values(array_filter([
-            env('APPLE_CLIENT_ID', 'com.bango.app'),
+            env('APPLE_CLIENT_ID', 'com.bangoapp.app'),
             env('APPLE_BUNDLE_ID'),
             env('APPLE_SERVICE_ID'),
         ])),
@@ -72,6 +72,7 @@ return [
 
     'contact_matching' => [
         'salt' => env('CONTACT_MATCHING_SALT', 'bango_contact_salt_secret_2026'),
+        'enable_legacy_hash' => env('CONTACT_MATCHING_ENABLE_LEGACY_HASH', false),
     ],
 
     'translation' => [

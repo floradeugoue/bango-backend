@@ -2,11 +2,21 @@
 
 namespace App\Services\Subscription;
 
+use App\Enums\Boost\CreditTransactionType;
 use App\Enums\Page\PageCertificationStatus;
+use App\Enums\Payment\PaymentChannel;
+use App\Enums\Payment\PaymentEventSource;
+use App\Enums\Payment\PaymentProvider;
+use App\Enums\Payment\PaymentServiceType;
+use App\Enums\Payment\PaymentStatus;
+use App\Models\Boost\CreditTransaction;
+use App\Models\Payment\PaymentTransaction;
 use App\Models\Subscription\Subscription;
 use App\Models\Subscription\SubscriptionEvent;
 use App\Models\Subscription\SubscriptionPrice;
 use App\Models\User;
+use App\Services\Payment\PaymentEngineService;
+use App\Services\Payment\PricingService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -103,17 +113,21 @@ class SubscriptionService
 
             $pageId = isset($metadata['page_id']) ? (int) $metadata['page_id'] : null;
 
-            // Find existing subscription for this badge type or create new
-            $query = Subscription::where('user_id', $user->id)
-                ->where('badge_type', $product->badge_type ?: $product->code);
-
-            if ($pageId) {
-                $query->where('page_id', $pageId);
+            // Find existing subscription by ID if provided, or by user + badge_type
+            if (! empty($metadata['subscription_id'])) {
+                $subscription = Subscription::where('id', $metadata['subscription_id'])->lockForUpdate()->first();
             } else {
-                $query->whereNull('page_id');
-            }
+                $query = Subscription::where('user_id', $user->id)
+                    ->where('badge_type', $product->badge_type ?: $product->code);
 
-            $subscription = $query->lockForUpdate()->first();
+                if ($pageId) {
+                    $query->where('page_id', $pageId);
+                } else {
+                    $query->whereNull('page_id');
+                }
+
+                $subscription = $query->lockForUpdate()->first();
+            }
 
             $oldState = $subscription?->state;
 
@@ -209,18 +223,159 @@ class SubscriptionService
 
         $newAmount = (float) $newPrice->price_amount;
         $amountToPay = max(0.0, $newAmount - $prorataCredit);
+        $durationDays = $newPrice->duration_days ?: ($newPrice->cadence === 'yearly' ? 365 : 30);
+        $newPeriodEnd = $now->copy()->addDays($durationDays);
 
         return [
             'current_subscription_id' => $subscription->id,
             'current_cadence' => $subscription->cadence,
             'new_cadence' => $newPrice->cadence,
+            'new_price_id' => $newPrice->id,
             'current_amount' => (float) $subscription->amount,
             'new_amount' => $newAmount,
-            'remaining_days' => $remainingDays,
+            'remaining_days' => (int) round($remainingDays),
             'prorata_credit_xaf' => $prorataCredit,
             'amount_to_pay_xaf' => $amountToPay,
             'currency' => $newPrice->currency,
+            'new_period_end' => $newPeriodEnd->toIso8601String(),
         ];
+    }
+
+    /**
+     * Encaisse le prorata (via credit_wallet) et bascule l'abonnement sur la nouvelle formule et la nouvelle échéance.
+     *
+     * @return array{subscription: Subscription, transaction: PaymentTransaction, calculation: array<string, mixed>, replayed: bool}
+     */
+    public function confirmPlanChange(
+        User $user,
+        Subscription $subscription,
+        SubscriptionPrice $newPrice,
+        string $idempotencyKey
+    ): array {
+        return DB::transaction(function () use ($user, $subscription, $newPrice, $idempotencyKey) {
+            /** @var Subscription $lockedSub */
+            $lockedSub = Subscription::where('id', $subscription->id)
+                ->with(['product', 'price'])
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            // Rejeu idempotent si une transaction confirmée existe déjà avec cette clé
+            $existingTx = PaymentTransaction::where('user_id', $user->id)
+                ->where('idempotency_key', $idempotencyKey)
+                ->where('status', PaymentStatus::Confirmed)
+                ->first();
+
+            if ($existingTx) {
+                return [
+                    'subscription' => $lockedSub->fresh(['product', 'price']),
+                    'transaction' => $existingTx,
+                    'calculation' => $this->calculatePlanChange($lockedSub, $newPrice),
+                    'replayed' => true,
+                ];
+            }
+
+            $calculation = $this->calculatePlanChange($lockedSub, $newPrice);
+            $requiredAmount = (int) round((float) $calculation['amount_to_pay_xaf']);
+
+            $wallet = $user->creditWallet()->lockForUpdate()->first();
+            if ($requiredAmount > 0 && (! $wallet || ! $wallet->canAfford($requiredAmount))) {
+                throw ValidationException::withMessages([
+                    'credit_wallet' => ['Solde de crédits BANGO insuffisant pour régler le prorata du changement de formule.'],
+                ]);
+            }
+
+            $pricingService = app(PricingService::class);
+            $paymentEngine = app(PaymentEngineService::class);
+
+            $now = now();
+            $durationDays = $newPrice->duration_days ?: ($newPrice->cadence === 'yearly' ? 365 : 30);
+            $newPeriodEnd = $now->copy()->addDays($durationDays);
+
+            $quote = $pricingService->calculateQuote(
+                serviceType: PaymentServiceType::Subscription,
+                priceId: $newPrice->id,
+                customAmount: (float) $requiredAmount,
+                gateway: 'wallet'
+            );
+
+            $transaction = $paymentEngine->createOrRetrieveTransaction(
+                user: $user,
+                quote: $quote,
+                idempotencyKey: $idempotencyKey,
+                context: [
+                    'subscription_id' => $lockedSub->id,
+                    'channel' => PaymentChannel::CreditWallet->value,
+                    'context' => 'plan_change',
+                    'old_cadence' => $lockedSub->cadence,
+                    'new_cadence' => $newPrice->cadence,
+                    'prorata_credit_xaf' => $calculation['prorata_credit_xaf'],
+                    'custom_period_end' => $newPeriodEnd->toISOString(),
+                ]
+            );
+
+            if ($requiredAmount > 0 && $wallet) {
+                $balanceBefore = (int) $wallet->balance;
+                $wallet->decrement('balance', $requiredAmount);
+                $balanceAfter = (int) $wallet->balance;
+
+                CreditTransaction::create([
+                    'wallet_id' => $wallet->id,
+                    'user_id' => $user->id,
+                    'type' => CreditTransactionType::Debit,
+                    'amount' => -$requiredAmount,
+                    'balance_before' => $balanceBefore,
+                    'balance_after' => $balanceAfter,
+                    'description' => "Changement de formule d'abonnement ({$lockedSub->cadence} -> {$newPrice->cadence}) ({$transaction->reference})",
+                    'reference' => $transaction->reference,
+                    'created_at' => $now,
+                ]);
+            }
+
+            $attempt = $transaction->createAttempt(
+                provider: PaymentProvider::Wallet,
+                channel: PaymentChannel::CreditWallet,
+                externalReference: 'WALLET-'.Str::upper(Str::random(10)),
+                metadata: [
+                    'debited_amount' => $requiredAmount,
+                    'wallet_id' => $wallet?->id,
+                    'prorata_credit_xaf' => $calculation['prorata_credit_xaf'],
+                ]
+            );
+            $attempt->markSuccessful($attempt->external_reference, ['debited' => $requiredAmount]);
+
+            $transaction->provider = PaymentProvider::Wallet;
+            $transaction->channel = PaymentChannel::CreditWallet;
+            $transaction->fee_amount = '0.00';
+            $transaction->total_amount = (string) $requiredAmount;
+            $transaction->amount_charged = (string) $requiredAmount;
+            $transaction->credit_used = $requiredAmount;
+            $transaction->external_reference = $attempt->external_reference;
+            $transaction->transitionTo(
+                targetStatus: PaymentStatus::Processing,
+                source: PaymentEventSource::System,
+                reason: 'Débit du portefeuille de crédits BANGO (changement de formule)',
+                payload: ['debited' => $requiredAmount]
+            );
+
+            $confirmedTx = $paymentEngine->confirmAndFulfill(
+                transaction: $transaction,
+                externalReference: $attempt->external_reference,
+                source: PaymentEventSource::System,
+                fulfillmentDetails: [
+                    'debited' => $requiredAmount,
+                    'plan_change' => true,
+                    'old_cadence' => $calculation['current_cadence'],
+                    'new_cadence' => $newPrice->cadence,
+                ]
+            );
+
+            return [
+                'subscription' => $lockedSub->fresh(['product', 'price']),
+                'transaction' => $confirmedTx,
+                'calculation' => $calculation,
+                'replayed' => false,
+            ];
+        });
     }
 
     /**
@@ -293,18 +448,40 @@ class SubscriptionService
     }
 
     /**
-     * Transition a subscription to grace period (7 days) after a renewal failure.
+     * Transition a subscription to grace period (7 days) after a renewal failure or expiration.
      */
-    public function enterGracePeriod(Subscription $subscription, ?string $failureReason = null): Subscription
-    {
-        return DB::transaction(function () use ($subscription, $failureReason) {
-            $graceUntil = now()->addDays(7);
+    public function enterGracePeriod(
+        Subscription $subscription,
+        ?string $failureReason = null,
+        ?bool $incrementFailedAttempts = null
+    ): Subscription {
+        return DB::transaction(function () use ($subscription, $failureReason, $incrementFailedAttempts) {
+            $graceDays = (int) config('subscription.grace_period_days', 7);
+            $graceUntil = now()->addDays($graceDays);
             $oldState = $subscription->state;
+
+            // Ne compter un échec (failed_attempts + 1) QUE si un prélèvement a été explicitement tenté et a échoué
+            $shouldIncrement = $incrementFailedAttempts ?? (
+                $failureReason !== null
+                && $failureReason !== 'Échéance passée sans renouvellement'
+                && ! str_starts_with($failureReason, 'Échéance dépassée')
+                && (str_contains(mb_strtolower($failureReason), 'échec')
+                    || str_contains(mb_strtolower($failureReason), 'echec')
+                    || str_contains(mb_strtolower($failureReason), 'fail')
+                    || str_contains(mb_strtolower($failureReason), 'refus')
+                    || str_contains(mb_strtolower($failureReason), 'insuffisant'))
+            );
+
+            $failedAttempts = $shouldIncrement
+                ? ($subscription->failed_attempts + 1)
+                : $subscription->failed_attempts;
+
+            $reason = $failureReason ?? ($shouldIncrement ? 'Échec du prélèvement à l\'échéance' : 'Échéance passée sans renouvellement');
 
             $subscription->update([
                 'state' => 'grace',
                 'grace_until' => $graceUntil,
-                'failed_attempts' => $subscription->failed_attempts + 1,
+                'failed_attempts' => $failedAttempts,
             ]);
 
             SubscriptionEvent::create([
@@ -314,10 +491,10 @@ class SubscriptionService
                 'old_state' => $oldState,
                 'new_state' => 'grace',
                 'actor_role' => 'system',
-                'reason' => $failureReason ?? 'Échec du prélèvement à l\'échéance',
+                'reason' => $reason,
                 'payload' => [
                     'grace_until' => $graceUntil->toIso8601String(),
-                    'attempt' => $subscription->failed_attempts,
+                    'attempt' => $failedAttempts,
                 ],
             ]);
 

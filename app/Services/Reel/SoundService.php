@@ -6,8 +6,10 @@ use App\Enums\Reel\ReelStatus;
 use App\Models\Reel\Reel;
 use App\Models\Reel\Sound;
 use App\Models\User;
+use App\Notifications\Reel\ReelAudioMutedCopyrightNotification;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 class SoundService
@@ -19,6 +21,7 @@ class SoundService
     {
         return Sound::query()
             ->availableForUsers()
+            ->withCount('reels')
             ->when($genre, fn (Builder $q) => $q->where('genre', $genre))
             ->when($search, function (Builder $q) use ($search) {
                 $term = strtolower(trim($search));
@@ -27,7 +30,7 @@ class SoundService
                         ->orWhereRaw('LOWER(artist) LIKE ?', ["%{$term}%"]);
                 });
             })
-            ->orderByRaw('(base_uses + uses_count) DESC')
+            ->orderByDesc('reels_count')
             ->paginate($perPage);
     }
 
@@ -37,7 +40,7 @@ class SoundService
     public function getSound(string $id, ?User $user = null): ?Sound
     {
         // 1. Recherche dans la base
-        $sound = Sound::with('user')->find($id);
+        $sound = Sound::with('user')->withCount('reels')->find($id);
         if ($sound) {
             return $sound;
         }
@@ -173,5 +176,76 @@ class SoundService
         $sound->update(['is_locked' => $locked]);
 
         return $sound;
+    }
+
+    /**
+     * Coupe le son original partout lorsqu'un reel ou son audio fait l'objet d'un retrait pour droits d'auteur (copyright).
+     *
+     * 1. Marque le sound 'orig:<reel_id>' comme retiré (is_removed = true, is_published = false, rights_status = 'disputed').
+     * 2. Coupe l'audio de tous les reels dérivés (sound_id = 'orig:<reel_id>') en positionnant is_muted = true (vidéos conservées).
+     * 3. Notifie les auteurs des reels dérivés impactés.
+     *
+     * @return array{sound: Sound, muted_reels_count: int, affected_users_count: int}
+     */
+    public function handleOriginalSoundCopyrightInfringement(Reel|string $reel, ?User $operator = null, ?string $reason = null): array
+    {
+        $reelId = $reel instanceof Reel ? $reel->id : (string) $reel;
+        $reelObj = $reel instanceof Reel ? $reel : Reel::withTrashed()->with('user')->find($reelId);
+
+        $soundId = "orig:{$reelId}";
+
+        $sound = Sound::firstOrCreate(
+            ['id' => $soundId],
+            [
+                'title' => 'Son original',
+                'artist' => $reelObj?->user?->display_name ?? $reelObj?->user?->name ?? 'Utilisateur BANGO',
+                'genre' => 'afro',
+                'is_original' => true,
+                'original_reel_id' => $reelId,
+                'user_id' => $reelObj?->user_id,
+                'audio_url' => $reelObj?->video_url,
+            ]
+        );
+
+        $sound->update([
+            'is_removed' => true,
+            'is_published' => false,
+            'is_locked' => true,
+            'rights_status' => 'disputed',
+        ]);
+
+        $affectedReels = Reel::where('sound_id', $soundId)
+            ->where('id', '!=', $reelId)
+            ->with('user')
+            ->get();
+
+        $mutedCount = 0;
+        $notifiedUsers = [];
+
+        foreach ($affectedReels as $affectedReel) {
+            $affectedReel->is_muted = true;
+            $affectedReel->save();
+            $mutedCount++;
+
+            $author = $affectedReel->user;
+            if ($author) {
+                try {
+                    $author->notify(new ReelAudioMutedCopyrightNotification($affectedReel, $sound, $reason));
+                    if (! in_array($author->id, $notifiedUsers, true)) {
+                        $notifiedUsers[] = $author->id;
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning("Échec envoi notification coupure son original reel {$affectedReel->id} : ".$e->getMessage());
+                }
+            }
+        }
+
+        Log::info("Son original {$soundId} retiré pour droits d'auteur : {$mutedCount} reel(s) dérivé(s) coupé(s), ".count($notifiedUsers).' auteur(s) notifié(s).');
+
+        return [
+            'sound' => $sound,
+            'muted_reels_count' => $mutedCount,
+            'affected_users_count' => count($notifiedUsers),
+        ];
     }
 }

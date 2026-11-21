@@ -58,9 +58,14 @@ class AdminAccessRequestController extends Controller
             'role' => $request->input('requested_role'),
         ]);
 
+        // Envoi de l'accusé de réception au demandeur et notification des validateurs
+        $this->emailService->sendSubmissionReceipt($accessRequest);
+        $this->emailService->notifyReviewers($accessRequest);
+
         return response()->json([
             'message' => 'Votre demande d\'accès a bien été enregistrée et transmise à la direction pour validation.',
             'reference_id' => $accessRequest->id,
+            'reference' => $accessRequest->reference,
             'status' => 'pending',
         ], 201);
     }

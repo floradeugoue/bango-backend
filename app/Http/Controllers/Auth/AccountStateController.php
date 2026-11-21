@@ -24,14 +24,18 @@ class AccountStateController extends Controller
 
         $suspension = null;
         if ($user->status === 'suspended') {
-            $sanction = $this->verifier->activeSuspension($user);
+            if ($user->suspended_until !== null && $user->suspended_until->isPast()) {
+                $user->liftExpiredSuspension();
+            } else {
+                $sanction = $this->verifier->activeSuspension($user);
 
-            $suspension = [
-                'id' => $sanction?->id,
-                'reason' => $user->suspension_reason ?? 'Non respect des conditions d\'utilisation.',
-                'from' => $user->suspended_from?->toIso8601String() ?? $user->updated_at?->toIso8601String(),
-                'until' => $user->suspended_until?->toIso8601String(),
-            ];
+                $suspension = [
+                    'id' => $sanction?->id,
+                    'reason' => $user->suspension_reason ?? 'Non respect des conditions d\'utilisation.',
+                    'from' => $user->suspended_from?->toIso8601String() ?? $user->updated_at?->toIso8601String(),
+                    'until' => $user->suspended_until?->toIso8601String(),
+                ];
+            }
         }
 
         $deletion = null;

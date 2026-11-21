@@ -7,6 +7,7 @@ use App\Http\Controllers\Agent\AgentEarningsController;
 use App\Http\Controllers\Agent\AgentInvitationController;
 use App\Http\Controllers\Agent\AgentPortfolioController;
 use App\Http\Controllers\Auth\AccountStateController;
+use App\Http\Controllers\Auth\EmailVerificationController;
 use App\Http\Controllers\Auth\ForgotPasswordController;
 use App\Http\Controllers\Auth\LogoutController;
 use App\Http\Controllers\Auth\ResetPasswordController;
@@ -174,6 +175,7 @@ Route::prefix('auth')->group(function () {
     Route::post('/signup', SignupController::class);
     // Annulation immédiate de l'inscription et effacement du compte (LG-09)
     Route::delete('/signup', [SignupController::class, 'destroy'])->middleware('auth:api');
+    Route::post('/underage', [ProfileController::class, 'reportUnderage'])->middleware('auth:api');
     // Connexion et génération du token d'accès (Passport)
     Route::post('/signin', SigninController::class);
     // Validation du second facteur (2FA)
@@ -202,6 +204,14 @@ Route::prefix('auth')->group(function () {
 
     // Restaurer un compte supprimé (soft delete)
     Route::post('/restore-account', [AccountController::class, 'restore']);
+
+    // Confirmation et vérification d'adresse e-mail (inscription & bienvenue)
+    Route::get('/email/verify/{id}/{hash}', [EmailVerificationController::class, 'verify'])
+        ->name('api.auth.email.verify.link');
+    Route::post('/email/verify', [EmailVerificationController::class, 'verifyWithCode'])
+        ->name('api.auth.email.verify.code');
+    Route::post('/email/resend', [EmailVerificationController::class, 'resend'])
+        ->name('api.auth.email.resend');
 });
 
 // Suggestions automatiques de pseudonymes disponibles (AU-15 / AU-16)
@@ -300,6 +310,10 @@ Route::prefix('listings')->group(function () {
     // Enregistrer un partage d'annonce de manière atomique et idempotente
     // POST /listings/{id}/share
     Route::post('/{id}/share', [ListingController::class, 'share'])->whereUuid('id')->name('api.listings.share');
+
+    // Écran d'alerte fausse annonce (SUP-18)
+    // GET /listings/{id}/fraud-alert
+    Route::get('/{id}/fraud-alert', [ListingController::class, 'fraudAlert'])->whereUuid('id')->name('api.listings.fraud_alert');
 });
 
 // --------------------------------------------------------------------------
@@ -402,6 +416,12 @@ Route::middleware('auth:api')->group(function () {
     Route::get('/user', function (Request $request) {
         return new UserResource($request->user()->load('interests'));
     });
+    Route::get('/auth/me', function (Request $request) {
+        return new UserResource($request->user()->load('interests'));
+    })->name('api.auth.me');
+    Route::get('/me', function (Request $request) {
+        return new UserResource($request->user()->load('interests'));
+    })->name('api.me');
 });
 
 /*
@@ -431,6 +451,10 @@ Route::middleware('auth:api')->group(function () {
         Route::put('/identity', [ProfileController::class, 'updateIdentity']);
         // Mettre à jour la date de naissance
         Route::put('/birthdate', [ProfileController::class, 'updateBirthdate']);
+        // Signaler l'utilisateur comme mineur et effacer immédiatement et définitivement son compte et ses données (LG-09)
+        Route::post('/birthdate/underage', [ProfileController::class, 'reportUnderage'])->name('api.profile.birthdate.underage');
+        Route::delete('/birthdate/underage', [ProfileController::class, 'reportUnderage']);
+        Route::post('/underage', [ProfileController::class, 'reportUnderage'])->name('api.profile.underage');
         // Mettre à jour le genre/sexe
         Route::put('/gender', [ProfileController::class, 'updateGender']);
         // Mettre à jour la localisation actuelle de l'utilisateur
@@ -656,6 +680,9 @@ Route::middleware('auth:api')->group(function () {
         // Annuler une visite (avec application de la politique de remboursement 24h IM-14)
         Route::post('/{id}/cancel', [ProspectVisitController::class, 'cancel'])->whereUuid('id')->name('api.visits.cancel');
 
+        // Demander le remboursement en argent sur le moyen de paiement d'origine d'une visite annulée
+        Route::post('/{id}/refund-to-source', [ProspectVisitController::class, 'refundToSource'])->whereUuid('id')->name('api.visits.refund_to_source');
+
         // Répondre à une proposition de créneau alternatif par le bailleur
         Route::post('/{id}/proposal/respond', [ProspectVisitController::class, 'respondToProposal'])->whereUuid('id')->name('api.visits.proposal.respond');
 
@@ -824,6 +851,9 @@ Route::middleware('auth:api')->group(function () {
         Route::delete('/sessions/{id}', [SecurityController::class, 'revokeSession']);
         // Valider/Reconnaître manuellement un appareil ou une session
         Route::post('/sessions/{id}/acknowledge', [SecurityController::class, 'acknowledgeSession']);
+        // « Ce n'était pas moi » déconnecte immédiatement la session inhabituelle signalée (ST-13)
+        Route::post('/sessions/{id}/not-me', [SecurityController::class, 'notMe'])->name('api.settings.sessions.not_me');
+        Route::post('/sessions/not-me', [SecurityController::class, 'notMe']);
 
         // Double Authentification TOTP (ST-09 / ST-10)
         Route::prefix('2fa')->group(function () {
@@ -873,6 +903,7 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/{id}', [SubscriptionController::class, 'show']);
         // Changer de plan d'abonnement (migration de formule)
         Route::post('/{id}/change-plan', [SubscriptionController::class, 'changePlan']);
+        Route::post('/{id}/change-plan/confirm', [SubscriptionController::class, 'confirmChangePlan']);
         // Résilier le renouvellement automatique d'un abonnement
         Route::post('/{id}/cancel', [SubscriptionController::class, 'cancel']);
         // Rétablir la reconduction automatique d'un abonnement (annuler la résiliation)
@@ -930,6 +961,8 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/double-charge-claims', [DoubleChargeClaimController::class, 'store'])->name('api.payments.double-charge-claims.store');
         // Lister mes réclamations d'incidents de double débit et leur état de traitement
         Route::get('/double-charge-claims/mine', [DoubleChargeClaimController::class, 'mine'])->name('api.payments.double-charge-claims.mine');
+        // Demander le remboursement en argent sur le moyen de paiement d'origine d'un double débit
+        Route::post('/double-charge-claims/{id}/refund-to-source', [DoubleChargeClaimController::class, 'refundToSource'])->name('api.payments.double-charge-claims.refund_to_source');
 
         // Obtenir le statut en temps réel d'un paiement (polling 120s / reprise réseau)
         Route::get('/{id}/status', [PaymentController::class, 'status']);
@@ -1439,6 +1472,8 @@ Route::middleware('auth:api')->group(function () {
     Route::prefix('credits')->group(function () {
         // Consulter le solde du portefeuille de Crédits BANGO
         Route::get('/wallet', [App\Http\Controllers\Credits\CreditWalletController::class, 'show'])->name('api.credits.wallet.show');
+        // Rembourser en argent le solde de Crédits BANGO sur le moyen de paiement d'origine
+        Route::post('/wallet/refund', [App\Http\Controllers\Credits\CreditWalletController::class, 'refund'])->name('api.credits.wallet.refund');
         // Acheter un pack de Crédits BANGO via paiement mobile money ou carte
         Route::post('/purchases', [CreditPurchaseController::class, 'store'])->name('api.credits.purchases.store');
         // Historique des transactions et mouvements de Crédits BANGO

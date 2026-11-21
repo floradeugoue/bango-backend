@@ -13,6 +13,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\RateLimiter;
 
@@ -60,7 +61,8 @@ class AdminAuthService
                 'device_fingerprint' => substr($deviceHash, 0, 16),
             ],
             'policy' => [
-                'two_factor_required' => false,
+                'two_factor_required' => isset($session) && $session?->user ? $session->user->requiresMandatoryTwoFactor() : false,
+                'mandatory_two_factor_roles' => User::MANDATORY_2FA_ROLES,
                 'sliding_timeout_minutes' => 30,
                 'password_policy' => AdminPasswordPolicy::getPolicy(),
             ],
@@ -178,13 +180,26 @@ class AdminAuthService
         // Réinitialisation du throttle après vérification valide des identifiants
         RateLimiter::clear($throttleKey);
 
-        // Double authentification facultative : activée uniquement si l'opérateur a configuré son TOTP
-        $hasTotp = ! empty($user->two_factor_secret)
-            && ! in_array($user->two_factor_method, [null, '', 'off', 'none'], true);
+        // Double authentification obligatoire pour les rôles sensibles (vérification KYC, support, finance, direction, admin),
+        // facultative pour les autres rôles (ex: modération) tant que l'opérateur n'a pas configuré son TOTP.
+        $hasTotp = $user->hasActiveTotp();
+        $hasBackupCodes = ! empty($user->backup_codes) && is_array($user->backup_codes);
+        $isMandatoryRole = $user->requiresMandatoryTwoFactor();
 
-        if (! $hasTotp) {
-            // Si l'opérateur n'a pas de TOTP (two_factor_method vide ou off), ouvrir la session directement (cookie bango_admin_session), sans challenge
+        if (! $hasTotp && ! $hasBackupCodes && ! $isMandatoryRole) {
+            // Si le rôle n'exige pas la 2FA et que l'opérateur n'a pas de TOTP, ouvrir la session directement
             return $this->establishSession($user, $request);
+        }
+
+        // Si le rôle exige la 2FA mais que l'opérateur n'a pas encore configuré son TOTP,
+        // on génère immédiatement un secret TOTP en attente à configurer et valider lors du challenge.
+        $setupSecret = null;
+        $setupOtpAuthUri = null;
+        if (! $hasTotp && $isMandatoryRole) {
+            $setupSecret = $this->totpService->generateSecret();
+            $account = $user->email ?? $user->handle ?? (string) $user->id;
+            $setupOtpAuthUri = $this->totpService->getOtpAuthUri($setupSecret, $account, 'BANGO ADMIN');
+            Cache::put("admin_2fa_pending_secret:{$user->id}", $setupSecret, now()->addMinutes(15));
         }
 
         // Émission d'un challenge TOTP aléatoire, expirant, lié à l'opérateur
@@ -202,23 +217,39 @@ class AdminAuthService
 
         AdminAuditLog::logEvent('auth.challenge.issued', $user, $request->ip(), $request->userAgent(), [
             'type' => 'totp',
+            'setup_required' => $setupSecret !== null,
         ]);
 
-        return response()->json([
-            'next' => 'otp',
+        $payload = [
+            'next' => $setupSecret !== null ? 'setup_2fa' : 'otp',
             'challengeId' => $challengeToken,
             'challenge_token' => $challengeToken,
             'operator' => [
                 'email' => $user->email,
                 'title' => $user->role?->name ?? 'Opérateur',
+                'role' => $user->role?->slug,
                 'city' => $user->city ?? 'Dakar',
                 'avatarUrl' => $user->avatar_url,
             ],
             'challenge_required' => true,
             'challenge_type' => 'totp',
+            'two_factor_required' => $isMandatoryRole,
+            'two_factor_setup_required' => $setupSecret !== null,
             'expires_in' => 600,
-            'message' => 'Identifiants validés. Veuillez saisir votre code d\'authentification à deux facteurs.',
-        ], 200);
+            'message' => $setupSecret !== null
+                ? 'La double authentification (TOTP) est obligatoire pour votre rôle. Veuillez configurer votre code TOTP pour continuer.'
+                : 'Identifiants validés. Veuillez saisir votre code d\'authentification à deux facteurs.',
+        ];
+
+        if ($setupSecret !== null) {
+            $payload['secret'] = $setupSecret;
+            $payload['totp_secret'] = $setupSecret;
+            $payload['otpauth_uri'] = $setupOtpAuthUri;
+            $payload['otpauthUri'] = $setupOtpAuthUri;
+            $payload['issuer'] = 'BANGO ADMIN';
+        }
+
+        return response()->json($payload, 200);
     }
 
     /**
@@ -263,8 +294,42 @@ class AdminAuthService
             ], 403);
         }
 
-        // Vérification du code TOTP
-        $isValid = $this->verifyTotp($user, $code);
+        $extraPayload = [];
+
+        // 1. Si l'opérateur possède déjà un secret TOTP actif ou des codes de secours
+        if ($user->hasActiveTotp() || (! empty($user->backup_codes) && is_array($user->backup_codes))) {
+            $isValid = $this->verifyTotp($user, $code);
+        } else {
+            // 2. Sinon, validation et activation du TOTP obligatoire initié lors de la connexion
+            $pendingSecret = Cache::get("admin_2fa_pending_secret:{$user->id}");
+            $isValid = ! empty($pendingSecret) && $this->totpService->verifyCode((string) $pendingSecret, $code);
+
+            if ($isValid) {
+                $backupCodes = $this->backupCodeService->generateCodes(10);
+
+                $user->update([
+                    'two_factor_method' => 'totp',
+                    'two_factor_secret' => Crypt::encryptString((string) $pendingSecret),
+                    'two_factor_confirmed_at' => now(),
+                    'backup_codes' => $backupCodes['hashed'],
+                ]);
+
+                Cache::forget("admin_2fa_pending_secret:{$user->id}");
+
+                AdminAuditLog::logEvent('auth.2fa.enabled', $user, $request->ip(), $request->userAgent(), [
+                    'method' => 'totp',
+                    'enrolled_at_login' => true,
+                    'backup_codes_count' => 10,
+                ]);
+
+                $extraPayload = [
+                    'two_factor_enabled' => true,
+                    'recoveryKeys' => $backupCodes['plain'],
+                    'recovery_keys' => $backupCodes['plain'],
+                    'backup_codes' => $backupCodes['plain'],
+                ];
+            }
+        }
 
         if (! $isValid) {
             return $this->handleFailed2faAttempt($user, $challenge, $request, 'auth.2fa.failed');
@@ -275,7 +340,7 @@ class AdminAuthService
         Cache::forget("admin_2fa_failed_attempts:{$user->id}");
 
         // Établissement de la session administrative sécurisée
-        return $this->establishSession($user, $request);
+        return $this->establishSession($user, $request, isRecovery: false, extraPayload: $extraPayload);
     }
 
     /**
@@ -407,8 +472,10 @@ class AdminAuthService
 
     /**
      * Établit la session serveur, régénère l'identifiant pour contrer la fixation, et émet les cookies.
+     *
+     * @param  array<string, mixed>  $extraPayload
      */
-    public function establishSession(User $user, Request $request, bool $isRecovery = false): JsonResponse
+    public function establishSession(User $user, Request $request, bool $isRecovery = false, array $extraPayload = []): JsonResponse
     {
         // 1. Génération cryptographique aléatoire de l'ID de session et du jeton CSRF
         $rawSessionId = bin2hex(random_bytes(32));
@@ -484,7 +551,7 @@ class AdminAuthService
 
         $permissions = $user->getEffectivePermissions();
 
-        return response()->json([
+        return response()->json(array_merge([
             'operator' => [
                 'id' => (string) $user->id,
                 'name' => $user->name,
@@ -506,7 +573,7 @@ class AdminAuthService
                 'csrf_token' => $csrfToken,
                 'expiresAt' => $session->expires_at->toIso8601String(),
             ],
-        ], 200)->withCookie($sessionCookie)->withCookie($csrfCookie);
+        ], $extraPayload), 200)->withCookie($sessionCookie)->withCookie($csrfCookie);
     }
 
     /**

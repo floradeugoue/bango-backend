@@ -28,4 +28,40 @@ class CreditWalletController extends Controller
             ->response()
             ->setStatusCode(200);
     }
+
+    /**
+     * Rembourse en argent sur le moyen de paiement d'origine le solde de crédits BANGO
+     * (à la demande de l'utilisateur ou avant la suppression du compte).
+     *
+     * POST /api/credits/wallet/refund
+     */
+    public function refund(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'phone' => ['nullable', 'string', 'max:20'],
+            'operator' => ['nullable', 'string', 'in:mtn,orange,wave,moov,airtel'],
+        ]);
+
+        $user = $request->user();
+        $result = $this->creditWalletService->refundBalanceBeforeAccountDeletion(
+            user: $user,
+            phone: $validated['phone'] ?? null,
+            operator: $validated['operator'] ?? null
+        );
+
+        if ($result === null) {
+            return response()->json([
+                'message' => 'Aucun solde de crédit disponible à rembourser.',
+                'data' => [
+                    'refunded' => false,
+                    'amount' => 0.0,
+                ],
+            ], 422);
+        }
+
+        return response()->json([
+            'message' => 'Votre solde de crédit a été remboursé en argent sur votre moyen de paiement d\'origine.',
+            'data' => $result,
+        ], 200);
+    }
 }

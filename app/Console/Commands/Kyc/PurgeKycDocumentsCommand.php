@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Kyc;
 
+use App\Enums\Kyc\KycDocKind;
 use App\Enums\Kyc\KycStatus;
 use App\Enums\Page\PageCertificationStatus;
 use App\Models\Kyc\KycDocument;
@@ -40,6 +41,27 @@ class PurgeKycDocumentsCommand extends Command
 
         $deletedKycDocsCount = 0;
         $deletedPageDocsCount = 0;
+        $privateDisk = config('media.private_disk', 'local');
+
+        // 0. Destruction immédiate des captures de vivacité sur les dossiers décidés (seul le selfie de face est conservé)
+        $decidedLivenessDocs = KycDocument::where('kind', KycDocKind::LivenessFrame)
+            ->whereHas('submission', function ($q) {
+                $q->whereNotNull('decided_at');
+            })
+            ->get();
+
+        foreach ($decidedLivenessDocs as $doc) {
+            if ($doc->file_path && $doc->file_path !== 'purged') {
+                $foundDisk = Storage::disk($privateDisk)->exists($doc->file_path) ? $privateDisk : (Storage::disk('local')->exists($doc->file_path) ? 'local' : null);
+                if ($foundDisk && ! $dryRun) {
+                    Storage::disk($foundDisk)->delete($doc->file_path);
+                }
+            }
+            if (! $dryRun) {
+                $doc->delete();
+            }
+            $deletedKycDocsCount++;
+        }
 
         // 1. Dossiers KYC rejetés depuis plus de 30 jours
         $cutoffRejectedKyc = Carbon::now()->subDays(30);
@@ -53,8 +75,6 @@ class PurgeKycDocumentsCommand extends Command
             })
             ->with('documents')
             ->get();
-
-        $privateDisk = config('media.private_disk', 'local');
 
         foreach ($rejectedSubmissions as $submission) {
             foreach ($submission->documents as $doc) {

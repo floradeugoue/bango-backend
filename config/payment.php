@@ -17,6 +17,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Marketplace Payout / Collection Mode (CEMAC Regulatory Options)
+    |--------------------------------------------------------------------------
+    |
+    | Options for visit fee collection and disbursement to landlords and agents:
+    | - 'split_payment': Monetbil splits the payment at collection directly to
+    |   landlord and agent Mobile Money accounts under Monetbil's payment license.
+    | - 'mandate_payout': Collection mandate where funds are automatically
+    |   disbursed via Monetbil Payout API after visit completion.
+    |
+    */
+
+    'payout_mode' => env('PAYMENT_PAYOUT_MODE', 'mandate_payout'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Default Currency
     |--------------------------------------------------------------------------
     |

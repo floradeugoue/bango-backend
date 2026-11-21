@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Sentry\State\Scope;
 use Throwable;
 
 class IncidentTrackerService
@@ -76,6 +77,14 @@ class IncidentTrackerService
         ];
 
         Log::error("[INCIDENT:{$incidentId}] Erreur serveur inattendue : {$exception->getMessage()}", $context);
+
+        if (app()->bound('sentry')) {
+            \Sentry\configureScope(function (Scope $scope) use ($incidentId, $context): void {
+                $scope->setTag('incident_id', $incidentId);
+                $scope->setContext('incident_details', $context);
+            });
+            \Sentry\captureException($exception);
+        }
 
         return $context;
     }

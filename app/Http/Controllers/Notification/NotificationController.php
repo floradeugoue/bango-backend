@@ -27,17 +27,7 @@ class NotificationController extends Controller
 
         $query = $user->notifications()->latest();
 
-        if ($activePage) {
-            $query->where(function ($q) use ($activePage) {
-                $q->where('data', 'like', '%"page_id":'.$activePage->id.'%')
-                    ->orWhere('data', 'like', '%"page_id":"'.$activePage->id.'"%');
-            });
-        } else {
-            $query->where(function ($q) {
-                $q->where('data', 'not like', '%"page_id":%')
-                    ->orWhere('data', 'like', '%"page_id":null%');
-            });
-        }
+        $this->applyIdentityScope($query, $activePage);
 
         if ($unreadOnly) {
             $query->whereNull('read_at');
@@ -66,13 +56,16 @@ class NotificationController extends Controller
                     $q->where('type', 'like', '%Notifications\\\\Subscription%')
                         ->orWhere('type', 'like', '%Notifications\\\\Boost%')
                         ->orWhere('type', 'like', '%Notifications\\\\Kyc%')
+                        ->orWhere('type', 'like', '%Notifications\\\\Auth%')
                         ->orWhere('type', 'like', '%PageCertification%')
                         ->orWhere('type', 'like', '%PageSuspended%')
+                        ->orWhere('type', 'like', '%ConfirmNeighbourhood%')
                         ->orWhere('data', 'like', '%"category":"account"%')
                         ->orWhere('data', 'like', '%"type":"campaign_%')
                         ->orWhere('data', 'like', '%"type":"kyc_%')
                         ->orWhere('data', 'like', '%"type":"subscription_%')
-                        ->orWhere('data', 'like', '%"type":"badge_%');
+                        ->orWhere('data', 'like', '%"type":"badge_%')
+                        ->orWhere('data', 'like', '%"type":"unknown_login%');
                 }),
                 default => null,
             };
@@ -88,7 +81,9 @@ class NotificationController extends Controller
 
         foreach ($unreadNotifications as $notif) {
             $data = is_array($notif->data) ? $notif->data : json_decode((string) $notif->data, true);
-            $pageId = $data['page_id'] ?? null;
+            $notifType = $data['type'] ?? '';
+            $isPersonalPageEvent = in_array($notifType, ['page_invitation', 'page_member_revoked'], true);
+            $pageId = $isPersonalPageEvent ? null : ($data['page_id'] ?? null);
 
             if ($pageId) {
                 $pid = (string) $pageId;
@@ -139,17 +134,7 @@ class NotificationController extends Controller
 
         // Compteur non lu restant dans le contexte actif
         $unreadQuery = $user->unreadNotifications();
-        if ($activePage) {
-            $unreadQuery->where(function ($q) use ($activePage) {
-                $q->where('data', 'like', '%"page_id":'.$activePage->id.'%')
-                    ->orWhere('data', 'like', '%"page_id":"'.$activePage->id.'"%');
-            });
-        } else {
-            $unreadQuery->where(function ($q) {
-                $q->where('data', 'not like', '%"page_id":%')
-                    ->orWhere('data', 'like', '%"page_id":null%');
-            });
-        }
+        $this->applyIdentityScope($unreadQuery, $activePage);
 
         return response()->json([
             'success' => true,
@@ -169,18 +154,7 @@ class NotificationController extends Controller
         $activePage = $request->attributes->get('acting_page') ?? $request->attributes->get('active_page');
 
         $unreadQuery = $user->unreadNotifications();
-
-        if ($activePage) {
-            $unreadQuery->where(function ($q) use ($activePage) {
-                $q->where('data', 'like', '%"page_id":'.$activePage->id.'%')
-                    ->orWhere('data', 'like', '%"page_id":"'.$activePage->id.'"%');
-            });
-        } else {
-            $unreadQuery->where(function ($q) {
-                $q->where('data', 'not like', '%"page_id":%')
-                    ->orWhere('data', 'like', '%"page_id":null%');
-            });
-        }
+        $this->applyIdentityScope($unreadQuery, $activePage);
 
         $unreadQuery->update(['read_at' => now()]);
 
@@ -189,5 +163,31 @@ class NotificationController extends Controller
             'message' => 'Toutes les notifications ont été marquées comme lues.',
             'unread_count' => 0,
         ], 200);
+    }
+
+    /**
+     * Filtre les notifications selon le contexte actif (fil personnel ou fil d'une page gérée).
+     * Les notifications d'invitation et de révocation de membre de page appartiennent toujours au fil personnel,
+     * même si un page_id résiduel est présent dans les données.
+     */
+    protected function applyIdentityScope(mixed $query, mixed $activePage): void
+    {
+        if ($activePage) {
+            $query->where(function ($q) use ($activePage) {
+                $q->where('data', 'like', '%"page_id":'.$activePage->id.'%')
+                    ->orWhere('data', 'like', '%"page_id":"'.$activePage->id.'"%');
+            })
+                ->where('data', 'not like', '%"type":"page_invitation"%')
+                ->where('data', 'not like', '%"type":"page_member_revoked"%');
+        } else {
+            $query->where(function ($q) {
+                $q->where('data', 'not like', '%"page_id":%')
+                    ->orWhere('data', 'like', '%"page_id":null%')
+                    ->orWhere('data', 'like', '%"type":"page_invitation"%')
+                    ->orWhere('data', 'like', '%"type":"page_member_revoked"%')
+                    ->orWhere('type', 'like', '%PageMemberInvitedNotification')
+                    ->orWhere('type', 'like', '%PageMemberRevokedNotification');
+            });
+        }
     }
 }

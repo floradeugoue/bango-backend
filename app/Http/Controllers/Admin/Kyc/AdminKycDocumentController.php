@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin\Kyc;
 
+use App\Enums\Kyc\KycDocKind;
 use App\Http\Controllers\Controller;
 use App\Models\Admin\AdminAuditLog;
 use App\Models\Kyc\KycDocument;
@@ -32,28 +33,39 @@ class AdminKycDocumentController extends Controller
         /** @var KycDocument $document */
         $document = $submission->documents()->where('id', $docId)->firstOrFail();
 
+        $isSelfie = $document->kind === KycDocKind::Selfie;
+        $defaultAction = $isSelfie ? 'view_selfie' : 'open';
+        $action = (string) $request->input('action', $defaultAction);
+
         // 1. Enregistrement immuable dans le journal d'audit des consultations sensibles
         KycDocumentAccessLog::create([
             'operator_id' => $request->user()->id,
             'kyc_submission_id' => $submission->id,
             'kyc_document_id' => $document->id,
-            'action' => (string) $request->input('action', 'open'),
+            'action' => $action,
             'ip_address' => $request->ip(),
             'user_agent' => $request->userAgent(),
             'created_at' => now(),
         ]);
 
-        // Point 21 : Journalisation d'audit chaînée de l'ouverture de pièce KYC
+        // Point 21 & Traçabilité selfie : Journalisation d'audit chaînée
+        $event = $isSelfie ? 'kyc.selfie_viewed' : 'kyc.document_opened';
+        $targetLabel = $isSelfie
+            ? "Consultation du selfie de face du dossier {$submission->reference} (utilisateur #{$submission->user_id})"
+            : "Ouverture pièce KYC {$document->kind?->value} ({$document->original_name}) du dossier {$submission->reference}";
+
         AdminAuditLog::logChainedEvent(
-            event: 'kyc.document_opened',
+            event: $event,
             operator: $request->user(),
             targetType: 'KycDocument',
             targetId: (string) $document->id,
-            targetLabel: "Ouverture pièce KYC {$document->kind?->value} ({$document->original_name}) du dossier {$submission->reference}",
+            targetLabel: $targetLabel,
             context: [
                 'submission_id' => $submission->id,
                 'submission_reference' => $submission->reference,
                 'document_id' => $document->id,
+                'document_kind' => $document->kind?->value,
+                'is_selfie' => $isSelfie,
                 'original_name' => $document->original_name,
                 'mime_type' => $document->mime_type,
             ],
@@ -107,5 +119,63 @@ class AdminKycDocumentController extends Controller
                 'X-Content-Type-Options' => 'nosniff',
             ]
         );
+    }
+
+    /**
+     * Enregistre explicitement la consultation d'un selfie dans l'historique d'audit du back-office.
+     */
+    public function logSelfieView(Request $request, string $id): Response
+    {
+        $submission = Str::isUuid($id)
+            ? KycSubmission::where(fn ($q) => $q->where('id', $id)->orWhere('reference', $id))->firstOrFail()
+            : KycSubmission::where('reference', $id)->firstOrFail();
+
+        /** @var KycDocument|null $selfie */
+        $selfie = $submission->documents()->where('kind', KycDocKind::Selfie)->first();
+
+        if (! $selfie) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Aucun selfie trouvé pour ce dossier.',
+            ], 404);
+        }
+
+        KycDocumentAccessLog::create([
+            'operator_id' => $request->user()->id,
+            'kyc_submission_id' => $submission->id,
+            'kyc_document_id' => $selfie->id,
+            'action' => 'view_selfie',
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+            'created_at' => now(),
+        ]);
+
+        AdminAuditLog::logChainedEvent(
+            event: 'kyc.selfie_viewed',
+            operator: $request->user(),
+            targetType: 'KycDocument',
+            targetId: (string) $selfie->id,
+            targetLabel: "Consultation du selfie de face du dossier {$submission->reference} (utilisateur #{$submission->user_id})",
+            context: [
+                'submission_id' => $submission->id,
+                'submission_reference' => $submission->reference,
+                'document_id' => $selfie->id,
+                'document_kind' => 'selfie',
+                'is_selfie' => true,
+            ],
+            ip: $request->ip(),
+            userAgent: $request->userAgent()
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Consultation du selfie enregistrée dans l\'historique.',
+            'data' => [
+                'submission_id' => $submission->id,
+                'document_id' => $selfie->id,
+                'action' => 'view_selfie',
+                'accessed_at' => now()->toISOString(),
+            ],
+        ]);
     }
 }

@@ -8,6 +8,8 @@ use App\Models\Reel\Sound;
 use App\Models\Square\Post;
 use App\Models\Support\CopyrightClaim;
 use App\Models\User;
+use App\Notifications\Reel\ReelAudioMutedCopyrightNotification;
+use App\Services\Reel\SoundService;
 use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
@@ -270,12 +272,25 @@ class CopyrightService
                 } elseif ($claim->content_type === 'reel') {
                     $reel = Reel::find($claim->content_id);
                     $reel?->delete();
+                    app(SoundService::class)->handleOriginalSoundCopyrightInfringement($claim->content_id, $operator, $decisionNotes);
                 } elseif ($claim->content_type === 'sound') {
                     $sound = Sound::find($claim->content_id);
                     if ($sound) {
                         $sound->is_removed = true;
                         $sound->is_published = false;
                         $sound->save();
+
+                        if ($sound->original_reel_id || str_starts_with($sound->id, 'orig:')) {
+                            $targetReelId = $sound->original_reel_id ?? substr($sound->id, 5);
+                            app(SoundService::class)->handleOriginalSoundCopyrightInfringement($targetReelId, $operator, $decisionNotes);
+                        } else {
+                            $affectedReels = Reel::where('sound_id', $sound->id)->with('user')->get();
+                            foreach ($affectedReels as $affReel) {
+                                $affReel->is_muted = true;
+                                $affReel->save();
+                                $affReel->user?->notify(new ReelAudioMutedCopyrightNotification($affReel, $sound, $decisionNotes));
+                            }
+                        }
                     }
                 }
                 $claim->status = 'approved';
@@ -284,8 +299,10 @@ class CopyrightService
                     $reel = Reel::find($claim->content_id);
                     if ($reel) {
                         $reel->sound_id = null;
+                        $reel->is_muted = true;
                         $reel->save();
                     }
+                    app(SoundService::class)->handleOriginalSoundCopyrightInfringement($claim->content_id, $operator, $decisionNotes);
                 } elseif ($claim->content_type === 'sound') {
                     $sound = Sound::find($claim->content_id);
                     if ($sound) {
@@ -293,6 +310,11 @@ class CopyrightService
                         $sound->is_published = false;
                         $sound->rights_status = 'disputed';
                         $sound->save();
+
+                        if ($sound->original_reel_id || str_starts_with($sound->id, 'orig:')) {
+                            $targetReelId = $sound->original_reel_id ?? substr($sound->id, 5);
+                            app(SoundService::class)->handleOriginalSoundCopyrightInfringement($targetReelId, $operator, $decisionNotes);
+                        }
                     }
                 }
                 $claim->status = 'approved';
