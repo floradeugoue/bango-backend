@@ -4,6 +4,7 @@ namespace App\Console\Commands\Media;
 
 use App\Services\Media\MediaStorageService;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
@@ -21,6 +22,7 @@ class MigrateMediaToR2Command extends Command
                             {--dry-run : Simuler la migration sans modifier ni copier aucun fichier}
                             {--verify-only : Vérifier uniquement l\'intégrité des fichiers déjà transférés sur R2}
                             {--delete-source : Supprimer les fichiers sources locaux UNIQUEMENT après validation stricte d\'intégrité sur R2}
+                            {--update-urls : Mettre à jour les URLs en base de données (remplace https://api.bangoapp.com/storage/ par https://cdn.bangoapp.com/ dans post_media)}
                             {--limit=0 : Nombre maximal de fichiers à traiter (0 = tous)}';
 
     /**
@@ -110,8 +112,13 @@ class MigrateMediaToR2Command extends Command
         $totalFiles = count($allSourceFiles);
         $this->line("Nombre total de fichiers sources identifiés : <info>{$totalFiles}</info>");
 
+        $dbUrlsUpdated = 0;
+        if ($type === 'public' || $this->option('update-urls')) {
+            $dbUrlsUpdated = $this->migratePostMediaUrls($isDryRun);
+        }
+
         if ($totalFiles === 0) {
-            $this->info('Aucun fichier à migrer pour ce profil.');
+            $this->info('Aucun fichier physique à migrer pour ce profil.');
 
             return self::SUCCESS;
         }
@@ -230,19 +237,22 @@ class MigrateMediaToR2Command extends Command
         $bar->finish();
         $this->newLine(2);
 
-        $this->table(
-            ['Métrique', 'Valeur'],
-            [
-                ['Fichiers sources analysés', count($allSourceFiles)],
-                ['Fichiers déjà présents et intègres sur R2 (reprise)', $alreadyOnTargetCount],
-                ['Nouveaux fichiers transférés vers R2', $transferredCount],
-                ['Intégrités validées avec succès', $integrityVerifiedCount],
-                ['Échecs d\'intégrité détectés', $integrityFailedCount],
-                ['Fichiers sources locaux supprimés (--delete-source)', $deletedSourceCount],
-                ['Erreurs survenues', $errorCount],
-                ['Volume transféré', round($bytesTransferred / (1024 * 1024), 2).' Mo'],
-            ]
-        );
+        $tableRows = [
+            ['Fichiers sources analysés', count($allSourceFiles)],
+            ['Fichiers déjà présents et intègres sur R2 (reprise)', $alreadyOnTargetCount],
+            ['Nouveaux fichiers transférés vers R2', $transferredCount],
+            ['Intégrités validées avec succès', $integrityVerifiedCount],
+            ['Échecs d\'intégrité détectés', $integrityFailedCount],
+            ['Fichiers sources locaux supprimés (--delete-source)', $deletedSourceCount],
+            ['Erreurs survenues', $errorCount],
+            ['Volume transféré', round($bytesTransferred / (1024 * 1024), 2).' Mo'],
+        ];
+
+        if ($type === 'public' || $this->option('update-urls')) {
+            $tableRows[] = ['URLs post_media réécrites en base', $isDryRun ? "{$dbUrlsUpdated} (simulées)" : "{$dbUrlsUpdated}"];
+        }
+
+        $this->table(['Métrique', 'Valeur'], $tableRows);
 
         if ($errorCount > 0 || $integrityFailedCount > 0) {
             $this->warn("La migration a rencontré {$errorCount} erreur(s) et {$integrityFailedCount} échec(s) d'intégrité. Consultez les logs.");
@@ -253,5 +263,51 @@ class MigrateMediaToR2Command extends Command
         $this->info('✓ Opération de migration vers R2 terminée avec succès.');
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Met à jour les URLs locales dans post_media vers le CDN Cloudflare R2.
+     */
+    protected function migratePostMediaUrls(bool $isDryRun): int
+    {
+        $targetCdn = rtrim(config('filesystems.disks.r2.url', 'https://cdn.bangoapp.com') ?: 'https://cdn.bangoapp.com', '/');
+
+        $mediaCount = DB::table('post_media')
+            ->where('media_url', 'like', '%api.bangoapp.com/storage/%')
+            ->count();
+
+        $posterCount = DB::table('post_media')
+            ->where('poster_url', 'like', '%api.bangoapp.com/storage/%')
+            ->count();
+
+        $totalMatches = $mediaCount + $posterCount;
+
+        if ($totalMatches === 0) {
+            $this->line("Base de données (post_media) : aucune URL 'api.bangoapp.com/storage/' à réécrire.");
+
+            return 0;
+        }
+
+        if ($isDryRun) {
+            $this->warn("[Simulation DB] {$mediaCount} media_url et {$posterCount} poster_url dans post_media auraient été réécrits vers {$targetCdn}/");
+
+            return $totalMatches;
+        }
+
+        DB::table('post_media')
+            ->where('media_url', 'like', '%api.bangoapp.com/storage/%')
+            ->update([
+                'media_url' => DB::raw("REPLACE(REPLACE(media_url, 'https://api.bangoapp.com/storage/', '{$targetCdn}/'), 'http://api.bangoapp.com/storage/', '{$targetCdn}/')"),
+            ]);
+
+        DB::table('post_media')
+            ->where('poster_url', 'like', '%api.bangoapp.com/storage/%')
+            ->update([
+                'poster_url' => DB::raw("REPLACE(REPLACE(poster_url, 'https://api.bangoapp.com/storage/', '{$targetCdn}/'), 'http://api.bangoapp.com/storage/', '{$targetCdn}/')"),
+            ]);
+
+        $this->info("✓ Base de données (post_media) mise à jour : {$mediaCount} media_url et {$posterCount} poster_url réécrits vers {$targetCdn}/");
+
+        return $totalMatches;
     }
 }

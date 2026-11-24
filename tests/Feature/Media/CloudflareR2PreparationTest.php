@@ -13,6 +13,7 @@ use App\Models\Square\Post;
 use App\Models\Square\PostMedia;
 use App\Models\User;
 use App\Services\Media\MediaStorageService;
+use App\Services\Media\MediaUploadService;
 use App\Services\Media\VideoTranscodingService;
 use App\Services\Message\VoiceMessageService;
 use App\Services\Square\PostManagementService;
@@ -269,5 +270,74 @@ class CloudflareR2PreparationTest extends TestCase
 
         // La commande doit échouer avec code d'erreur (1) sans crash fatal
         expect($exitCode)->toBe(1);
+    }
+
+    public function test_media_upload_service_utilise_disque_configure_par_defaut(): void
+    {
+        Config::set('media.disk', 'r2');
+        $uploadService = app(MediaUploadService::class);
+        $file = UploadedFile::fake()->image('square_pic.jpg', 640, 480);
+
+        // Appel sans spécifier $disk
+        $result = $uploadService->upload($file, $this->user);
+
+        expect($result['disk'])->toBe('r2');
+        Storage::disk('r2')->assertExists($result['path']);
+        expect($result['url'])->toContain('https://cdn.bango.app');
+    }
+
+    public function test_post_media_accessor_reecrit_les_anciennes_urls_locales_vers_le_cdn(): void
+    {
+        Config::set('filesystems.disks.r2.url', 'https://cdn.bangoapp.com');
+
+        $post = Post::factory()->create(['user_id' => $this->user->id]);
+        $postMedia = PostMedia::create([
+            'post_id' => $post->id,
+            'media_url' => 'https://api.bangoapp.com/storage/square/images/6/media_test.jpg',
+            'poster_url' => 'https://api.bangoapp.com/storage/square/images/6/poster_test.jpg',
+            'media_type' => PostMediaKind::Photo,
+            'mime_type' => 'image/jpeg',
+            'display_order' => 1,
+        ]);
+
+        expect($postMedia->media_url)->toBe('https://cdn.bangoapp.com/square/images/6/media_test.jpg');
+        expect($postMedia->poster_url)->toBe('https://cdn.bangoapp.com/square/images/6/poster_test.jpg');
+    }
+
+    public function test_migration_r2_reecrit_les_urls_dans_post_media(): void
+    {
+        Config::set('filesystems.disks.r2.url', 'https://cdn.bangoapp.com');
+
+        $post = Post::factory()->create(['user_id' => $this->user->id]);
+        $postMedia = PostMedia::create([
+            'post_id' => $post->id,
+            'media_url' => 'https://api.bangoapp.com/storage/square/images/6/media_migrate.jpg',
+            'poster_url' => 'https://api.bangoapp.com/storage/square/images/6/poster_migrate.jpg',
+            'media_type' => PostMediaKind::Photo,
+            'mime_type' => 'image/jpeg',
+            'display_order' => 1,
+        ]);
+
+        // 1. En dry-run : aucune modification en base
+        Artisan::call('media:migrate-to-r2', [
+            '--type' => 'public',
+            '--source-disk' => 'public',
+            '--target-disk' => 'r2',
+            '--dry-run' => true,
+        ]);
+
+        $freshRawMedia = PostMedia::withoutGlobalScopes()->where('id', $postMedia->id)->first();
+        expect($freshRawMedia->getRawOriginal('media_url'))->toBe('https://api.bangoapp.com/storage/square/images/6/media_migrate.jpg');
+
+        // 2. Sans dry-run : réécriture en base de données
+        Artisan::call('media:migrate-to-r2', [
+            '--type' => 'public',
+            '--source-disk' => 'public',
+            '--target-disk' => 'r2',
+        ]);
+
+        $freshRawMedia = PostMedia::withoutGlobalScopes()->where('id', $postMedia->id)->first();
+        expect($freshRawMedia->getRawOriginal('media_url'))->toBe('https://cdn.bangoapp.com/square/images/6/media_migrate.jpg');
+        expect($freshRawMedia->getRawOriginal('poster_url'))->toBe('https://cdn.bangoapp.com/square/images/6/poster_migrate.jpg');
     }
 }

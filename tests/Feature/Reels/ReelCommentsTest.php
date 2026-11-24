@@ -1,6 +1,5 @@
 <?php
 
-use App\Enums\Reel\ReelReactionType;
 use App\Models\Reel\Reel;
 use App\Models\Reel\ReelComment;
 use App\Models\Reel\ReelCommentReaction;
@@ -8,7 +7,6 @@ use App\Models\Square\Post;
 use App\Models\Square\PostComment;
 use App\Models\Square\PostCommentReaction;
 use App\Models\User;
-use App\Services\Reel\ReelCommentService;
 use App\Services\Square\PostCommentReactionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;

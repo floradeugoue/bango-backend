@@ -75,4 +75,3 @@ class AdminAccessRequestPendingNotification extends Notification implements Shou
         ];
     }
 }
-
