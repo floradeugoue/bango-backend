@@ -75,4 +75,3 @@ class AdminAccessRequestSubmittedMail extends Mailable
         );
     }
 }
-

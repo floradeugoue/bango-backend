@@ -54,6 +54,10 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->append(TrustCloudflareHeaders::class);
 
+        $middleware->redirectGuestsTo(function (Request $request) {
+            return null;
+        });
+
         $middleware->prepend(ValidateUploadLimits::class);
 
         $middleware->encryptCookies(except: [
@@ -83,6 +87,12 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->is('admin/*') || $request->expectsJson(),
         );
+
+        $exceptions->render(function (AuthenticationException $e, Request $request) {
+            if ($request->is('api/*') || $request->expectsJson()) {
+                return response()->json(['message' => 'Unauthenticated.'], 401);
+            }
+        });
 
         $exceptions->render(function (ValidationException $e, Request $request) {
             $isAdmin = $request->is('admin/*')

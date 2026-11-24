@@ -94,4 +94,3 @@ class WelcomeEmailVerificationNotification extends Notification implements Shoul
         ];
     }
 }
-

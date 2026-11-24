@@ -14,6 +14,7 @@ class MediaUploadService
     /**
      * Téléverse et enregistre un média Square dans square/images/{user_id} ou square/videos/{user_id}.
      *
+     * @param  ?string  $disk  Disque de stockage (null pour utiliser le disque par défaut configuré, ex: R2)
      * @return array{
      *     id: string,
      *     url: string,
@@ -26,7 +27,7 @@ class MediaUploadService
      *     duration: ?int
      * }
      */
-    public function upload(UploadedFile $file, User $user, string $disk = 'public'): array
+    public function upload(UploadedFile $file, User $user, ?string $disk = null): array
     {
         return $this->storageService->storeSquareMedia($file, $user, $disk);
     }

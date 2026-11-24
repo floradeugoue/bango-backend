@@ -44,4 +44,3 @@ class RecordUserDailyActivity
         return $response;
     }
 }
-

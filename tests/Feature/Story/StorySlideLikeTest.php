@@ -140,4 +140,3 @@ test('cannot like a slide with mismatched story_id', function () {
     ]);
     $res->assertNotFound();
 });
-

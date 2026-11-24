@@ -64,6 +64,12 @@ class PostMedia extends Model
             return null;
         }
 
+        if (str_starts_with($value, 'https://api.bangoapp.com/storage/') || str_starts_with($value, 'http://api.bangoapp.com/storage/')) {
+            $cdnUrl = rtrim(config('filesystems.disks.r2.url', 'https://cdn.bangoapp.com'), '/');
+
+            return preg_replace('#^https?://api\.bangoapp\.com/storage/#', $cdnUrl.'/', $value);
+        }
+
         if (str_starts_with($value, 'http://') || str_starts_with($value, 'https://')) {
             return $value;
         }
@@ -88,6 +94,12 @@ class PostMedia extends Model
     {
         if (empty($value)) {
             return null;
+        }
+
+        if (str_starts_with($value, 'https://api.bangoapp.com/storage/') || str_starts_with($value, 'http://api.bangoapp.com/storage/')) {
+            $cdnUrl = rtrim(config('filesystems.disks.r2.url', 'https://cdn.bangoapp.com'), '/');
+
+            return preg_replace('#^https?://api\.bangoapp\.com/storage/#', $cdnUrl.'/', $value);
         }
 
         if (str_starts_with($value, 'http://') || str_starts_with($value, 'https://')) {
