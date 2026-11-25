@@ -17,7 +17,6 @@ class HandleSuggestionService
         'moderator',
         'official',
         'officiel',
-        'cceda',
         'help',
         'system',
     ];

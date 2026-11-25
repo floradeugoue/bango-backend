@@ -96,8 +96,9 @@ test('Visit receipt PDF formats timezone, UTF-8 DejaVu font, display name, trans
     expect($pdfContent)->toContain('2 000 FCFA')
         ->and($pdfContent)->not->toContain('2 000,00 XAF');
 
-    // 7. Éditeur unique conforme aux CGU : CCEDA Finance
-    expect($pdfContent)->toContain('CCEDA Finance')
+    // 7. Éditeur unique conforme aux CGU : BANGO
+    expect($pdfContent)->toContain('BANGO')
+        ->and($pdfContent)->not->toContain('CCEDA Finance')
         ->and($pdfContent)->not->toContain('BANGO TECHNOLOGIES LTD')
         ->and($pdfContent)->not->toContain('BANGO SAS');
 });

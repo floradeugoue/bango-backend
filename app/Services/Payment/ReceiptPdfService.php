@@ -19,12 +19,12 @@ class ReceiptPdfService
     /**
      * Nom officiel unique de l'éditeur (conforme à l'article 1 des CGU).
      */
-    public const PUBLISHER_NAME = 'CCEDA Finance';
+    public const PUBLISHER_NAME = 'BANGO';
 
     /**
      * Mention légale en pied de page.
      */
-    public const LEGAL_FOOTER = 'CCEDA Finance — Opérateur de la plateforme immobilière et sociale BANGO.';
+    public const LEGAL_FOOTER = 'BANGO · document généré automatiquement, valable sans signature.';
 
     /**
      * Génère un document PDF binaire 1.4 conforme aux spécifications ISO PDF,

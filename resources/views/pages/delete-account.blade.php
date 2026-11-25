@@ -377,7 +377,7 @@
 
     <!-- Footer -->
     <footer class="bg-white border-t border-slate-200 py-6 text-center text-xs text-slate-400">
-        &copy; {{ date('Y') }} BANGO — CCEDA Finance. {{ $locale === 'en' ? 'All rights reserved.' : 'Tous droits réservés.' }}
+        &copy; {{ date('Y') }} BANGO. {{ $locale === 'en' ? 'All rights reserved.' : 'Tous droits réservés.' }}
     </footer>
 
     <!-- Interactive Scripts -->
