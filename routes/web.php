@@ -3,6 +3,7 @@
 use App\Http\Controllers\Geo\GenderController;
 use App\Http\Controllers\Search\PeopleSearchController;
 use App\Http\Controllers\Web\PublicAccountDeletionController;
+use App\Http\Controllers\Web\PublicShareController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -81,3 +82,14 @@ Route::get('/storage/sounds/{filename}', function (string $filename) {
         'Accept-Ranges' => 'bytes',
     ]);
 })->where('filename', '[A-Za-z0-9_-]+\.mp3');
+
+// Partage web public avec aperçu Open Graph (WhatsApp, Facebook, Twitter, iMessage)
+Route::get('/p/{id}', [PublicShareController::class, 'post'])->name('web.share.post');
+Route::get('/r/{id}', [PublicShareController::class, 'reel'])->name('web.share.reel');
+Route::get('/l/{uuid}', [PublicShareController::class, 'listing'])->name('web.share.listing');
+Route::get('/@{handle}', [PublicShareController::class, 'profile'])->where('handle', '[A-Za-z0-9_.-]+')->name('web.share.profile');
+Route::get('/u/{handle}', [PublicShareController::class, 'profile'])->where('handle', '[A-Za-z0-9_.-]+')->name('web.share.profile.short');
+
+// Deep Linking & App Links (Android / iOS)
+Route::get('/.well-known/assetlinks.json', [PublicShareController::class, 'assetLinks'])->name('web.wellknown.assetlinks');
+Route::get('/.well-known/apple-app-site-association', [PublicShareController::class, 'appleAppSiteAssociation'])->name('web.wellknown.apple-app-site-association');
