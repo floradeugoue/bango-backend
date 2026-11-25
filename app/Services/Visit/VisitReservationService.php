@@ -587,8 +587,19 @@ class VisitReservationService
 
                 if ($isDuplicateCharge && $transaction->status === PaymentStatus::Confirmed) {
                     $txMeta = $transaction->metadata ?? [];
+                    $phone = $txMeta['phone'] ?? $txMeta['phonenumber'] ?? $txMeta['phone_number'] ?? null;
+                    if (! $phone) {
+                        $attempt = $transaction->attempts()->latest('id')->first();
+                        $phone = $attempt?->metadata['phone'] ?? $attempt?->metadata['phonenumber'] ?? null;
+                    }
                     $prospect = $reservation->prospect ?? User::find($reservation->prospect_id);
-                    $phone = (string) ($txMeta['phone'] ?? $txMeta['phonenumber'] ?? $prospect?->phone ?? '+237690000000');
+                    $phone = $phone ?: $prospect?->phone;
+
+                    if (empty($phone)) {
+                        Log::warning('Auto-remboursement doublon impossible : numéro d\'origine manquant', ['transaction_id' => $transaction->id]);
+
+                        return $reservation;
+                    }
                     $operator = $txMeta['operator'] ?? null;
 
                     $disburse = $this->monetbilGateway->disburseToMobileMoney(
@@ -1001,11 +1012,21 @@ class VisitReservationService
         } elseif ($transaction) {
             $extRef = 'REFUND-VISIT-'.$reservation->id;
             $refundMeta = [];
-
             if ($wantsCashToOriginalMethod) {
                 $txMeta = $transaction->metadata ?? [];
+                $phone = $txMeta['phone'] ?? $txMeta['phonenumber'] ?? $txMeta['phone_number'] ?? null;
+                if (! $phone) {
+                    $attempt = $transaction->attempts()->latest('id')->first();
+                    $phone = $attempt?->metadata['phone'] ?? $attempt?->metadata['phonenumber'] ?? null;
+                }
                 $prospect = $reservation->prospect ?? User::find($reservation->prospect_id);
-                $phone = (string) ($txMeta['phone'] ?? $txMeta['phonenumber'] ?? $prospect?->phone ?? '+237690000000');
+                $phone = $phone ?: $prospect?->phone;
+
+                if (empty($phone)) {
+                    throw ValidationException::withMessages([
+                        'phone' => ['Numéro de paiement d\'origine introuvable. Veuillez contacter le support client pour effectuer votre remboursement.'],
+                    ]);
+                }
                 $operator = $txMeta['operator'] ?? null;
 
                 $disburse = $this->monetbilGateway->disburseToMobileMoney(
@@ -1070,7 +1091,7 @@ class VisitReservationService
             throw new AuthorizationException('Seul le prospect titulaire de la réservation peut demander ce remboursement.');
         }
 
-        return DB::transaction(function () use ($reservation, $phone) {
+        return DB::transaction(function () use ($reservation) {
             /** @var VisitReservation $locked */
             $locked = VisitReservation::with(['paymentTransaction', 'prospect'])
                 ->where('id', $reservation->id)
@@ -1095,40 +1116,60 @@ class VisitReservationService
                 ]);
             }
 
-            $feeAmount = (float) ($locked->refund_amount ?: $locked->fee_amount);
+            // Ne verser que refund_amount et refuser s'il vaut 0 (ne jamais fallback sur fee_amount)
+            $feeAmount = (float) ($locked->refund_amount ?? 0);
             if ($feeAmount <= 0) {
                 throw ValidationException::withMessages([
-                    'amount' => ['Cette visite ne comporte aucun montant éligible au remboursement.'],
+                    'refund_amount' => ['Cette visite ne comporte aucun montant éligible au remboursement.'],
                 ]);
             }
 
             $prospect = $locked->prospect ?? User::findOrFail($locked->prospect_id);
             $transaction = $locked->paymentTransaction;
+            $amountToDisburse = $feeAmount;
 
-            // Si un crédit BANGO avait été émis pour cette visite, on le débite avant d'envoyer l'argent
+            // Si un crédit BANGO avait été émis pour cette visite, ne verser que ce qui reste et refuser s'il ne reste rien
             if ($locked->refund_channel === 'bango_credit') {
-                $currentBalance = $this->creditWalletService->getBalance($prospect);
-                if ($currentBalance >= $feeAmount) {
-                    $this->creditWalletService->debit(
-                        account: $prospect,
-                        amount: (int) round($feeAmount),
-                        source: 'visit_cash_refund_conversion',
-                        reference: 'CASH-CONV-VISIT-'.$locked->id,
-                        description: sprintf('Conversion en remboursement Mobile Money de la visite annulée #%s', $locked->id),
-                        idempotencyKey: 'visit_cash_refund_conv_'.$locked->id,
-                        referenceModel: $locked
-                    );
+                $currentBalance = (float) $this->creditWalletService->getBalance($prospect);
+                if ($currentBalance <= 0) {
+                    throw ValidationException::withMessages([
+                        'balance' => ['Le crédit BANGO émis pour cette visite a déjà été entièrement consommé. Aucun remboursement en argent ne peut être effectué.'],
+                    ]);
                 }
+
+                $amountToDisburse = min($feeAmount, $currentBalance);
+
+                $this->creditWalletService->debit(
+                    account: $prospect,
+                    amount: (int) round($amountToDisburse),
+                    source: 'visit_cash_refund_conversion',
+                    reference: 'CASH-CONV-VISIT-'.$locked->id,
+                    description: sprintf('Conversion en remboursement Mobile Money de la visite annulée #%s', $locked->id),
+                    idempotencyKey: 'visit_cash_refund_conv_'.$locked->id.'_'.round($amountToDisburse),
+                    referenceModel: $locked
+                );
             }
 
+            // Ignorer le phone du client : verser uniquement au numéro qui a payé, lu dans la transaction d'origine
             $txMeta = $transaction?->metadata ?? [];
-            $targetPhone = $phone
-                ?: ($txMeta['phone'] ?? $txMeta['phonenumber'] ?? $prospect->phone ?? '+237690000000');
+            $targetPhone = $txMeta['phone'] ?? $txMeta['phonenumber'] ?? $txMeta['phone_number'] ?? null;
             $operator = $txMeta['operator'] ?? null;
+
+            if (! $targetPhone && $transaction) {
+                $attempt = $transaction->attempts()->latest('id')->first();
+                $targetPhone = $attempt?->metadata['phone'] ?? $attempt?->metadata['phonenumber'] ?? null;
+                $operator = $operator ?: ($attempt?->metadata['operator'] ?? null);
+            }
+
+            if (empty($targetPhone)) {
+                throw ValidationException::withMessages([
+                    'phone' => ['Numéro de paiement d\'origine introuvable pour cette réservation. Veuillez contacter le support client pour effectuer votre remboursement.'],
+                ]);
+            }
 
             $disburse = $this->monetbilGateway->disburseToMobileMoney(
                 phone: (string) $targetPhone,
-                amount: $feeAmount,
+                amount: $amountToDisburse,
                 currency: $locked->currency ?: ($transaction?->currency ?: 'XAF'),
                 reference: 'CASH-REFUND-VISIT-'.$locked->id,
                 operator: is_string($operator) ? $operator : null,
@@ -1142,7 +1183,7 @@ class VisitReservationService
                 $this->paymentEngineService->refundTransaction(
                     transaction: $transaction,
                     reason: 'Remboursement en argent sur le moyen de paiement d\'origine (visite annulée)',
-                    amount: $feeAmount,
+                    amount: $amountToDisburse,
                     externalRefundReference: $disburse['external_reference'],
                     metadata: [
                         'refund_channel' => 'original_payment_method',
@@ -1159,7 +1200,7 @@ class VisitReservationService
             }
 
             $locked->status = VisitReservationStatus::Refunded;
-            $locked->refund_amount = $feeAmount;
+            $locked->refund_amount = $amountToDisburse;
             $locked->refunded_at = now();
             $locked->refund_channel = 'original_payment_method';
             $locked->save();

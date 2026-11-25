@@ -12,11 +12,15 @@ use App\Models\User;
 use App\Models\Visit\VisitReservation;
 use App\Models\Visit\VisitSlot;
 use App\Notifications\Visit\VisitCancelledNotification;
+use App\Services\Boost\CreditWalletService;
+use App\Services\Payment\Gateways\MonetbilGateway;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Notification;
 use Laravel\Passport\Passport;
 
 uses(RefreshDatabase::class);
+
+afterEach(fn () => MonetbilGateway::resetFakes());
 
 beforeEach(function (): void {
     $this->owner = User::factory()->create([
@@ -348,4 +352,103 @@ test('marking property taken refunds paid visits in requested or proposed status
 
     expect($this->slot->fresh()->status)->toBe(VisitSlotStatus::Open)
         ->and($slot2->fresh()->status)->toBe(VisitSlotStatus::Open);
+});
+
+test('refund-to-source rejects when visit has refund_amount of 0 and does not fall back to fee_amount', function (): void {
+    Passport::actingAs($this->prospect);
+
+    $this->reservation->status = VisitReservationStatus::Cancelled;
+    $this->reservation->fee_amount = 5000;
+    $this->reservation->refund_amount = 0; // Annulée trop tard, non remboursable
+    $this->reservation->save();
+
+    $response = $this->postJson("/api/visits/{$this->reservation->id}/refund-to-source");
+
+    $response->assertStatus(422)
+        ->assertJsonValidationErrors(['refund_amount']);
+});
+
+test('refund-to-source rejects when visit credit compensation was already spent', function (): void {
+    Passport::actingAs($this->prospect);
+
+    $tx = PaymentTransaction::create([
+        'reference' => 'TX-VISIT-CRED-SPENT',
+        'idempotency_key' => (string) Str::uuid(),
+        'user_id' => $this->prospect->id,
+        'service_type' => PaymentServiceType::Visit,
+        'provider' => PaymentProvider::Monetbil,
+        'channel' => PaymentChannel::MobileMoney,
+        'currency' => 'XAF',
+        'amount' => 5000,
+        'total_amount' => 5000,
+        'amount_charged' => 5000,
+        'status' => PaymentStatus::Confirmed,
+        'metadata' => ['phone' => '237699112233'],
+    ]);
+
+    $this->reservation->status = VisitReservationStatus::Refunded;
+    $this->reservation->fee_amount = 5000;
+    $this->reservation->refund_amount = 5000;
+    $this->reservation->refund_channel = 'bango_credit';
+    $this->reservation->payment_transaction_id = $tx->id;
+    $this->reservation->save();
+
+    // Solde de crédit à 0 (déjà dépensé)
+    expect(app(CreditWalletService::class)->getBalance($this->prospect))->toBe(0.0);
+
+    $response = $this->postJson("/api/visits/{$this->reservation->id}/refund-to-source");
+
+    $response->assertStatus(422)
+        ->assertJsonValidationErrors(['balance']);
+});
+
+test('refund-to-source disburses strictly to origin payment transaction phone and ignores client phone input', function (): void {
+    $disbursed = [];
+    MonetbilGateway::fakeDisburse(function ($phone, $amount, $currency, $reference, $operator) use (&$disbursed) {
+        $disbursed = compact('phone', 'amount');
+
+        return [
+            'success' => true,
+            'external_reference' => 'EXT-VISIT-REFUND-1',
+            'status' => 'completed',
+            'phone' => $phone,
+            'operator' => $operator,
+            'amount' => $amount,
+            'currency' => $currency,
+        ];
+    });
+
+    Passport::actingAs($this->prospect);
+
+    $tx = PaymentTransaction::create([
+        'reference' => 'TX-VISIT-ORIG-PHONE',
+        'idempotency_key' => (string) Str::uuid(),
+        'user_id' => $this->prospect->id,
+        'service_type' => PaymentServiceType::Visit,
+        'provider' => PaymentProvider::Monetbil,
+        'channel' => PaymentChannel::MobileMoney,
+        'currency' => 'XAF',
+        'amount' => 5000,
+        'total_amount' => 5000,
+        'amount_charged' => 5000,
+        'status' => PaymentStatus::Confirmed,
+        'metadata' => ['phone' => '237699112233', 'operator' => 'mtn'],
+    ]);
+
+    $this->reservation->status = VisitReservationStatus::Cancelled;
+    $this->reservation->fee_amount = 5000;
+    $this->reservation->refund_amount = 5000;
+    $this->reservation->payment_transaction_id = $tx->id;
+    $this->reservation->save();
+
+    // Le client tente d'envoyer un autre numéro
+    $response = $this->postJson("/api/visits/{$this->reservation->id}/refund-to-source", [
+        'phone' => '237655000000',
+    ]);
+
+    $response->assertOk();
+
+    // L'argent doit partir vers 237699112233 (transaction d'origine) et non 237655000000
+    expect($disbursed['phone'])->toBe('237699112233')
+        ->and($disbursed['amount'])->toBe(5000.0);
 });

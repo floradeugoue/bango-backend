@@ -37,16 +37,10 @@ class CreditWalletController extends Controller
      */
     public function refund(Request $request): JsonResponse
     {
-        $validated = $request->validate([
-            'phone' => ['nullable', 'string', 'max:20'],
-            'operator' => ['nullable', 'string', 'in:mtn,orange,wave,moov,airtel'],
-        ]);
-
         $user = $request->user();
         $result = $this->creditWalletService->refundBalanceBeforeAccountDeletion(
             user: $user,
-            phone: $validated['phone'] ?? null,
-            operator: $validated['operator'] ?? null
+            throwOnValidation: true
         );
 
         if ($result === null) {

@@ -7,6 +7,8 @@ use App\Enums\Payment\PaymentStatus;
 use App\Models\Payment\PaymentDispute;
 use App\Models\Payment\PaymentTransaction;
 use App\Models\User;
+use App\Services\Boost\CreditWalletService;
+use App\Services\Payment\Gateways\MonetbilGateway;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
@@ -181,4 +183,126 @@ it('lists the authenticated user claims only', function () {
     $response->assertStatus(200)
         ->assertJsonCount(1, 'data')
         ->assertJsonPath('data.0.operator_reference', 'REF-USER1');
+});
+
+it('rejects refund-to-source when double charge claim has not been validated by an operator', function () {
+    $user = User::factory()->create();
+    Passport::actingAs($user);
+
+    $dispute = PaymentDispute::create([
+        'user_id' => $user->id,
+        'type' => 'double_charge',
+        'status' => 'pending',
+        'operator_reference' => 'UNAPPROVED-OP-REF',
+        'claimant_phone' => '+237671111111',
+        'disputed_amount' => 5000,
+        'currency' => 'XAF',
+        'reason' => 'Double débit non encore traité.',
+    ]);
+
+    $response = postJson("/api/payments/double-charge-claims/{$dispute->id}/refund-to-source");
+
+    $response->assertStatus(422)
+        ->assertJsonValidationErrors(['status']);
+});
+
+it('rejects refund-to-source when compensation credit was already spent', function () {
+    $user = User::factory()->create();
+    Passport::actingAs($user);
+
+    $tx = PaymentTransaction::create([
+        'reference' => 'TX-ORIG-100',
+        'idempotency_key' => (string) Str::uuid(),
+        'user_id' => $user->id,
+        'service_type' => PaymentServiceType::Visit,
+        'provider' => PaymentProvider::Monetbil,
+        'channel' => PaymentChannel::MobileMoney,
+        'currency' => 'XAF',
+        'amount' => 5000,
+        'total_amount' => 5000,
+        'amount_charged' => 5000,
+        'status' => PaymentStatus::Confirmed,
+        'metadata' => ['phone' => '237699112233'],
+    ]);
+
+    $dispute = PaymentDispute::create([
+        'user_id' => $user->id,
+        'transaction_id' => $tx->id,
+        'type' => 'double_charge',
+        'status' => 'resolved',
+        'operator_reference' => 'RESOLVED-CREDIT-SPENT',
+        'claimant_phone' => '+237671111111',
+        'disputed_amount' => 5000,
+        'currency' => 'XAF',
+        'reason' => 'Double débit validé mais crédit dépensé.',
+        'metadata' => [
+            'refund_channel' => 'bango_credit',
+        ],
+    ]);
+
+    // Solde de crédit à 0 (déjà dépensé)
+    expect(app(CreditWalletService::class)->getBalance($user))->toBe(0.0);
+
+    $response = postJson("/api/payments/double-charge-claims/{$dispute->id}/refund-to-source");
+
+    $response->assertStatus(422)
+        ->assertJsonValidationErrors(['balance']);
+});
+
+it('refunds double charge claim to original payment transaction phone once approved', function () {
+    $disbursed = [];
+    MonetbilGateway::fakeDisburse(function ($phone, $amount, $currency, $reference, $operator) use (&$disbursed) {
+        $disbursed = compact('phone', 'amount');
+
+        return [
+            'success' => true,
+            'external_reference' => 'EXT-DBL-1',
+            'status' => 'completed',
+            'phone' => $phone,
+            'operator' => $operator,
+            'amount' => $amount,
+            'currency' => $currency,
+        ];
+    });
+
+    $user = User::factory()->create();
+    Passport::actingAs($user);
+
+    $tx = PaymentTransaction::create([
+        'reference' => 'TX-ORIG-200',
+        'idempotency_key' => (string) Str::uuid(),
+        'user_id' => $user->id,
+        'service_type' => PaymentServiceType::Visit,
+        'provider' => PaymentProvider::Monetbil,
+        'channel' => PaymentChannel::MobileMoney,
+        'currency' => 'XAF',
+        'amount' => 5000,
+        'total_amount' => 5000,
+        'amount_charged' => 5000,
+        'status' => PaymentStatus::Confirmed,
+        'metadata' => ['phone' => '237699445566', 'operator' => 'orange'],
+    ]);
+
+    $dispute = PaymentDispute::create([
+        'user_id' => $user->id,
+        'transaction_id' => $tx->id,
+        'type' => 'double_charge',
+        'status' => 'approved',
+        'operator_reference' => 'APPROVED-OP-REF',
+        'claimant_phone' => '+237671999999',
+        'disputed_amount' => 5000,
+        'currency' => 'XAF',
+        'reason' => 'Double débit confirmé par la banque.',
+        'metadata' => ['operator' => 'orange'],
+    ]);
+
+    $response = postJson("/api/payments/double-charge-claims/{$dispute->id}/refund-to-source");
+
+    $response->assertOk()
+        ->assertJsonPath('data.amount_refunded', 5000)
+        ->assertJsonPath('data.refund_channel', 'original_payment_method');
+
+    // Le virement doit partir vers le téléphone de la transaction d'origine (237699445566)
+    expect($disbursed['phone'])->toBe('237699445566')
+        ->and($disbursed['amount'])->toBe(5000.0);
 });

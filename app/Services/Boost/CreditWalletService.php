@@ -9,13 +9,13 @@ use App\Exceptions\Boost\InsufficientCreditException;
 use App\Models\Boost\CreditTransaction;
 use App\Models\Boost\CreditWallet;
 use App\Models\Payment\PaymentTransaction;
-use App\Models\Payment\SavedPaymentMethod;
 use App\Models\User;
 use App\Services\Payment\Gateways\MonetbilGateway;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 
 class CreditWalletService
@@ -403,14 +403,15 @@ class CreditWalletService
     public function refundBalanceBeforeAccountDeletion(
         User $user,
         ?string $phone = null,
-        ?string $operator = null
+        ?string $operator = null,
+        bool $throwOnValidation = true
     ): ?array {
         $balance = $this->getBalance($user);
         if ($balance <= 0) {
             return null;
         }
 
-        return DB::transaction(function () use ($user, $phone, $operator) {
+        return DB::transaction(function () use ($user, $throwOnValidation) {
             $wallet = $this->getOrCreateWallet($user);
 
             /** @var CreditWallet $lockedWallet */
@@ -421,46 +422,116 @@ class CreditWalletService
                 return null;
             }
 
-            // Résolution du moyen de paiement d'origine (dernière transaction confirmée ou méthode enregistrée)
-            $lastTx = PaymentTransaction::where('user_id', $user->id)
+            // Ne rembourser en argent que le crédit acheté, jamais les bonus
+            $totalPurchased = (int) CreditTransaction::where('wallet_id', $lockedWallet->id)
+                ->where('type', CreditTransactionType::Purchase)
+                ->sum('amount');
+
+            if ($totalPurchased <= 0) {
+                if ($throwOnValidation) {
+                    throw ValidationException::withMessages([
+                        'balance' => ['Seuls les crédits achetés avec de l\'argent réel peuvent être remboursés en argent. Vos crédits promotionnels ou bonus ne sont pas éligibles au remboursement.'],
+                    ]);
+                }
+
+                return null;
+            }
+
+            $totalCashRefunded = (int) CreditTransaction::where('wallet_id', $lockedWallet->id)
+                ->where('source', 'credit_balance_cash_refund')
+                ->sum('amount');
+
+            $totalDebits = (int) CreditTransaction::where('wallet_id', $lockedWallet->id)
+                ->whereIn('type', [CreditTransactionType::Debit, CreditTransactionType::CampaignDebit])
+                ->sum('amount');
+
+            $remainingPurchasedCredits = max(0, $totalPurchased - $totalCashRefunded - $totalDebits);
+            $amountToRefund = min($currentBalance, $remainingPurchasedCredits);
+
+            if ($amountToRefund <= 0) {
+                if ($throwOnValidation) {
+                    throw ValidationException::withMessages([
+                        'balance' => ['Vos crédits achetés ont déjà été intégralement consommés. Votre solde restant provient de bonus non remboursables en argent.'],
+                    ]);
+                }
+
+                return null;
+            }
+
+            // Ignorer le phone du client : verser uniquement au numéro qui a payé, lu dans la transaction d'origine
+            $purchaseTx = PaymentTransaction::where('user_id', $user->id)
+                ->where('service_type', PaymentServiceType::Credit)
                 ->where('status', PaymentStatus::Confirmed)
                 ->latest('id')
                 ->first();
 
-            $txMeta = $lastTx?->metadata ?? [];
-            $savedMethod = SavedPaymentMethod::where('user_id', $user->id)
-                ->orderByDesc('is_default')
-                ->latest('id')
-                ->first();
+            $targetPhone = null;
+            $targetOperator = null;
 
-            $targetPhone = $phone
-                ?: ($txMeta['phone'] ?? $txMeta['phonenumber'] ?? $savedMethod?->phone_number ?? $user->phone ?? '+237690000000');
-            $targetOperator = $operator
-                ?: ($txMeta['operator'] ?? $savedMethod?->operator ?? null);
-            $currency = $lockedWallet->currency ?: ($lastTx?->currency ?: 'XAF');
+            if ($purchaseTx) {
+                $txMeta = $purchaseTx->metadata ?? [];
+                $targetPhone = $txMeta['phone'] ?? $txMeta['phonenumber'] ?? $txMeta['phone_number'] ?? null;
+                $targetOperator = $txMeta['operator'] ?? null;
 
+                if (! $targetPhone) {
+                    $attempt = $purchaseTx->attempts()->latest('id')->first();
+                    $targetPhone = $attempt?->metadata['phone'] ?? $attempt?->metadata['phonenumber'] ?? null;
+                    $targetOperator = $targetOperator ?: ($attempt?->metadata['operator'] ?? null);
+                }
+            }
+
+            if (! $targetPhone) {
+                $anyTx = PaymentTransaction::where('user_id', $user->id)
+                    ->where('status', PaymentStatus::Confirmed)
+                    ->latest('id')
+                    ->first();
+
+                if ($anyTx) {
+                    $txMeta = $anyTx->metadata ?? [];
+                    $targetPhone = $txMeta['phone'] ?? $txMeta['phonenumber'] ?? $txMeta['phone_number'] ?? null;
+                    $targetOperator = $txMeta['operator'] ?? null;
+
+                    if (! $targetPhone) {
+                        $attempt = $anyTx->attempts()->latest('id')->first();
+                        $targetPhone = $attempt?->metadata['phone'] ?? $attempt?->metadata['phonenumber'] ?? null;
+                        $targetOperator = $targetOperator ?: ($attempt?->metadata['operator'] ?? null);
+                    }
+                }
+            }
+
+            if (empty($targetPhone)) {
+                if ($throwOnValidation) {
+                    throw ValidationException::withMessages([
+                        'phone' => ['Numéro de paiement d\'origine introuvable. Veuillez contacter le support client pour effectuer votre remboursement.'],
+                    ]);
+                }
+
+                return null;
+            }
+
+            $currency = $lockedWallet->currency ?: ($purchaseTx?->currency ?: 'XAF');
             $ref = 'CRED-REFUND-'.$user->id.'-'.strtoupper(Str::random(6));
 
             $disburse = app(MonetbilGateway::class)->disburseToMobileMoney(
                 phone: (string) $targetPhone,
-                amount: (float) $currentBalance,
+                amount: (float) $amountToRefund,
                 currency: $currency,
                 reference: $ref,
                 operator: is_string($targetOperator) ? $targetOperator : null,
                 countryCode: $user->country_code,
                 metadata: [
                     'user_id' => $user->id,
-                    'reason' => 'Remboursement du solde de crédit BANGO sur le moyen de paiement d\'origine',
+                    'reason' => 'Remboursement du solde de crédit BANGO acheté sur le moyen de paiement d\'origine',
                 ]
             );
 
             $creditTx = $this->debit(
                 account: $lockedWallet,
-                amount: $currentBalance,
+                amount: $amountToRefund,
                 source: 'credit_balance_cash_refund',
                 reference: $ref,
-                description: 'Remboursement en argent du solde de crédits sur le moyen de paiement d\'origine',
-                idempotencyKey: 'credit_cash_refund_'.$user->id.'_'.$currentBalance.'_'.now()->format('YmdHis'),
+                description: 'Remboursement en argent du solde de crédits achetés sur le moyen de paiement d\'origine',
+                idempotencyKey: 'credit_cash_refund_'.$user->id.'_'.$amountToRefund.'_'.now()->format('YmdHis'),
                 metadata: [
                     'refund_channel' => 'original_payment_method',
                     'phone' => $disburse['phone'],
@@ -471,7 +542,7 @@ class CreditWalletService
 
             return [
                 'refunded' => true,
-                'amount' => (float) $currentBalance,
+                'amount' => (float) $amountToRefund,
                 'currency' => $currency,
                 'refund_channel' => 'original_payment_method',
                 'phone' => $disburse['phone'],

@@ -579,10 +579,23 @@ class AdminPaymentController extends Controller
         if ($validated['status'] === 'resolved' && $dispute->type === 'double_charge') {
             $meta = $dispute->metadata ?? [];
             $refundMethod = $request->input('refund_method', $meta['refund_method'] ?? 'original_payment_method');
-
             if (in_array($refundMethod, ['original_payment_method', 'cash', 'mobile_money'], true) && empty($meta['cash_refund'])) {
-                $phone = (string) ($dispute->claimant_phone ?: $dispute->user?->phone ?: '+237690000000');
-                $operator = $meta['operator'] ?? null;
+                $tx = $dispute->transaction;
+                $txMeta = $tx?->metadata ?? [];
+                $phone = $txMeta['phone'] ?? $txMeta['phonenumber'] ?? $txMeta['phone_number'] ?? null;
+                if (! $phone && $tx) {
+                    $attempt = $tx->attempts()->latest('id')->first();
+                    $phone = $attempt?->metadata['phone'] ?? $attempt?->metadata['phonenumber'] ?? null;
+                }
+                $phone = $phone ?: ($dispute->claimant_phone ?: $dispute->user?->phone);
+
+                if (empty($phone)) {
+                    throw ValidationException::withMessages([
+                        'phone' => ['Numéro de paiement d\'origine introuvable pour ce dossier. Impossible d\'effectuer le remboursement automatique.'],
+                    ]);
+                }
+
+                $operator = $txMeta['operator'] ?? ($meta['operator'] ?? null);
                 $amount = (float) $dispute->disputed_amount;
 
                 $disburse = app(MonetbilGateway::class)->disburseToMobileMoney(

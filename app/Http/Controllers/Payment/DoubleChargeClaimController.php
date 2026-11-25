@@ -167,34 +167,74 @@ class DoubleChargeClaimController extends Controller
             ]);
         }
 
+        $isAccepted = in_array($dispute->status, ['approved', 'resolved'], true)
+            || ! empty($meta['approved_by_operator'])
+            || ! empty($meta['accepted_by_operator']);
+
+        if (! $isAccepted) {
+            throw ValidationException::withMessages([
+                'status' => ['Ce dossier de double débit n\'a pas encore été validé par un opérateur. Le remboursement en argent nécessite la validation préalable par nos équipes de conformité.'],
+            ]);
+        }
+
         return DB::transaction(function () use ($dispute, $user, $monetbilGateway, $creditWalletService) {
             /** @var PaymentDispute $locked */
             $locked = PaymentDispute::where('id', $dispute->id)->lockForUpdate()->firstOrFail();
             $meta = $locked->metadata ?? [];
             $amount = (float) $locked->disputed_amount;
 
-            // Si le double débit avait précédemment été compensé en crédit BANGO, débiter le crédit avant versement Mobile Money
-            $owner = $locked->user ?? $user;
-            if (($meta['refund_channel'] ?? null) === 'bango_credit' || $creditWalletService->getBalance($owner) >= $amount) {
-                if (($meta['refund_channel'] ?? null) === 'bango_credit' && $creditWalletService->getBalance($owner) >= $amount) {
-                    $creditWalletService->debit(
-                        account: $owner,
-                        amount: (int) round($amount),
-                        source: 'double_charge_cash_refund_conversion',
-                        reference: 'CASH-CONV-DBL-'.$locked->reference,
-                        description: sprintf('Conversion en remboursement Mobile Money du double débit #%s', $locked->reference),
-                        idempotencyKey: 'double_charge_cash_conv_'.$locked->id,
-                        referenceModel: $locked
-                    );
-                }
+            if ($amount <= 0) {
+                throw ValidationException::withMessages([
+                    'amount' => ['Ce dossier ne comporte aucun montant éligible au remboursement.'],
+                ]);
             }
 
-            $phone = (string) ($locked->claimant_phone ?: $owner->phone ?: '+237690000000');
-            $operator = $meta['operator'] ?? null;
+            $owner = $locked->user ?? $user;
+            $amountToDisburse = $amount;
+
+            // Si le double débit avait précédemment été compensé en crédit BANGO, ne verser que ce qui reste et refuser s'il ne reste rien
+            if (($meta['refund_channel'] ?? null) === 'bango_credit') {
+                $currentBalance = (float) $creditWalletService->getBalance($owner);
+                if ($currentBalance <= 0) {
+                    throw ValidationException::withMessages([
+                        'balance' => ['Le crédit BANGO émis pour ce dossier a déjà été entièrement consommé. Aucun remboursement en argent ne peut être effectué.'],
+                    ]);
+                }
+
+                $amountToDisburse = min($amount, $currentBalance);
+
+                $creditWalletService->debit(
+                    account: $owner,
+                    amount: (int) round($amountToDisburse),
+                    source: 'double_charge_cash_refund_conversion',
+                    reference: 'CASH-CONV-DBL-'.$locked->reference,
+                    description: sprintf('Conversion en remboursement Mobile Money du double débit #%s', $locked->reference),
+                    idempotencyKey: 'double_charge_cash_conv_'.$locked->id.'_'.round($amountToDisburse),
+                    referenceModel: $locked
+                );
+            }
+
+            // Verser uniquement au numéro qui a payé, lu dans la transaction d'origine
+            $tx = $locked->transaction;
+            $txMeta = $tx?->metadata ?? [];
+            $phone = $txMeta['phone'] ?? $txMeta['phonenumber'] ?? $txMeta['phone_number'] ?? null;
+            $operator = $txMeta['operator'] ?? ($meta['operator'] ?? null);
+
+            if (! $phone && $tx) {
+                $attempt = $tx->attempts()->latest('id')->first();
+                $phone = $attempt?->metadata['phone'] ?? $attempt?->metadata['phonenumber'] ?? null;
+                $operator = $operator ?: ($attempt?->metadata['operator'] ?? null);
+            }
+
+            if (empty($phone)) {
+                throw ValidationException::withMessages([
+                    'phone' => ['Numéro de paiement d\'origine introuvable pour ce dossier. Veuillez contacter le support client pour effectuer votre remboursement.'],
+                ]);
+            }
 
             $disburse = $monetbilGateway->disburseToMobileMoney(
-                phone: $phone,
-                amount: $amount,
+                phone: (string) $phone,
+                amount: $amountToDisburse,
                 currency: $locked->currency ?: 'XAF',
                 reference: 'REFUND-DBL-'.$locked->reference,
                 operator: is_string($operator) ? $operator : null,
@@ -208,7 +248,7 @@ class DoubleChargeClaimController extends Controller
             $meta['refund_method'] = 'original_payment_method';
             $meta['refund_channel'] = 'original_payment_method';
             $meta['cash_refund'] = [
-                'amount_refunded' => $amount,
+                'amount_refunded' => $amountToDisburse,
                 'currency' => $locked->currency ?: 'XAF',
                 'phone' => $disburse['phone'],
                 'operator' => $disburse['operator'],
@@ -218,7 +258,7 @@ class DoubleChargeClaimController extends Controller
             $locked->metadata = $meta;
             $locked->status = 'resolved';
             $locked->resolved_at = $locked->resolved_at ?? now();
-            $locked->decision = $locked->decision ?? 'Remboursement en argent effectué sur le moyen de paiement d\'origine.';
+            $locked->resolution_decision = $locked->resolution_decision ?? 'Remboursement en argent effectué sur le moyen de paiement d\'origine.';
             $locked->save();
 
             return response()->json([
@@ -229,6 +269,7 @@ class DoubleChargeClaimController extends Controller
                     'status' => $locked->status,
                     'refund_channel' => 'original_payment_method',
                     'disputed_amount' => (float) $locked->disputed_amount,
+                    'amount_refunded' => $amountToDisburse,
                     'currency' => $locked->currency,
                     'cash_refund' => $meta['cash_refund'],
                 ],

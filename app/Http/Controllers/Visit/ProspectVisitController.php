@@ -264,14 +264,9 @@ class ProspectVisitController extends Controller
     {
         $reservation = VisitReservation::findOrFail($id);
 
-        $validated = $request->validate([
-            'phone' => ['nullable', 'string', 'max:20'],
-        ]);
-
         $refunded = $this->reservationService->requestCashRefundToOriginalMethod(
             reservation: $reservation,
-            actor: $request->user(),
-            phone: $validated['phone'] ?? null
+            actor: $request->user()
         );
 
         return response()->json([
