@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Services\Profile\ContactMatchingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\ValidationException;
 
@@ -77,6 +78,21 @@ class ContactMatchingController extends Controller
                 'message' => $e->getMessage(),
                 'errors' => $e->errors(),
             ], 422);
+        }
+
+        if ($user) {
+            $matchedIds = collect($result['suggestions'])
+                ->pluck('id')
+                ->map(fn ($id) => (int) $id)
+                ->filter(fn ($id) => $id > 0)
+                ->all();
+
+            if (! empty($matchedIds)) {
+                $cachedKey = 'user_contact_matches:'.$user->id;
+                $existing = (array) Cache::get($cachedKey, []);
+                $merged = array_values(array_unique(array_merge($existing, $matchedIds)));
+                Cache::put($cachedKey, $merged, now()->addDays(30));
+            }
         }
 
         return response()->json([

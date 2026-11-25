@@ -33,7 +33,9 @@ class PersonSuggestionResource extends JsonResource
             'badge' => $this->badge ?? 'none',
             'city' => $city,
             'neighbourhood' => $neighbourhood,
+            'reason' => (string) ($this->reason ?? 'city'),
             'mutual_followers_count' => (int) ($this->mutual_followers_count ?? 0),
+            'mutual_names' => (array) ($this->mutual_names ?? []),
         ];
     }
 }

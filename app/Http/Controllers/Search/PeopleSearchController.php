@@ -6,8 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\Search\PeopleSearchResultResource;
 use App\Http\Resources\Search\PersonSuggestionResource;
 use App\Models\User;
+use App\Services\Profile\ContactMatchingService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -68,11 +70,19 @@ class PeopleSearchController extends Controller
     }
 
     /**
-     * Suggestions « voisins » (SQ-01 bloc « Près de toi », AU-19).
+     * Suggestions de personnes inspirées du modèle TikTok (SQ-01, AU-19).
      *
-     * GET /people/suggestions?scope=neighbourhood|city&limit=20
-     * Comptes actifs, hors moi, hors bloqués et déjà suivis.
-     * Même quartier d'abord, puis même ville.
+     * Sources mélangées dans cet ordre strict :
+     * 1. Amis d'amis (suivis par les personnes que je suis, sans limite de ville, classés par nombre de liens en commun)
+     * 2. Contacts du téléphone (empreintes ou numéros déjà envoyés et rapprochés)
+     * 3. Mon quartier
+     * 4. Ma ville
+     *
+     * Exclusions strictes :
+     * - Moi-même
+     * - Comptes déjà suivis
+     * - Blocages mutuels (bloqués par moi ou me bloquant)
+     * - Comptes inactifs / suspendus / supprimés
      */
     public function suggestions(Request $request): AnonymousResourceCollection
     {
@@ -91,91 +101,259 @@ class PeopleSearchController extends Controller
         $myNeighbourhood = $authUser->getRawOriginal('neighbourhood') ?: ($authUser->neighbourhood?->name ?? null);
         $myNeighbourhoodId = $authUser->neighbourhood_id;
 
-        $query = User::query()
-            ->with(['city', 'neighbourhood'])
-            ->where('status', 'active')
-            ->where('id', '!=', $authUserId);
-
-        // Exclure les comptes déjà suivis
-        $query->whereNotIn('id', function ($q) use ($authUserId) {
-            $q->select('following_id')
-                ->from('follows')
-                ->where('follower_id', $authUserId);
-        });
-
-        // Exclure les comptes bloqués (bloqués par moi)
-        $query->whereNotIn('id', function ($q) use ($authUserId) {
-            $q->select('blocked_id')
-                ->from('user_blocks')
-                ->where('blocker_id', $authUserId);
-        });
-
-        // Exclure les comptes qui me bloquent
-        $query->whereNotIn('id', function ($q) use ($authUserId) {
-            $q->select('blocker_id')
-                ->from('user_blocks')
-                ->where('blocked_id', $authUserId);
-        });
-
-        // Calcul des abonnés en commun (mutual_followers_count)
-        $query->select('users.*');
-        $query->selectSub(function ($q) use ($authUserId) {
-            $q->selectRaw('COUNT(DISTINCT f1.follower_id)')
-                ->from('follows as f1')
-                ->whereColumn('f1.following_id', 'users.id')
-                ->whereIn('f1.follower_id', function ($sub) use ($authUserId) {
-                    $sub->select('f2.follower_id')
-                        ->from('follows as f2')
-                        ->where('f2.following_id', $authUserId);
+        // Requête de base avec exclusions mutuelles strictes
+        $baseUserQuery = function () use ($authUserId) {
+            return User::query()
+                ->where('status', 'active')
+                ->whereNull('deleted_at')
+                ->where(function ($q) {
+                    $q->whereNull('suspended_until')
+                        ->orWhere('suspended_until', '<=', now());
+                })
+                ->where('id', '!=', $authUserId)
+                ->whereNotIn('id', function ($q) use ($authUserId) {
+                    $q->select('following_id')->from('follows')->where('follower_id', $authUserId);
+                })
+                ->whereNotIn('id', function ($q) use ($authUserId) {
+                    $q->select('blocked_id')->from('user_blocks')->where('blocker_id', $authUserId);
+                })
+                ->whereNotIn('id', function ($q) use ($authUserId) {
+                    $q->select('blocker_id')->from('user_blocks')->where('blocked_id', $authUserId);
                 });
-        }, 'mutual_followers_count');
+        };
 
-        // Filtrage selon la portée demandée (scope)
-        if ($scope === 'neighbourhood') {
-            if ($myNeighbourhood || $myNeighbourhoodId) {
-                $query->where(function ($q) use ($myNeighbourhood, $myNeighbourhoodId) {
+        $selectedUsers = collect();
+        $selectedIds = collect();
+
+        // 1. Source « amis d'amis » : comptes suivis par les personnes que je suis, sans limite de ville.
+        // Classés par nombre de liens en commun décroissant.
+        $fofDataQuery = DB::table('follows as f_target')
+            ->whereIn('f_target.follower_id', function ($sub) use ($authUserId) {
+                $sub->select('following_id')->from('follows')->where('follower_id', $authUserId);
+            })
+            ->where('f_target.following_id', '!=', $authUserId)
+            ->whereNotIn('f_target.following_id', function ($q) use ($authUserId) {
+                $q->select('following_id')->from('follows')->where('follower_id', $authUserId);
+            })
+            ->whereNotIn('f_target.following_id', function ($q) use ($authUserId) {
+                $q->select('blocked_id')->from('user_blocks')->where('blocker_id', $authUserId);
+            })
+            ->whereNotIn('f_target.following_id', function ($q) use ($authUserId) {
+                $q->select('blocker_id')->from('user_blocks')->where('blocked_id', $authUserId);
+            })
+            ->select('f_target.following_id as user_id', DB::raw('COUNT(DISTINCT f_target.follower_id) as common_links_count'))
+            ->groupBy('f_target.following_id')
+            ->orderByDesc('common_links_count')
+            ->limit($limit);
+
+        $fofResults = $fofDataQuery->get();
+        if ($fofResults->isNotEmpty()) {
+            $fofUserIds = $fofResults->pluck('user_id')->all();
+            $fofUsers = $baseUserQuery()
+                ->with(['city', 'neighbourhood'])
+                ->whereIn('id', $fofUserIds)
+                ->when($scope === 'neighbourhood' && ($myNeighbourhood || $myNeighbourhoodId), function ($q) use ($myNeighbourhood, $myNeighbourhoodId) {
+                    $q->where(function ($sub) use ($myNeighbourhood, $myNeighbourhoodId) {
+                        if ($myNeighbourhood) {
+                            $sub->where('neighbourhood', $myNeighbourhood);
+                        }
+                        if ($myNeighbourhoodId) {
+                            $sub->orWhere('neighbourhood_id', $myNeighbourhoodId);
+                        }
+                    });
+                })
+                ->get()
+                ->sortBy(function ($user) use ($fofUserIds) {
+                    return array_search($user->id, $fofUserIds, true);
+                })
+                ->values();
+
+            foreach ($fofUsers as $user) {
+                if ($selectedUsers->count() >= $limit) {
+                    break;
+                }
+                $user->reason = 'friends_of_friends';
+                $selectedUsers->push($user);
+                $selectedIds->push($user->id);
+            }
+        }
+
+        // 2. Source « contacts du téléphone » (empreintes déjà envoyées)
+        if ($selectedUsers->count() < $limit) {
+            $cachedContactIds = (array) Cache::get('user_contact_matches:'.$authUserId, []);
+
+            // Prendre aussi en compte d'éventuelles empreintes passées directement dans la requête
+            $inputFingerprints = $request->input('fingerprints', []);
+            $inputPhones = $request->input('phones', $request->input('numbers', []));
+            $inputs = array_merge((array) $inputFingerprints, (array) $inputPhones);
+            if (! empty($inputs)) {
+                try {
+                    $matchResult = app(ContactMatchingService::class)->match($authUser, $inputs);
+                    $newMatchedIds = collect($matchResult['suggestions'])
+                        ->pluck('id')
+                        ->map(fn ($id) => (int) $id)
+                        ->filter(fn ($id) => $id > 0)
+                        ->all();
+                    $cachedContactIds = array_values(array_unique(array_merge($cachedContactIds, $newMatchedIds)));
+                    Cache::put('user_contact_matches:'.$authUserId, $cachedContactIds, now()->addDays(30));
+                } catch (\Throwable) {
+                    // Ignorer les erreurs d'analyse contacts
+                }
+            }
+
+            $contactUserIds = array_values(array_diff($cachedContactIds, $selectedIds->all()));
+            if (! empty($contactUserIds)) {
+                $needed = $limit - $selectedUsers->count();
+                $contactUsers = $baseUserQuery()
+                    ->with(['city', 'neighbourhood'])
+                    ->whereIn('id', $contactUserIds)
+                    ->when($scope === 'neighbourhood' && ($myNeighbourhood || $myNeighbourhoodId), function ($q) use ($myNeighbourhood, $myNeighbourhoodId) {
+                        $q->where(function ($sub) use ($myNeighbourhood, $myNeighbourhoodId) {
+                            if ($myNeighbourhood) {
+                                $sub->where('neighbourhood', $myNeighbourhood);
+                            }
+                            if ($myNeighbourhoodId) {
+                                $sub->orWhere('neighbourhood_id', $myNeighbourhoodId);
+                            }
+                        });
+                    })
+                    ->orderByDesc('is_verified')
+                    ->orderBy('id', 'asc')
+                    ->limit($needed)
+                    ->get();
+
+                foreach ($contactUsers as $user) {
+                    if ($selectedUsers->count() >= $limit) {
+                        break;
+                    }
+                    $user->reason = 'contact';
+                    $selectedUsers->push($user);
+                    $selectedIds->push($user->id);
+                }
+            }
+        }
+
+        // 3. Source « mon quartier »
+        if ($selectedUsers->count() < $limit && ($myNeighbourhood || $myNeighbourhoodId)) {
+            $needed = $limit - $selectedUsers->count();
+            $neighbourhoodUsers = $baseUserQuery()
+                ->with(['city', 'neighbourhood'])
+                ->when($selectedIds->isNotEmpty(), fn ($q) => $q->whereNotIn('id', $selectedIds->all()))
+                ->where(function ($q) use ($myNeighbourhood, $myNeighbourhoodId) {
                     if ($myNeighbourhood) {
                         $q->where('neighbourhood', $myNeighbourhood);
                     }
                     if ($myNeighbourhoodId) {
                         $q->orWhere('neighbourhood_id', $myNeighbourhoodId);
                     }
-                });
-            } else {
-                $query->whereRaw('1 = 0');
+                })
+                ->orderByDesc('is_verified')
+                ->orderBy('id', 'asc')
+                ->limit($needed)
+                ->get();
+
+            foreach ($neighbourhoodUsers as $user) {
+                if ($selectedUsers->count() >= $limit) {
+                    break;
+                }
+                $user->reason = 'neighbourhood';
+                $selectedUsers->push($user);
+                $selectedIds->push($user->id);
             }
-        } elseif ($myCity || $myCityId) {
-            $query->where(function ($q) use ($myCity, $myCityId) {
-                if ($myCity) {
-                    $q->where('city', $myCity);
+        }
+
+        // 4. Source « ma ville »
+        if ($selectedUsers->count() < $limit && ($myCity || $myCityId) && $scope !== 'neighbourhood') {
+            $needed = $limit - $selectedUsers->count();
+            $cityUsers = $baseUserQuery()
+                ->with(['city', 'neighbourhood'])
+                ->when($selectedIds->isNotEmpty(), fn ($q) => $q->whereNotIn('id', $selectedIds->all()))
+                ->where(function ($q) use ($myCity, $myCityId) {
+                    if ($myCity) {
+                        $q->where('city', $myCity);
+                    }
+                    if ($myCityId) {
+                        $q->orWhere('city_id', $myCityId);
+                    }
+                })
+                ->orderByDesc('is_verified')
+                ->orderBy('id', 'asc')
+                ->limit($needed)
+                ->get();
+
+            foreach ($cityUsers as $user) {
+                if ($selectedUsers->count() >= $limit) {
+                    break;
                 }
-                if ($myCityId) {
-                    $q->orWhere('city_id', $myCityId);
+                $user->reason = 'city';
+                $selectedUsers->push($user);
+                $selectedIds->push($user->id);
+            }
+        }
+
+        // 5. Fallback utilisateurs actifs si ville ou quartier non renseignés
+        if ($selectedUsers->count() < $limit && $scope !== 'neighbourhood') {
+            $needed = $limit - $selectedUsers->count();
+            $fallbackUsers = $baseUserQuery()
+                ->with(['city', 'neighbourhood'])
+                ->when($selectedIds->isNotEmpty(), fn ($q) => $q->whereNotIn('id', $selectedIds->all()))
+                ->orderByDesc('is_verified')
+                ->orderBy('id', 'asc')
+                ->limit($needed)
+                ->get();
+
+            foreach ($fallbackUsers as $user) {
+                if ($selectedUsers->count() >= $limit) {
+                    break;
                 }
-            });
+                $user->reason = 'city';
+                $selectedUsers->push($user);
+                $selectedIds->push($user->id);
+            }
         }
 
-        // Tri : même quartier d'abord, puis même ville, puis abonnés en commun, puis vérifiés
-        if ($myNeighbourhood || $myNeighbourhoodId) {
-            $query->orderByRaw('CASE WHEN (neighbourhood = ? OR (neighbourhood_id IS NOT NULL AND neighbourhood_id = ?)) THEN 0 ELSE 1 END ASC', [
-                $myNeighbourhood ?? '',
-                $myNeighbourhoodId ?? 0,
-            ]);
+        // Calcul des abonnés et liens en commun (mutual_followers_count et mutual_names)
+        $candidateIds = $selectedUsers->pluck('id')->all();
+        if (! empty($candidateIds)) {
+            $mutualRows = DB::table('follows as f_target')
+                ->join('users as u', 'u.id', '=', 'f_target.follower_id')
+                ->whereIn('f_target.following_id', $candidateIds)
+                ->where(function ($w) use ($authUserId) {
+                    $w->whereIn('u.id', function ($sub) use ($authUserId) {
+                        $sub->select('following_id')->from('follows')->where('follower_id', $authUserId);
+                    })->orWhereIn('u.id', function ($sub) use ($authUserId) {
+                        $sub->select('follower_id')->from('follows')->where('following_id', $authUserId);
+                    });
+                })
+                ->select('f_target.following_id as candidate_id', 'u.id as user_id', 'u.display_name', 'u.name')
+                ->distinct()
+                ->get();
+
+            $mutualGrouped = $mutualRows->groupBy('candidate_id');
+
+            foreach ($selectedUsers as $user) {
+                $rows = $mutualGrouped->get($user->id, collect());
+                $user->mutual_followers_count = $rows->count();
+
+                $names = [];
+                foreach ($rows as $row) {
+                    $rawName = trim((string) ($row->display_name ?: $row->name));
+                    if ($rawName !== '') {
+                        $parts = preg_split('/\s+/', $rawName);
+                        $firstName = $parts[0] ?? $rawName;
+                        if ($firstName !== '' && ! in_array($firstName, $names, true)) {
+                            $names[] = $firstName;
+                        }
+                    }
+                    if (count($names) >= 2) {
+                        break;
+                    }
+                }
+
+                $user->mutual_names = $names;
+            }
         }
 
-        if ($myCity || $myCityId) {
-            $query->orderByRaw('CASE WHEN (city = ? OR (city_id IS NOT NULL AND city_id = ?)) THEN 0 ELSE 1 END ASC', [
-                $myCity ?? '',
-                $myCityId ?? 0,
-            ]);
-        }
-
-        $query->orderByDesc('mutual_followers_count')
-            ->orderByDesc('is_verified')
-            ->orderBy('id', 'asc');
-
-        $users = $query->limit($limit)->get();
-
-        return PersonSuggestionResource::collection($users);
+        return PersonSuggestionResource::collection($selectedUsers);
     }
 }

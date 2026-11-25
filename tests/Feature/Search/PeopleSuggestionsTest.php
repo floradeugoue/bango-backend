@@ -246,3 +246,193 @@ it('allows filtering search/people by city and neighbourhood', function () {
     expect($handlesNeighbourhood)->not->toContain('habitant_ouakam');
     expect($handlesNeighbourhood)->not->toContain('habitant_douala');
 });
+
+it('suggests friends of friends regardless of city and ranks by mutual links count', function () {
+    $me = User::factory()->create([
+        'status' => 'active',
+        'city' => 'Douala',
+        'neighbourhood' => 'Akwa',
+    ]);
+    Passport::actingAs($me);
+
+    $friendAwa = User::factory()->create([
+        'status' => 'active',
+        'name' => 'Awa Diop',
+        'display_name' => 'Awa Diop',
+        'handle' => 'awa_diop',
+    ]);
+
+    $friendOumar = User::factory()->create([
+        'status' => 'active',
+        'name' => 'Oumar Sy',
+        'display_name' => 'Oumar Sy',
+        'handle' => 'oumar_sy',
+    ]);
+
+    // Je suis Awa et Oumar
+    DB::table('follows')->insert([
+        ['follower_id' => $me->id, 'following_id' => $friendAwa->id, 'created_at' => now(), 'updated_at' => now()],
+        ['follower_id' => $me->id, 'following_id' => $friendOumar->id, 'created_at' => now(), 'updated_at' => now()],
+    ]);
+
+    // Samba habite à Abidjan (autre ville) et est suivi par Awa ET Oumar (2 liens en commun)
+    $samba = User::factory()->create([
+        'status' => 'active',
+        'name' => 'Samba Diallo',
+        'display_name' => 'Samba Diallo',
+        'handle' => 'samba_diallo',
+        'city' => 'Abidjan',
+        'neighbourhood' => 'Cocody',
+    ]);
+
+    // Fatou habite à Paris (autre ville) et est suivie seulement par Awa (1 lien en commun)
+    $fatou = User::factory()->create([
+        'status' => 'active',
+        'name' => 'Fatou Ndiaye',
+        'display_name' => 'Fatou Ndiaye',
+        'handle' => 'fatou_ndiaye',
+        'city' => 'Paris',
+        'neighbourhood' => '16e',
+    ]);
+
+    DB::table('follows')->insert([
+        ['follower_id' => $friendAwa->id, 'following_id' => $samba->id, 'created_at' => now(), 'updated_at' => now()],
+        ['follower_id' => $friendOumar->id, 'following_id' => $samba->id, 'created_at' => now(), 'updated_at' => now()],
+        ['follower_id' => $friendAwa->id, 'following_id' => $fatou->id, 'created_at' => now(), 'updated_at' => now()],
+    ]);
+
+    $response = $this->getJson('/people/suggestions');
+    $response->assertStatus(200);
+
+    $data = $response->json('data');
+
+    // Samba (2 liens) doit apparaître en premier, puis Fatou (1 lien)
+    expect($data[0]['id'])->toBe((string) $samba->id);
+    expect($data[0]['reason'])->toBe('friends_of_friends');
+    expect($data[0]['mutual_followers_count'])->toBe(2);
+    expect($data[0]['mutual_names'])->toContain('Awa');
+    expect($data[0]['mutual_names'])->toContain('Oumar');
+
+    expect($data[1]['id'])->toBe((string) $fatou->id);
+    expect($data[1]['reason'])->toBe('friends_of_friends');
+    expect($data[1]['mutual_followers_count'])->toBe(1);
+    expect($data[1]['mutual_names'])->toBe(['Awa']);
+});
+
+it('mixes suggestions in strict order: friends of friends, contacts, neighbourhood, city', function () {
+    $me = User::factory()->create([
+        'status' => 'active',
+        'city' => 'Dakar',
+        'neighbourhood' => 'Ouakam',
+    ]);
+    Passport::actingAs($me);
+
+    // 1. Ami d'ami (Abidjan)
+    $myFollowing = User::factory()->create(['status' => 'active']);
+    DB::table('follows')->insert([
+        'follower_id' => $me->id,
+        'following_id' => $myFollowing->id,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $friendOfFriend = User::factory()->create([
+        'status' => 'active',
+        'city' => 'Abidjan',
+        'handle' => 'ami_d_ami',
+    ]);
+    DB::table('follows')->insert([
+        'follower_id' => $myFollowing->id,
+        'following_id' => $friendOfFriend->id,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    // 2. Contact du carnet d'adresses (Yaoundé) préalablement rapproché
+    $contactUser = User::factory()->create([
+        'status' => 'active',
+        'phone' => '+237690112233',
+        'city' => 'Yaoundé',
+        'handle' => 'mon_contact',
+    ]);
+    $digits = substr(preg_replace('/\D/', '', '+237690112233'), -8);
+    $sha256 = hash('sha256', $digits);
+
+    // Envoi des empreintes du téléphone
+    $this->postJson('/api/friends/match-fingerprints', [
+        'fingerprints' => [$sha256],
+    ])->assertOk();
+
+    // 3. Voisin du quartier (Dakar, Ouakam)
+    $neighbour = User::factory()->create([
+        'status' => 'active',
+        'city' => 'Dakar',
+        'neighbourhood' => 'Ouakam',
+        'handle' => 'mon_voisin',
+    ]);
+
+    // 4. Habitant de la ville (Dakar, Almadies)
+    $cityResident = User::factory()->create([
+        'status' => 'active',
+        'city' => 'Dakar',
+        'neighbourhood' => 'Almadies',
+        'handle' => 'mon_concitoyen',
+    ]);
+
+    $response = $this->getJson('/people/suggestions');
+    $response->assertStatus(200);
+
+    $data = $response->json('data');
+    expect(count($data))->toBeGreaterThanOrEqual(4);
+
+    // Vérification de l'ordre strict
+    expect($data[0]['id'])->toBe((string) $friendOfFriend->id);
+    expect($data[0]['reason'])->toBe('friends_of_friends');
+
+    expect($data[1]['id'])->toBe((string) $contactUser->id);
+    expect($data[1]['reason'])->toBe('contact');
+
+    expect($data[2]['id'])->toBe((string) $neighbour->id);
+    expect($data[2]['reason'])->toBe('neighbourhood');
+
+    expect($data[3]['id'])->toBe((string) $cityResident->id);
+    expect($data[3]['reason'])->toBe('city');
+});
+
+it('limits mutual_names to at most two first names even with multiple connections', function () {
+    $me = User::factory()->create(['status' => 'active']);
+    Passport::actingAs($me);
+
+    $friends = collect([
+        User::factory()->create(['name' => 'Awa Ndiaye', 'display_name' => 'Awa Ndiaye']),
+        User::factory()->create(['name' => 'Mamadou Ba', 'display_name' => 'Mamadou Ba']),
+        User::factory()->create(['name' => 'Cheikh Diop', 'display_name' => 'Cheikh Diop']),
+    ]);
+
+    foreach ($friends as $f) {
+        DB::table('follows')->insert([
+            'follower_id' => $me->id,
+            'following_id' => $f->id,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
+    $target = User::factory()->create(['status' => 'active', 'city' => 'Lomé']);
+    foreach ($friends as $f) {
+        DB::table('follows')->insert([
+            'follower_id' => $f->id,
+            'following_id' => $target->id,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
+    $response = $this->getJson('/people/suggestions');
+    $response->assertStatus(200);
+
+    $data = $response->json('data');
+    expect($data[0]['id'])->toBe((string) $target->id);
+    expect($data[0]['mutual_followers_count'])->toBe(3);
+    expect($data[0]['mutual_names'])->toHaveCount(2);
+});
