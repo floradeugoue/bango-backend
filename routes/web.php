@@ -28,8 +28,8 @@ Route::get('/people/suggestions', [PeopleSearchController::class, 'suggestions']
 Route::get('/search/people', [PeopleSearchController::class, 'index'])->middleware('api')->name('web.search.people');
 
 // Support direct /admin and /admin/v1 base URL without /api prefix for back-office frontend
-Route::prefix('admin')->middleware('api')->group(base_path('routes/admin.php'));
-Route::prefix('admin/v1')->middleware('api')->group(base_path('routes/admin.php'));
+Route::prefix('admin')->middleware('api')->name('web.admin.')->group(base_path('routes/admin.php'));
+Route::prefix('admin/v1')->middleware('api')->name('web.admin.v1.')->group(base_path('routes/admin.php'));
 
 // Diffusion publique des sons musicaux (évite 403 / disque privé)
 Route::get('/sounds/{filename}', function (string $filename) {
