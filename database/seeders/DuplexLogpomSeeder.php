@@ -16,6 +16,12 @@ class DuplexLogpomSeeder extends Seeder
 {
     public function run(): void
     {
+        if (! app()->environment('local', 'testing')) {
+            $this->command?->warn('DuplexLogpomSeeder est strictement réservé aux environnements local et de test.');
+
+            return;
+        }
+
         $owner = User::where('email', 'jeanpaul@bango.app')
             ->orWhere('name', 'jeanpaul')
             ->first();

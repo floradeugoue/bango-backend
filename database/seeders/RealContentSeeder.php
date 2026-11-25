@@ -47,6 +47,12 @@ class RealContentSeeder extends Seeder
 {
     public function run(): void
     {
+        if (! app()->environment('local', 'testing')) {
+            $this->command?->warn('RealContentSeeder est strictement réservé aux environnements local et de test.');
+
+            return;
+        }
+
         $this->command?->info('Création des données réalistes BANGO...');
 
         $cameroun = Country::where('code', 'CM')->first();

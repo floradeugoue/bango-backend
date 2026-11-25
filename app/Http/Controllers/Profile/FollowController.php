@@ -174,7 +174,7 @@ class FollowController extends Controller
             return response()->json(['message' => 'Ce compte est privé ou inaccessible.'], 403);
         }
 
-        $query = $target->followers();
+        $query = $target->followers()->excludeAdmins();
 
         if ($request->filled('query')) {
             $needle = '%'.strtolower($request->query('query')).'%';
@@ -217,11 +217,12 @@ class FollowController extends Controller
 
         if ($activePage && (! $id || (int) $id === (int) $actor?->id)) {
             $query = User::query()
+                ->excludeAdmins()
                 ->join('follows', 'users.id', '=', 'follows.following_id')
                 ->where('follows.follower_page_id', $activePage->id)
                 ->select('users.*');
         } else {
-            $query = $target->following();
+            $query = $target->following()->excludeAdmins();
         }
 
         if ($request->filled('query')) {

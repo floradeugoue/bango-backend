@@ -248,6 +248,44 @@ class User extends Authenticatable implements MustVerifyEmail
     }
 
     /**
+     * Scope pour exclure les comptes d'administration / back-office de la recherche,
+     * des suggestions publiques et des listes d'abonnés.
+     */
+    public function scopeExcludeAdmins(Builder $query): Builder
+    {
+        $roleCol = $this->qualifyColumn('role_id');
+        $handleCol = $this->qualifyColumn('handle');
+        $emailCol = $this->qualifyColumn('email');
+
+        return $query->where(function (Builder $q) use ($roleCol) {
+            $q->whereNull($roleCol)
+                ->orWhereNotIn($roleCol, function ($sub) {
+                    $sub->select('id')->from('roles')->whereIn('slug', [
+                        'admin',
+                        'direction',
+                        'moderation',
+                        'support',
+                        'finance',
+                        'verification',
+                    ]);
+                });
+        })->where(function (Builder $q) use ($handleCol) {
+            $q->whereNull($handleCol)
+                ->orWhere(function (Builder $sub) use ($handleCol) {
+                    $sub->whereRaw("LOWER({$handleCol}) != ?", ['bango_admin'])
+                        ->whereRaw("LOWER({$handleCol}) NOT LIKE ?", ['%admin%']);
+                });
+        })->where(function (Builder $q) use ($emailCol) {
+            $q->whereNull($emailCol)
+                ->orWhere(function (Builder $sub) use ($emailCol) {
+                    $sub->whereRaw("LOWER({$emailCol}) != ?", ['admin@bango.app'])
+                        ->whereRaw("LOWER({$emailCol}) != ?", ['admin@bangoapp.com'])
+                        ->whereRaw("LOWER({$emailCol}) NOT LIKE ?", ['%bango_admin%']);
+                });
+        });
+    }
+
+    /**
      * Vérifie si un slug de rôle exige obligatoirement la double authentification (TOTP).
      */
     public static function roleRequiresTwoFactor(?string $roleSlug): bool

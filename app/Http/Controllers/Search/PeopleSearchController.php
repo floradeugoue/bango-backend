@@ -27,6 +27,7 @@ class PeopleSearchController extends Controller
         $neighbourhood = $request->query('neighbourhood');
 
         $usersQuery = User::query()
+            ->excludeAdmins()
             ->when($queryClean !== '', function ($q) use ($queryClean) {
                 $q->where(function ($sub) use ($queryClean) {
                     $sub->where(DB::raw('LOWER(handle)'), 'like', "%{$queryClean}%")
@@ -80,6 +81,7 @@ class PeopleSearchController extends Controller
      *
      * Exclusions strictes :
      * - Moi-même
+     * - Comptes d'administration et back-office
      * - Comptes déjà suivis
      * - Blocages mutuels (bloqués par moi ou me bloquant)
      * - Comptes inactifs / suspendus / supprimés
@@ -101,9 +103,10 @@ class PeopleSearchController extends Controller
         $myNeighbourhood = $authUser->getRawOriginal('neighbourhood') ?: ($authUser->neighbourhood?->name ?? null);
         $myNeighbourhoodId = $authUser->neighbourhood_id;
 
-        // Requête de base avec exclusions mutuelles strictes
+        // Requête de base avec exclusions mutuelles strictes et exclusion des comptes admin
         $baseUserQuery = function () use ($authUserId) {
             return User::query()
+                ->excludeAdmins()
                 ->where('status', 'active')
                 ->whereNull('deleted_at')
                 ->where(function ($q) {
@@ -140,6 +143,13 @@ class PeopleSearchController extends Controller
             })
             ->whereNotIn('f_target.following_id', function ($q) use ($authUserId) {
                 $q->select('blocker_id')->from('user_blocks')->where('blocked_id', $authUserId);
+            })
+            ->whereNotIn('f_target.following_id', function ($q) {
+                $q->select('id')->from('users')->where(function ($sub) {
+                    $sub->whereIn('role_id', function ($rq) {
+                        $rq->select('id')->from('roles')->whereIn('slug', ['admin', 'direction', 'moderation', 'support', 'finance', 'verification']);
+                    })->orWhere('handle', 'bango_admin');
+                });
             })
             ->select('f_target.following_id as user_id', DB::raw('COUNT(DISTINCT f_target.follower_id) as common_links_count'))
             ->groupBy('f_target.following_id')

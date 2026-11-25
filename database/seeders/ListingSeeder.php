@@ -19,6 +19,12 @@ class ListingSeeder extends Seeder
      */
     public function run(): void
     {
+        if (! app()->environment('local', 'testing')) {
+            $this->command?->warn('ListingSeeder est strictement réservé aux environnements local et de test.');
+
+            return;
+        }
+
         $landlord = User::firstOrCreate(
             ['email' => 'landlord@bango.app'],
             [
