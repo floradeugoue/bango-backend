@@ -243,7 +243,7 @@ Route::get('/currencies', [CurrencyController::class, 'index']);
 // --------------------------------------------------------------------------
 // GEO (public, lecture seule)
 // --------------------------------------------------------------------------
-Route::prefix('geo')->group(function () {
+Route::prefix('geo')->name('geo.')->group(function () {
     // Lister et afficher un pays spécifique
     Route::apiResource('countries', CountryController::class)->only(['index', 'show']);
     // Lister et afficher une devise
@@ -255,7 +255,7 @@ Route::prefix('geo')->group(function () {
     // Lister et afficher un opérateur téléphonique/internet
     Route::apiResource('operators', OperatorController::class)->only(['index', 'show']);
     // Lister les genres acceptés (AU-07)
-    Route::get('/genders', [GenderController::class, 'index'])->name('api.geo.genders');
+    Route::get('/genders', [GenderController::class, 'index'])->name('genders');
 });
 
 // Alias direct pour GET /api/operators et /api/genders
