@@ -17,7 +17,8 @@ test('serves legal documents in version 1.0 with effective date 2026-11-22 for a
     expect($resTermsFr->json('data.version'))->toBe('1.0')
         ->and($resTermsFr->json('data.locale'))->toBe('fr')
         ->and($resTermsFr->json('data.effective_date'))->toContain('2026-11-22')
-        ->and($resTermsFr->json('data.content_markdown'))->toContain('CCEDA Finance')
+        ->and($resTermsFr->json('data.content_markdown'))->toContain('BANGO')
+        ->and($resTermsFr->json('data.content_markdown'))->not->toContain('CCEDA Finance')
         ->and($resTermsFr->json('data.content_markdown'))->not->toContain('Sénégalais');
 
     $resTermsEn = $this->getJson('/api/legal/documents/terms-of-service?locale=en');
@@ -25,7 +26,9 @@ test('serves legal documents in version 1.0 with effective date 2026-11-22 for a
     expect($resTermsEn->json('data.version'))->toBe('1.0')
         ->and($resTermsEn->json('data.locale'))->toBe('en')
         ->and($resTermsEn->json('data.effective_date'))->toContain('2026-11-22')
-        ->and($resTermsEn->json('data.content_markdown'))->toContain('Terms of Use');
+        ->and($resTermsEn->json('data.content_markdown'))->toContain('Terms of Use')
+        ->and($resTermsEn->json('data.content_markdown'))->toContain('BANGO')
+        ->and($resTermsEn->json('data.content_markdown'))->not->toContain('CCEDA Finance');
 
     // 2. privacy-policy (fr & en)
     $resPrivacyFr = $this->getJson('/api/legal/documents/privacy-policy?locale=fr');
@@ -35,6 +38,7 @@ test('serves legal documents in version 1.0 with effective date 2026-11-22 for a
         ->and($resPrivacyFr->json('data.effective_date'))->toContain('2026-11-22')
         ->and($resPrivacyFr->json('data.content_markdown'))->toContain('Données biométriques')
         ->and($resPrivacyFr->json('data.content_markdown'))->toContain('Contabo, Allemagne')
+        ->and($resPrivacyFr->json('data.content_markdown'))->not->toContain('CCEDA Finance')
         ->and($resPrivacyFr->json('data.content_markdown'))->not->toContain('carte professionnelle');
 
     $resPrivacyEn = $this->getJson('/api/legal/documents/privacy-policy?locale=en');
@@ -43,7 +47,8 @@ test('serves legal documents in version 1.0 with effective date 2026-11-22 for a
         ->and($resPrivacyEn->json('data.locale'))->toBe('en')
         ->and($resPrivacyEn->json('data.effective_date'))->toContain('2026-11-22')
         ->and($resPrivacyEn->json('data.content_markdown'))->toContain('Biometric data')
-        ->and($resPrivacyEn->json('data.content_markdown'))->toContain('Contabo, Germany');
+        ->and($resPrivacyEn->json('data.content_markdown'))->toContain('Contabo, Germany')
+        ->and($resPrivacyEn->json('data.content_markdown'))->not->toContain('CCEDA Finance');
 
     // 3. content-rules (fr & en)
     $resRulesFr = $this->getJson('/api/legal/documents/content-rules?locale=fr');

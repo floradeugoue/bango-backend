@@ -1,8 +1,8 @@
-﻿# Terms of Use
+# Terms of Use
 
 ### 1. Who publishes BANGO
 
-BANGO is published by CCEDA Finance. The app connects individuals and professionals around neighbourhood content and property listings in several African countries. By creating an account you enter into a contract with CCEDA Finance, governed by these terms and by the law of the country you use the service from.
+BANGO is published by the company BANGO, headquartered in Douala (Cameroon). The app connects individuals and professionals around neighbourhood content and property listings in several African countries. By creating an account you enter into a contract with BANGO, governed by these terms and by the law set out in article 21.
 
 Together with the Privacy Policy and the Content Rules, these terms form the entire agreement between you and us. Where the three documents conflict, the Content Rules prevail over these terms on everything concerning what you publish.
 
@@ -188,7 +188,7 @@ The version in force and the date you accepted are always available on this scre
 
 ### 21. Governing law and disputes
 
-These terms are governed by Cameroonian law, CCEDA Finance having its head office in Douala. If you use the service from another country, you keep the benefit of that country's mandatory consumer-protection provisions.
+These terms are governed by Cameroonian law, BANGO having its head office in Douala. If you use the service from another country, you keep the benefit of that country's mandatory consumer-protection provisions.
 
 Before any action, please write to us from the Help Centre: the vast majority of disagreements are settled there. You keep in any event the right to bring proceedings where you live and, where applicable, to refer the matter to a consumer mediation body.
 
@@ -198,4 +198,4 @@ Support and complaints: in the app, Profile → Support. A ticket is opened ther
 
 Security vulnerability reports: securite@bangoapp.com. We undertake not to pursue any good-faith report that causes neither damage nor disclosure.
 
-Post: CCEDA Finance — BANGO legal department.
+Post: BANGO — legal department, Douala (Cameroon).

@@ -1,4 +1,4 @@
-﻿# Content rules
+# Content rules
 
 ### 1. The spirit of these rules
 

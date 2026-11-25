@@ -1,4 +1,4 @@
-﻿# Politique de confidentialité
+# Politique de confidentialité
 
 ### 1. Ce document en une page
 
@@ -13,7 +13,7 @@ Voici l'essentiel, le détail suit :
 
 ### 2. Qui est responsable
 
-CCEDA Finance est responsable du traitement de vos données personnelles dans le cadre de BANGO. Pour toute question relative à cette politique ou à l'exercice de vos droits : confidentialite@bangoapp.com.
+BANGO est responsable du traitement de vos données personnelles. Pour toute question relative à cette politique ou à l'exercice de vos droits : confidentialite@bangoapp.com.
 
 BANGO est déployé dans plusieurs pays. Selon votre lieu de résidence, votre autorité de contrôle peut être l'autorité camerounaise de protection des données à caractère personnel (Cameroun), la Commission de protection des données personnelles (Sénégal), l'Autorité de régulation des télécommunications (Côte d'Ivoire), la Data Protection Commission (Ghana), la Nigeria Data Protection Commission, ou l'autorité compétente de votre pays. Les coordonnées à jour figurent dans le Centre d'aide.
 

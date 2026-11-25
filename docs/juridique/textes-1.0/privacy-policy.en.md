@@ -1,4 +1,4 @@
-﻿# Privacy Policy
+# Privacy Policy
 
 ### 1. This document on one page
 
@@ -13,7 +13,7 @@ Here is the essence; the detail follows:
 
 ### 2. Who is responsible
 
-CCEDA Finance is the controller of your personal data within BANGO. For any question about this policy or to exercise your rights: confidentialite@bangoapp.com.
+BANGO is the controller of your personal data. For any question about this policy or to exercise your rights: confidentialite@bangoapp.com.
 
 BANGO operates in several countries. Depending on where you live, your supervisory authority may be the Cameroonian personal data protection authority (Cameroon), the Commission de protection des données personnelles (Senegal), the Autorité de régulation des télécommunications (Côte d'Ivoire), the Data Protection Commission (Ghana), the Nigeria Data Protection Commission, or the competent authority in your country. Up-to-date contact details are in the Help Centre.
 

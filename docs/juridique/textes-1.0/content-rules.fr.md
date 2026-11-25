@@ -1,4 +1,4 @@
-﻿# Règles de contenu
+# Règles de contenu
 
 ### 1. L’esprit de ces règles
 

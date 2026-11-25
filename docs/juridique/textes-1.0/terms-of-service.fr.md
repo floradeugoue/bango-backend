@@ -1,8 +1,8 @@
-﻿# Conditions générales d’utilisation
+# Conditions générales d’utilisation
 
 ### 1. Qui édite BANGO
 
-BANGO est édité par CCEDA Finance. L'application met en relation des particuliers et des professionnels autour de contenus de quartier et d'annonces immobilières dans plusieurs pays d'Afrique. En créant un compte, vous concluez un contrat avec CCEDA Finance, soumis aux présentes conditions et à la loi du pays depuis lequel vous utilisez le service.
+BANGO est édité par la société BANGO, dont le siège est à Douala (Cameroun). L'application met en relation des particuliers et des professionnels autour de contenus de quartier et d'annonces immobilières dans plusieurs pays d'Afrique. En créant un compte, vous concluez un contrat avec BANGO, soumis aux présentes conditions et au droit indiqué à l'article 21.
 
 Ces conditions forment, avec la Politique de confidentialité et les Règles de contenu, l'intégralité de l'accord entre vous et nous. En cas de contradiction entre ces trois documents, les Règles de contenu priment sur les présentes conditions pour tout ce qui concerne ce que vous publiez.
 
@@ -188,7 +188,7 @@ La version en vigueur et la date de votre acceptation sont consultables à tout 
 
 ### 21. Droit applicable et litiges
 
-Ces conditions sont régies par le droit camerounais, CCEDA Finance ayant son siège à Douala. Si vous utilisez le service depuis un autre pays, vous gardez le bénéfice des dispositions impératives de ce pays qui protègent les consommateurs.
+Ces conditions sont régies par le droit camerounais, BANGO ayant son siège à Douala. Si vous utilisez le service depuis un autre pays, vous gardez le bénéfice des dispositions impératives de ce pays qui protègent les consommateurs.
 
 Avant toute action, nous vous invitons à nous écrire depuis le Centre d'aide : la très grande majorité des différends s'y règle. Vous conservez en toute hypothèse le droit de saisir le juge de votre lieu de résidence et, le cas échéant, une autorité de médiation de la consommation.
 
@@ -198,4 +198,4 @@ Support et réclamations : depuis l'application, Profil → Support. Un ticket 
 
 Signalement d'une faille de sécurité : securite@bangoapp.com. Nous nous engageons à ne poursuivre aucun signalement de bonne foi qui ne cause ni dommage ni divulgation.
 
-Courrier : CCEDA Finance — service juridique BANGO.
+Courrier : BANGO — service juridique, Douala (Cameroun).
