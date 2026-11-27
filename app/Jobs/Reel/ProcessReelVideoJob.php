@@ -128,6 +128,13 @@ class ProcessReelVideoJob implements ShouldQueue
                 $this->reel->save();
             });
 
+            // Déclenchement de la version marquée pour téléchargement externe et partage (Point 1)
+            try {
+                GenerateBrandedReelVideoJob::dispatch($this->reel);
+            } catch (\Throwable $e) {
+                Log::warning("ProcessReelVideoJob: Échec dispatch GenerateBrandedReelVideoJob reel {$this->reel->id}: ".$e->getMessage());
+            }
+
             Log::info("Reel {$this->reel->id} traité et publié avec succès.");
         } catch (\Throwable $e) {
             Log::error("Erreur lors du traitement du Reel {$this->reel->id}: {$e->getMessage()}", [

@@ -101,6 +101,7 @@ class ReelDraftService
         $reel->sound_id = $soundId;
         $reel->allow_download = isset($data['allow_download']) ? (bool) $data['allow_download'] : ($reel->allow_download ?? true);
         $reel->comments_closed = isset($data['comments_closed']) ? (bool) $data['comments_closed'] : ($reel->comments_closed ?? false);
+        $reel->ai_generated = isset($data['ai_generated']) ? (bool) $data['ai_generated'] : (isset($data['aiGenerated']) ? (bool) $data['aiGenerated'] : ($reel->ai_generated ?? false));
         $reel->subtitles = $data['subtitles'] ?? $reel->subtitles;
         $reel->subtitles_locale = $data['subtitles_locale'] ?? ($reel->subtitles_locale ?: 'fr');
         $reel->listing_id = $data['listing_id'] ?? $reel->listing_id;

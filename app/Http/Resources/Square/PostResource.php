@@ -143,6 +143,8 @@ class PostResource extends JsonResource
             'allow_share' => (bool) $this->allow_share,
             'hideLikes' => (bool) $this->hide_likes,
             'hide_likes' => (bool) $this->hide_likes,
+            'ai_generated' => (bool) ($this->ai_generated ?? false),
+            'aiGenerated' => (bool) ($this->ai_generated ?? false),
 
             // Flags d'état
             'mine' => $isMine,

@@ -28,6 +28,8 @@ class StoreStoryRequest extends FormRequest
             'duration' => ['nullable', 'integer', 'min:1', 'max:30'],
             'sound_id' => ['nullable', 'string', 'exists:sounds,id'],
             'sound_start_at' => ['nullable', 'integer', 'min:0'],
+            'ai_generated' => ['nullable', 'boolean'],
+            'aiGenerated' => ['nullable', 'boolean'],
 
             'file' => ['nullable', 'file', 'mimes:jpeg,jpg,png,webp,mp4,mov,webm,3gp,m4v', 'max:51200'],
             'media' => ['nullable', 'file', 'mimes:jpeg,jpg,png,webp,mp4,mov,webm,3gp,m4v', 'max:51200'],
@@ -65,6 +67,8 @@ class StoreStoryRequest extends FormRequest
             'slides.*.capture' => ['nullable', 'file', 'mimes:jpeg,jpg,png,webp', 'max:10240'],
             'slides.*.preview_url' => ['nullable', 'string', 'max:2048'],
             'slides.*.capture_url' => ['nullable', 'string', 'max:2048'],
+            'slides.*.ai_generated' => ['nullable', 'boolean'],
+            'slides.*.aiGenerated' => ['nullable', 'boolean'],
         ];
     }
 }

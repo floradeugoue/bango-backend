@@ -31,6 +31,8 @@ class PublishReelRequest extends FormRequest
             'subtitles_locale' => ['nullable', 'string', 'max:10'],
             'composition' => ['nullable', 'array'],
             'listing_id' => ['nullable', 'string'],
+            'ai_generated' => ['nullable', 'boolean'],
+            'aiGenerated' => ['nullable', 'boolean'],
         ];
     }
 }

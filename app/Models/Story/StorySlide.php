@@ -30,6 +30,7 @@ class StorySlide extends Model
         'sound_id',
         'sound_metadata',
         'metadata',
+        'ai_generated',
     ];
 
     /**
@@ -41,6 +42,7 @@ class StorySlide extends Model
             'media_type' => StoryMediaType::class,
             'duration' => 'integer',
             'order' => 'integer',
+            'ai_generated' => 'boolean',
             'sound_metadata' => 'array',
             'metadata' => 'array',
         ];

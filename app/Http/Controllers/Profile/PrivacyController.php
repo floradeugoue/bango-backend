@@ -24,6 +24,8 @@ class PrivacyController extends Controller
         'showFollowing' => true,
         'birthday_visibility' => 'none',
         'birthdayVisibility' => 'none',
+        'allow_downloads' => true,
+        'allowDownloads' => true,
     ];
 
     /**
@@ -35,10 +37,13 @@ class PrivacyController extends Controller
         $user = $request->user();
 
         $saved = $user->privacy_settings ?? [];
+        $allowDownloads = $user->allowsVideoDownloads();
         $settings = array_merge(self::DEFAULT_PRIVACY, $saved, [
             'privateAccount' => (bool) $user->is_private,
             'birthday_visibility' => $user->birthday_visibility ?? 'none',
             'birthdayVisibility' => $user->birthday_visibility ?? 'none',
+            'allow_downloads' => $allowDownloads,
+            'allowDownloads' => $allowDownloads,
         ]);
 
         return response()->json($settings);
@@ -62,6 +67,8 @@ class PrivacyController extends Controller
             'showFollowing' => ['sometimes', 'boolean'],
             'birthday_visibility' => ['sometimes', 'in:none,mutuals'],
             'birthdayVisibility' => ['sometimes', 'in:none,mutuals'],
+            'allow_downloads' => ['sometimes', 'boolean'],
+            'allowDownloads' => ['sometimes', 'boolean'],
         ]);
 
         /** @var User $user */
@@ -70,6 +77,15 @@ class PrivacyController extends Controller
 
         $currentSettings = $user->privacy_settings ?? self::DEFAULT_PRIVACY;
         $updatedSettings = array_merge($currentSettings, $validated);
+
+        if ($request->has('allow_downloads') || $request->has('allowDownloads')) {
+            $allowDownloads = $request->has('allow_downloads')
+                ? $request->boolean('allow_downloads')
+                : $request->boolean('allowDownloads');
+            $user->allow_downloads = $allowDownloads;
+            $updatedSettings['allow_downloads'] = $allowDownloads;
+            $updatedSettings['allowDownloads'] = $allowDownloads;
+        }
 
         if ($request->has('ads_personalization')) {
             $updatedSettings['ads_decided_at'] = now()->toIso8601String();

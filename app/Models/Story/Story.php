@@ -35,6 +35,7 @@ class Story extends Model
         'replies_count',
         'likes_count',
         'metadata',
+        'ai_generated',
     ];
 
     /**
@@ -47,6 +48,7 @@ class Story extends Model
             'status' => StoryStatus::class,
             'allow_replies' => 'boolean',
             'allow_archive' => 'boolean',
+            'ai_generated' => 'boolean',
             'published_at' => 'datetime',
             'expires_at' => 'datetime',
             'views_count' => 'integer',

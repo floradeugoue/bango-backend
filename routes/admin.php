@@ -50,6 +50,7 @@ use App\Http\Controllers\Admin\Support\AdminAppFeedbackController;
 use App\Http\Controllers\Admin\Support\AdminSupportHelpCenterController;
 use App\Http\Controllers\Admin\Support\AdminSupportTemplateController;
 use App\Http\Controllers\Admin\Support\AdminSupportTicketOperationsController;
+use App\Http\Controllers\Admin\Support\AdminWaitlistController;
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Boost\CreditWalletController;
 use App\Http\Controllers\Geo\CityController;
@@ -1528,4 +1529,8 @@ Route::middleware(['admin.session'])->group(function () {
     // Guide et statut du parcours d'onboarding de l'administrateur connecté
     Route::get('/me/onboarding', [AdminDirectionDashboardController::class, 'onboarding'])
         ->name('me.onboarding');
+
+    // Liste d'attente des fonctions fermées (Point 3 : Inscrits par sujet et export CSV)
+    Route::get('/waitlist', [AdminWaitlistController::class, 'index'])->name('waitlist.index');
+    Route::get('/waitlist/export', [AdminWaitlistController::class, 'export'])->name('waitlist.export');
 });

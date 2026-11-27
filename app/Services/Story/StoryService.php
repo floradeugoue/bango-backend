@@ -86,6 +86,7 @@ class StoryService
                     'allow_replies' => (bool) ($data['allow_replies'] ?? true),
                     'allow_archive' => (bool) ($data['allow_archive'] ?? true),
                     'status' => StoryStatus::Active,
+                    'ai_generated' => (bool) ($data['ai_generated'] ?? ($data['aiGenerated'] ?? false)),
                     'published_at' => $now,
                     'expires_at' => $expiresAt,
                     'views_count' => 0,
@@ -175,6 +176,7 @@ class StoryService
                             'caption' => $slideData['caption'] ?? null,
                             'duration' => $slideData['duration'] ?? ($mediaInfo['duration'] ?? ($mediaInfo['type'] === 'image' ? 5 : null)),
                             'order' => $index,
+                            'ai_generated' => (bool) ($slideData['ai_generated'] ?? ($slideData['aiGenerated'] ?? ($data['ai_generated'] ?? ($data['aiGenerated'] ?? false)))),
                             'sound_id' => $slideData['sound_id'] ?? $soundId,
                             'sound_metadata' => $slideData['sound_metadata'] ?? $soundMetadata,
                             'metadata' => [
@@ -240,6 +242,7 @@ class StoryService
                         'caption' => $data['caption'] ?? null,
                         'duration' => $data['duration'] ?? ($mediaInfo['duration'] ?? ($mediaInfo['type'] === 'image' ? 5 : null)),
                         'order' => 0,
+                        'ai_generated' => (bool) ($data['ai_generated'] ?? ($data['aiGenerated'] ?? false)),
                         'sound_id' => $soundId,
                         'sound_metadata' => $soundMetadata,
                         'metadata' => [

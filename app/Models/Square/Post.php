@@ -48,6 +48,7 @@ class Post extends Model
         'saves_count',
         'views_count',
         'pinned_comment_id',
+        'ai_generated',
     ];
 
     protected static function booted(): void
@@ -82,6 +83,7 @@ class Post extends Model
             'hide_likes' => 'boolean',
             'is_edited' => 'boolean',
             'is_archived' => 'boolean',
+            'ai_generated' => 'boolean',
             'likes_count' => 'integer',
             'comments_count' => 'integer',
             'shares_count' => 'integer',

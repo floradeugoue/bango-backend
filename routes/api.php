@@ -86,6 +86,7 @@ use App\Http\Controllers\Profile\ProfileController;
 use App\Http\Controllers\Profile\QrController;
 use App\Http\Controllers\Profile\SecurityController;
 use App\Http\Controllers\Reel\CloudflareStreamWebhookController;
+use App\Http\Controllers\Reel\ReelBrandedController;
 use App\Http\Controllers\Reel\ReelCommentController;
 use App\Http\Controllers\Reel\ReelFeedController;
 use App\Http\Controllers\Reel\ReelInteractionController;
@@ -125,6 +126,7 @@ use App\Http\Controllers\Support\HelpArticleFeedbackController;
 use App\Http\Controllers\Support\ModerationAppealController;
 use App\Http\Controllers\Support\ReportController;
 use App\Http\Controllers\Support\SupportTicketController;
+use App\Http\Controllers\Support\WaitlistController;
 use App\Http\Controllers\Sync\OfflineSyncController;
 use App\Http\Controllers\System\AppVersionController;
 use App\Http\Controllers\Translation\TranslationController;
@@ -272,6 +274,17 @@ Route::get('/genders', [GenderController::class, 'index'])->name('api.genders');
 Route::get('/sounds', [SoundController::class, 'index'])->name('api.sounds.index');
 Route::get('/sounds/{id}', [SoundController::class, 'show'])->name('api.sounds.show');
 Route::get('/sounds/{id}/reels', [SoundController::class, 'reels'])->name('api.sounds.reels');
+
+// Liste d'attente publique du site web bangoapp.com (Point 3, sans jeton, rate-limited)
+Route::post('/waitlist/public', [WaitlistController::class, 'storePublic'])
+    ->middleware('throttle:30,1')
+    ->name('api.waitlist.public');
+Route::options('/waitlist/public', function () {
+    return response('', 204)
+        ->header('Access-Control-Allow-Origin', 'https://bangoapp.com')
+        ->header('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        ->header('Access-Control-Allow-Headers', 'Content-Type, X-Requested-With');
+});
 
 // --------------------------------------------------------------------------
 // AGENTS — ANNUAIRE PUBLIC & RECHERCHE (AG-06)
@@ -441,6 +454,10 @@ Route::middleware('auth:api')->group(function () {
 |==========================================================================
 */
 Route::middleware('auth:api')->group(function () {
+
+    // Liste d'attente des fonctions fermées (Point 3 : Assistant BANGO et fonctionnalités en attente)
+    Route::post('/waitlist', [WaitlistController::class, 'store'])->name('api.waitlist.store');
+    Route::get('/waitlist', [WaitlistController::class, 'index'])->name('api.waitlist.index');
 
     // --------------------------------------------------------------------------
     // PROFILE
@@ -1194,6 +1211,8 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/{reel}/view', [ReelInteractionController::class, 'view'])->whereUuid('reel')->name('api.reels.view');
         // Consulter un Reel individuel par son UUID
         Route::get('/{id}', [ReelFeedController::class, 'show'])->whereUuid('id')->name('api.reels.show');
+        // Version marquée pour le téléchargement et le partage (Point 1)
+        Route::get('/{id}/branded', [ReelBrandedController::class, 'show'])->name('api.reels.branded');
         // Supprimer définitivement un Reel publié (réservé à l'auteur)
         Route::delete('/{reel}', [ReelFeedController::class, 'destroy'])->name('api.reels.destroy');
 

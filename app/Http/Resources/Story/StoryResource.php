@@ -79,6 +79,8 @@ class StoryResource extends JsonResource
             'allow_replies' => (bool) $this->allow_replies,
             'allow_archive' => (bool) $this->allow_archive,
             'status' => $this->status->value,
+            'ai_generated' => (bool) ($this->ai_generated ?? false),
+            'aiGenerated' => (bool) ($this->ai_generated ?? false),
             'is_mine' => $isMine,
             'has_viewed' => $hasViewed,
             'is_liked' => $isLiked,

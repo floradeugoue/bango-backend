@@ -170,6 +170,8 @@ class ReelResource extends JsonResource
             'subtitles_locale' => $this->subtitles_locale,
             'downloadable' => (bool) $this->allow_download,
             'allow_download' => (bool) $this->allow_download,
+            'ai_generated' => (bool) ($this->ai_generated ?? false),
+            'aiGenerated' => (bool) ($this->ai_generated ?? false),
             'likes' => (int) $this->likes_count,
             'likes_count' => (int) $this->likes_count,
             'dislikes' => (int) $this->dislikes_count,

@@ -42,6 +42,8 @@ class StorySlideResource extends JsonResource
             'caption' => $this->caption,
             'duration' => (int) ($this->duration ?? ($this->media_type->value === 'image' ? 5 : 15)),
             'order' => (int) $this->order,
+            'ai_generated' => (bool) ($this->ai_generated ?? false),
+            'aiGenerated' => (bool) ($this->ai_generated ?? false),
             'sound' => $this->sound_metadata,
             'background' => $this->metadata['background'] ?? null,
             'drawings' => $this->metadata['drawings'] ?? null,

@@ -130,6 +130,7 @@ class PostCreationService
                 'comments_closed' => (bool) ($data['comments_closed'] ?? false),
                 'allow_share' => (bool) ($data['allow_share'] ?? true),
                 'hide_likes' => (bool) ($data['hide_likes'] ?? false),
+                'ai_generated' => (bool) ($data['ai_generated'] ?? false),
                 'is_edited' => false,
                 'is_archived' => false,
                 'place_label' => $place['label'] ?? null,

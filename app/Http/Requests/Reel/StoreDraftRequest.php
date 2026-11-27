@@ -43,6 +43,8 @@ class StoreDraftRequest extends FormRequest
             'composition.coverAt' => ['nullable', 'numeric'],
             'composition.coverUri' => ['nullable', 'string'],
             'listing_id' => ['nullable', 'string'],
+            'ai_generated' => ['nullable', 'boolean'],
+            'aiGenerated' => ['nullable', 'boolean'],
         ];
     }
 }

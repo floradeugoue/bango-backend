@@ -55,6 +55,9 @@ class Reel extends Model
         'shares_count',
         'saves_count',
         'published_at',
+        'branded_video_url',
+        'branded_status',
+        'ai_generated',
     ];
 
     protected function casts(): array
@@ -67,6 +70,7 @@ class Reel extends Model
             'height' => 'integer',
             'allow_download' => 'boolean',
             'comments_closed' => 'boolean',
+            'ai_generated' => 'boolean',
             'composition' => 'array',
             'renditions' => 'array',
             'views_count' => 'integer',

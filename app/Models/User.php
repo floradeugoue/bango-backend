@@ -130,6 +130,7 @@ class User extends Authenticatable implements MustVerifyEmail
         'terms_accepted_at',
         'accepted_terms_version',
         'last_seen_at',
+        'allow_downloads',
     ];
 
     protected $hidden = [
@@ -171,7 +172,22 @@ class User extends Authenticatable implements MustVerifyEmail
             'last_seen_at' => 'datetime',
             'neighbourhood_verified_at' => 'datetime',
             'onboarding_completed_at' => 'datetime',
+            'allow_downloads' => 'boolean',
         ];
+    }
+
+    /**
+     * Indique si l'utilisateur autorise le téléchargement de ses vidéos/Reels (Point 2, vrai par défaut).
+     */
+    public function allowsVideoDownloads(): bool
+    {
+        if (isset($this->attributes['allow_downloads'])) {
+            return (bool) $this->attributes['allow_downloads'];
+        }
+
+        $privacy = $this->privacy_settings ?? [];
+
+        return (bool) ($privacy['allow_downloads'] ?? $privacy['allowDownloads'] ?? true);
     }
 
     protected static function booted(): void

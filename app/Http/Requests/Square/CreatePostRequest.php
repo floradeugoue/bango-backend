@@ -37,6 +37,8 @@ class CreatePostRequest extends FormRequest
             'asPageId' => ['nullable', 'integer'], // Alias camelCase
             'idempotency_key' => ['nullable', 'string', 'max:100'],
             'idempotencyKey' => ['nullable', 'string', 'max:100'], // Alias camelCase
+            'ai_generated' => ['nullable', 'boolean'],
+            'aiGenerated' => ['nullable', 'boolean'], // Alias camelCase
 
             // Lieu descriptif
             'place' => ['nullable', 'array'],
@@ -167,6 +169,7 @@ class CreatePostRequest extends FormRequest
         $hideLikes = $data['hide_likes'] ?? $data['hideLikes'] ?? false;
         $asPageId = $data['as_page_id'] ?? $data['asPageId'] ?? null;
         $idempotencyKey = $data['idempotency_key'] ?? $data['idempotencyKey'] ?? null;
+        $aiGenerated = $data['ai_generated'] ?? $data['aiGenerated'] ?? false;
 
         // Normalisation des tags
         $rawTags = $data['tags'] ?? [];
@@ -205,6 +208,7 @@ class CreatePostRequest extends FormRequest
             'comments_closed' => (bool) $commentsClosed,
             'allow_share' => (bool) $allowShare,
             'hide_likes' => (bool) $hideLikes,
+            'ai_generated' => (bool) $aiGenerated,
             'as_page_id' => $asPageId ? (int) $asPageId : null,
             'place' => $data['place'] ?? null,
             'media' => $normalizedMedia,
