@@ -58,6 +58,8 @@ class Reel extends Model
         'branded_video_url',
         'branded_status',
         'ai_generated',
+        'series_id',
+        'episode_number',
     ];
 
     protected function casts(): array
@@ -71,6 +73,7 @@ class Reel extends Model
             'allow_download' => 'boolean',
             'comments_closed' => 'boolean',
             'ai_generated' => 'boolean',
+            'episode_number' => 'integer',
             'composition' => 'array',
             'renditions' => 'array',
             'views_count' => 'integer',
@@ -81,6 +84,14 @@ class Reel extends Model
             'saves_count' => 'integer',
             'published_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Série à laquelle appartient l'épisode (si rattaché).
+     */
+    public function series(): BelongsTo
+    {
+        return $this->belongsTo(Series::class);
     }
 
     /**

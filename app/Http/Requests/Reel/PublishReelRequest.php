@@ -33,6 +33,8 @@ class PublishReelRequest extends FormRequest
             'listing_id' => ['nullable', 'string'],
             'ai_generated' => ['nullable', 'boolean'],
             'aiGenerated' => ['nullable', 'boolean'],
+            'series_id' => ['nullable', 'integer', 'exists:series,id'],
+            'episode_number' => ['nullable', 'integer', 'min:1'],
         ];
     }
 }

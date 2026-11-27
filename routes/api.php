@@ -6,6 +6,7 @@ use App\Http\Controllers\Agent\AgentDirectoryController;
 use App\Http\Controllers\Agent\AgentEarningsController;
 use App\Http\Controllers\Agent\AgentInvitationController;
 use App\Http\Controllers\Agent\AgentPortfolioController;
+use App\Http\Controllers\Assistant\AssistantController;
 use App\Http\Controllers\Auth\AccountStateController;
 use App\Http\Controllers\Auth\EmailVerificationController;
 use App\Http\Controllers\Auth\ForgotPasswordController;
@@ -90,6 +91,7 @@ use App\Http\Controllers\Reel\ReelBrandedController;
 use App\Http\Controllers\Reel\ReelCommentController;
 use App\Http\Controllers\Reel\ReelFeedController;
 use App\Http\Controllers\Reel\ReelInteractionController;
+use App\Http\Controllers\Reel\SeriesController;
 use App\Http\Controllers\Reel\SoundController;
 use App\Http\Controllers\Reel\StudioReelController;
 use App\Http\Controllers\Search\HashtagSearchController;
@@ -352,6 +354,10 @@ Route::get('/posts/{post}', [PostController::class, 'show'])->whereNumber('post'
 // --------------------------------------------------------------------------
 Route::get('/reels/{id}', [ReelFeedController::class, 'show'])->whereUuid('id')->name('api.reels.show.public');
 
+// Séries et épisodes ordonnés
+Route::get('/series', [SeriesController::class, 'index'])->name('api.series.index');
+Route::get('/series/{slug}', [SeriesController::class, 'show'])->name('api.series.show');
+
 // --------------------------------------------------------------------------
 // MODULE 12 : PG — PAGES PROFESSIONNELLES (Consultation & Recherche Publiques)
 // --------------------------------------------------------------------------
@@ -464,6 +470,9 @@ Route::middleware('auth:api')->group(function () {
     // Liste d'attente des fonctions fermées (Point 3 : Assistant BANGO et fonctionnalités en attente)
     Route::post('/waitlist', [WaitlistController::class, 'store'])->name('api.waitlist.store');
     Route::get('/waitlist', [WaitlistController::class, 'index'])->name('api.waitlist.index');
+
+    // Conversation synchronisée avec le compte système officiel Assistant Bango
+    Route::get('/assistant/thread', [AssistantController::class, 'thread'])->name('api.assistant.thread');
 
     // --------------------------------------------------------------------------
     // PROFILE
@@ -1167,6 +1176,9 @@ Route::middleware('auth:api')->group(function () {
     // Tendances unifiées BANGO (RC-11 : Top hashtags, musiques du moment, créateurs émergents)
     Route::get('/trends', [TrendsController::class, 'index'])->name('api.trends');
 
+    // Création de séries
+    Route::post('/series', [SeriesController::class, 'store'])->name('api.series.store');
+
     // --------------------------------------------------------------------------
     // CR2 & RL — STUDIO REEL, REELS ET SONS (Actions et consultation authentifiées)
     // --------------------------------------------------------------------------
@@ -1373,6 +1385,9 @@ Route::middleware('auth:api')->group(function () {
     // MS - MESSAGERIE PRIVÉE & GROUPES (Direct, Immo, Vocaux, Stories, Groupes)
     // --------------------------------------------------------------------------
     Route::prefix('messages')->group(function () {
+        // Conversation synchronisée avec le compte système officiel Assistant Bango
+        Route::get('/assistant', [AssistantController::class, 'thread'])->name('api.messages.assistant');
+
         // Conversations & Fils de discussion
         // Lister les conversations et fils de discussion actifs de l'utilisateur
         Route::get('/threads', [MessageThreadController::class, 'index'])->name('api.messages.threads.index');

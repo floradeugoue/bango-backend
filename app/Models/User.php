@@ -69,6 +69,7 @@ use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Laravel\Passport\HasApiTokens;
 
 class User extends Authenticatable implements MustVerifyEmail
@@ -131,6 +132,7 @@ class User extends Authenticatable implements MustVerifyEmail
         'accepted_terms_version',
         'last_seen_at',
         'allow_downloads',
+        'is_system',
     ];
 
     protected $hidden = [
@@ -152,6 +154,7 @@ class User extends Authenticatable implements MustVerifyEmail
             'gender_hidden' => 'boolean',
             'is_verified' => 'boolean',
             'is_certified' => 'boolean',
+            'is_system' => 'boolean',
             'uses_agenda' => 'boolean',
             'payout_method' => 'array',
             'certified_at' => 'datetime',
@@ -1464,5 +1467,41 @@ class User extends Authenticatable implements MustVerifyEmail
     public function sendEmailVerificationNotification(): void
     {
         $this->sendWelcomeEmailVerificationNotification();
+    }
+
+    /**
+     * Vérifie si le compte est un compte système.
+     */
+    public function isSystem(): bool
+    {
+        return (bool) $this->is_system;
+    }
+
+    /**
+     * Récupère ou crée le compte système officiel « Assistant Bango ».
+     */
+    public static function getAssistant(): self
+    {
+        return static::firstOrCreate(
+            ['email' => 'assistant@bangoapp.com'],
+            [
+                'name' => 'Assistant Bango',
+                'display_name' => 'Assistant Bango',
+                'handle' => 'assistant',
+                'password' => Hash::make(Str::random(32)),
+                'is_system' => true,
+                'is_verified' => true,
+                'is_certified' => true,
+                'certified_at' => now(),
+                'badge' => 'certified',
+                'account_type' => AccountType::Personal,
+                'avatar_url' => 'https://api.bangoapp.com/images/assistant-bango.png',
+                'bio' => 'Assistant officiel BANGO. Disponible 24h/24 pour vous accompagner dans votre expérience !',
+                'birth_date' => '2000-01-01',
+                'terms_accepted_at' => now(),
+                'onboarding_completed_at' => now(),
+                'onboarding_progress' => ['terms' => true, 'profile' => true],
+            ]
+        );
     }
 }

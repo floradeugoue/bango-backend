@@ -26,6 +26,7 @@ class DatabaseSeeder extends Seeder
             HelpArticleSeeder::class,
             LegalDocumentSeeder::class,
             ModerationRuleSeeder::class,
+            ReviewerAccountSeeder::class,
         ]);
 
         if (app()->environment('local', 'testing')) {

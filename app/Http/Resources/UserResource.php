@@ -39,6 +39,8 @@ class UserResource extends JsonResource
             'needsNeighbourhoodVerification' => $this->resource->needsNeighbourhoodVerification(),
             'locale' => $this->locale,
             'isVerified' => $this->is_verified,
+            'is_system' => (bool) ($this->is_system ?? false),
+            'isSystem' => (bool) ($this->is_system ?? false),
             'certified' => (bool) ($this->is_certified ?? false),
             'is_certified' => (bool) ($this->is_certified ?? false),
             'certified_at' => $this->certified_at?->toIso8601String(),
