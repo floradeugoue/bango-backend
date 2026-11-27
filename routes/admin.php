@@ -469,6 +469,9 @@ Route::middleware(['admin.session'])->group(function () {
         // CRUD administratif des villes
         Route::apiResource('cities', CityController::class)->except(['index', 'show']);
         // CRUD administratif des quartiers
+        Route::get('neighbourhoods/pending', [NeighbourhoodController::class, 'pending'])->name('neighbourhoods.pending');
+        Route::post('neighbourhoods/{id}/approve', [NeighbourhoodController::class, 'approve'])->name('neighbourhoods.approve');
+        Route::post('neighbourhoods/{id}/reject', [NeighbourhoodController::class, 'reject'])->name('neighbourhoods.reject');
         Route::apiResource('neighbourhoods', NeighbourhoodController::class)->except(['index', 'show']);
         // CRUD administratif des opérateurs télécoms et Mobile Money
         Route::apiResource('operators', OperatorController::class)->except(['index', 'show']);

@@ -250,10 +250,10 @@ Route::prefix('geo')->name('geo.')->group(function () {
     Route::apiResource('countries', CountryController::class)->only(['index', 'show']);
     // Lister et afficher une devise
     Route::apiResource('currencies', CurrencyController::class)->only(['index', 'show']);
-    // Lister et afficher une ville
-    Route::apiResource('cities', CityController::class)->only(['index', 'show']);
-    // Lister et afficher un quartier
-    Route::apiResource('neighbourhoods', NeighbourhoodController::class)->only(['index', 'show']);
+    // Villes (CRUD / lecture publique)
+    Route::apiResource('cities', CityController::class);
+    // Quartiers (CRUD / soumission / lecture publique)
+    Route::apiResource('neighbourhoods', NeighbourhoodController::class);
     // Lister et afficher un opérateur téléphonique/internet
     Route::apiResource('operators', OperatorController::class)->only(['index', 'show']);
     // Lister les genres acceptés (AU-07)
@@ -262,6 +262,7 @@ Route::prefix('geo')->name('geo.')->group(function () {
 
 // Alias direct pour GET /api/neighbourhoods, /api/cities, /api/countries, /api/operators et /api/genders
 Route::get('/neighbourhoods', [NeighbourhoodController::class, 'index'])->name('api.neighbourhoods.index');
+Route::post('/neighbourhoods', [NeighbourhoodController::class, 'store'])->name('api.neighbourhoods.store');
 Route::get('/neighbourhoods/{neighbourhood}', [NeighbourhoodController::class, 'show'])->name('api.neighbourhoods.show');
 Route::get('/cities', [CityController::class, 'index'])->name('api.cities.index');
 Route::get('/cities/{city}', [CityController::class, 'show'])->name('api.cities.show');
@@ -345,6 +346,11 @@ Route::prefix('listings')->group(function () {
 // --------------------------------------------------------------------------
 // Consulter les détails d'une publication spécifique (public, enrichi si connecté)
 Route::get('/posts/{post}', [PostController::class, 'show'])->whereNumber('post')->name('api.posts.show.public');
+
+// --------------------------------------------------------------------------
+// REELS (Consultation Publique d'un Reel en lecture seule, enrichi si connecté)
+// --------------------------------------------------------------------------
+Route::get('/reels/{id}', [ReelFeedController::class, 'show'])->whereUuid('id')->name('api.reels.show.public');
 
 // --------------------------------------------------------------------------
 // MODULE 12 : PG — PAGES PROFESSIONNELLES (Consultation & Recherche Publiques)
@@ -1209,8 +1215,6 @@ Route::middleware('auth:api')->group(function () {
         // Vues et consultation individuelle
         // Enregistrement d'une vue (avec déduplication anti-abus 30 minutes et anonymisation IP)
         Route::post('/{reel}/view', [ReelInteractionController::class, 'view'])->whereUuid('reel')->name('api.reels.view');
-        // Consulter un Reel individuel par son UUID
-        Route::get('/{id}', [ReelFeedController::class, 'show'])->whereUuid('id')->name('api.reels.show');
         // Version marquée pour le téléchargement et le partage (Point 1)
         Route::get('/{id}/branded', [ReelBrandedController::class, 'show'])->name('api.reels.branded');
         // Supprimer définitivement un Reel publié (réservé à l'auteur)

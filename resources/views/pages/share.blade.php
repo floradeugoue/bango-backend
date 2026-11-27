@@ -71,7 +71,7 @@
                 </div>
                 <div class="flex flex-col">
                     <span class="font-extrabold text-lg tracking-tight text-white leading-none">BANGO</span>
-                    <span class="text-[10px] text-slate-400 font-medium tracking-wide">COMMUNAUTÉ & IMMOBILIER</span>
+                    <span class="text-[10px] text-slate-400 font-medium tracking-wide">SQUARE, RÉELS & MESSAGES</span>
                 </div>
             </a>
 
@@ -243,7 +243,7 @@
 
     <!-- Footer -->
     <footer class="border-t border-slate-800 py-6 text-center text-xs text-slate-400">
-        <p>© {{ date('Y') }} BANGO. L'application mobile pour le logement et la vie de quartier.</p>
+        <p>© {{ date('Y') }} BANGO. Square, Réels et Messages.</p>
     </footer>
 
     <!-- Smart Deep Link Redirection Script for Mobile Web -->

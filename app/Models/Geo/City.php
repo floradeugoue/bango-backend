@@ -19,6 +19,8 @@ class City extends Model
             'is_active' => 'boolean',
             'lat' => 'float',
             'lng' => 'float',
+            'population' => 'integer',
+            'osm_fetched_at' => 'datetime',
         ];
     }
 

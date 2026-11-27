@@ -13,6 +13,7 @@ use App\Models\User;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Str;
 
 class PublicShareController extends Controller
@@ -22,7 +23,7 @@ class PublicShareController extends Controller
     /**
      * Aperçu web public d'une publication du Square (/p/{id}).
      */
-    public function post(Request $request, string $id): View
+    public function post(Request $request, string $id): Response|View
     {
         /** @var Post|null $post */
         $post = Post::with(['user', 'media'])
@@ -40,7 +41,7 @@ class PublicShareController extends Controller
             && ! ($post->user?->is_private);
 
         if (! $isAvailable) {
-            return view('pages.share', [
+            return response()->view('pages.share', [
                 'type' => 'post',
                 'title' => 'Publication indisponible — BANGO',
                 'description' => 'Cette publication n\'est pas disponible, est privée ou a été supprimée.',
@@ -50,7 +51,7 @@ class PublicShareController extends Controller
                 'playStoreUrl' => self::PLAY_STORE_URL,
                 'isAvailable' => false,
                 'item' => null,
-            ]);
+            ], 404);
         }
 
         $author = $post->user;
@@ -103,12 +104,15 @@ class PublicShareController extends Controller
     /**
      * Aperçu web public d'un Reel vidéo (/r/{id}).
      */
-    public function reel(Request $request, string $id): View
+    public function reel(Request $request, string $id): Response|View
     {
         /** @var Reel|null $reel */
-        $reel = Reel::with(['user'])
-            ->where('id', $id)
-            ->first();
+        $reel = null;
+        if (Str::isUuid($id)) {
+            $reel = Reel::with(['user'])
+                ->where('id', $id)
+                ->first();
+        }
 
         $canonicalUrl = $request->fullUrl();
         $deepLink = "bango://reel?id={$id}";
@@ -119,7 +123,7 @@ class PublicShareController extends Controller
             && ! ($reel->user?->is_private);
 
         if (! $isAvailable) {
-            return view('pages.share', [
+            return response()->view('pages.share', [
                 'type' => 'reel',
                 'title' => 'Reel indisponible — BANGO',
                 'description' => 'Ce reel n\'est pas disponible, est privé ou a été supprimé.',
@@ -129,7 +133,7 @@ class PublicShareController extends Controller
                 'playStoreUrl' => self::PLAY_STORE_URL,
                 'isAvailable' => false,
                 'item' => null,
-            ]);
+            ], 404);
         }
 
         $author = $reel->user;
@@ -178,7 +182,7 @@ class PublicShareController extends Controller
     /**
      * Aperçu web public d'une annonce immobilière (/l/{uuid}).
      */
-    public function listing(Request $request, string $uuid): View
+    public function listing(Request $request, string $uuid): Response|View
     {
         /** @var Listing|null $listing */
         $listing = Listing::with(['owner', 'photos', 'media'])
@@ -196,7 +200,7 @@ class PublicShareController extends Controller
             && $listing->status === ListingStatus::Published;
 
         if (! $isAvailable) {
-            return view('pages.share', [
+            return response()->view('pages.share', [
                 'type' => 'listing',
                 'title' => 'Annonce indisponible — BANGO',
                 'description' => 'Cette annonce n\'est plus disponible ou a été retirée sur BANGO.',
@@ -206,7 +210,7 @@ class PublicShareController extends Controller
                 'playStoreUrl' => self::PLAY_STORE_URL,
                 'isAvailable' => false,
                 'item' => null,
-            ]);
+            ], 404);
         }
 
         $currency = $listing->currency ?: 'FCFA';
@@ -249,7 +253,7 @@ class PublicShareController extends Controller
     /**
      * Aperçu web public d'un profil utilisateur (/@{handle} et /u/{handle}).
      */
-    public function profile(Request $request, string $handle): View
+    public function profile(Request $request, string $handle): Response|View
     {
         $cleanHandle = ltrim($handle, '@');
 
@@ -265,7 +269,7 @@ class PublicShareController extends Controller
             && ! $user->is_private;
 
         if (! $isAvailable) {
-            return view('pages.share', [
+            return response()->view('pages.share', [
                 'type' => 'profile',
                 'title' => 'Profil BANGO',
                 'description' => 'Ce profil est privé ou indisponible sur BANGO.',
@@ -275,7 +279,7 @@ class PublicShareController extends Controller
                 'playStoreUrl' => self::PLAY_STORE_URL,
                 'isAvailable' => false,
                 'item' => null,
-            ]);
+            ], 404);
         }
 
         $displayName = $user->display_name ?: ($user->name ?: '@'.$user->handle);
@@ -284,7 +288,7 @@ class PublicShareController extends Controller
         $bio = trim((string) $user->bio);
         $description = ! empty($bio)
             ? Str::limit($bio, 150, '...')
-            : "Découvrez le profil de {$displayName} sur BANGO, l'application communautaire et immobilière.";
+            : "Découvrez le profil de {$displayName} sur BANGO — Square, Réels et Messages.";
 
         $image = $this->toAbsoluteUrl($user->avatar_url);
 
@@ -320,7 +324,7 @@ class PublicShareController extends Controller
         $fingerprints = ! empty($fingerprintsEnv)
             ? array_filter(array_map('trim', explode(',', $fingerprintsEnv)))
             : [
-                'FA:C6:17:45:DC:09:03:78:6F:B9:ED:E6:2A:96:2B:39:9F:73:48:F0:BB:6F:89:9B:83:32:66:75:91:03:3B:9C',
+                '37:9B:57:1F:F8:85:96:D9:A2:41:37:E8:1C:0B:EA:9F:21:6E:62:E7:7E:10:6E:2C:95:AF:07:20:D1:49:D0:D6',
             ];
 
         $packageName = env('ANDROID_APP_PACKAGE', 'com.bangoapp.app');
@@ -349,7 +353,10 @@ class PublicShareController extends Controller
      */
     public function appleAppSiteAssociation(): JsonResponse
     {
-        $appId = env('IOS_APP_ID', 'TEAMID.com.bangoapp.app');
+        $teamId = config('services.apple.team_id') ?: env('APPLE_TEAM_ID');
+        $bundleId = env('APPLE_BUNDLE_ID', 'com.bangoapp.app');
+        $defaultAppId = $teamId ? "{$teamId}.{$bundleId}" : "TEAMID.{$bundleId}";
+        $appId = env('IOS_APP_ID', $defaultAppId);
 
         $data = [
             'applinks' => [

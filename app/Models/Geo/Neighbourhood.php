@@ -27,6 +27,21 @@ class Neighbourhood extends Model
         ];
     }
 
+    public function submittedByUser()
+    {
+        return $this->belongsTo(User::class, 'submitted_by_user_id');
+    }
+
+    public function isVerified(): bool
+    {
+        return $this->status === 'verified';
+    }
+
+    public function isPending(): bool
+    {
+        return $this->status === 'pending';
+    }
+
     public function getUsersCountAttribute(): int
     {
         return (int) ($this->attributes['users_count'] ?? 0);

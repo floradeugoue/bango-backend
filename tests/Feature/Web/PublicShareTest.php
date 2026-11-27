@@ -9,6 +9,7 @@ use App\Models\Square\Post;
 use App\Models\Square\PostMedia;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 
 uses(RefreshDatabase::class);
 
@@ -65,14 +66,14 @@ test('private or deleted post renders generic fallback without leaking content',
 
     $response = $this->get('/p/'.$privatePost->id);
 
-    $response->assertOk();
+    $response->assertStatus(404);
     $response->assertSee('Publication indisponible', false);
     $response->assertDontSee('Secret message that should never be shown', false);
     $response->assertDontSee('secret.jpg', false);
 
     // Non-existent post
     $missingResponse = $this->get('/p/999999999');
-    $missingResponse->assertOk();
+    $missingResponse->assertStatus(404);
     $missingResponse->assertSee('Publication indisponible', false);
 });
 
@@ -109,9 +110,22 @@ test('draft or deleted reel displays generic fallback', function () {
 
     $response = $this->get('/r/'.$draftReel->id);
 
-    $response->assertOk();
+    $response->assertStatus(404);
     $response->assertSee('Reel indisponible', false);
     $response->assertDontSee('Confidential video reel not ready', false);
+});
+
+test('non-existent reel or non-uuid id /r/1 renders clean 404 without 500 error', function () {
+    // Cas ID non UUID : /r/1
+    $responseNonUuid = $this->get('/r/1');
+    $responseNonUuid->assertStatus(404);
+    $responseNonUuid->assertSee('Reel indisponible', false);
+
+    // Cas UUID inexistant
+    $randomUuid = (string) Str::uuid();
+    $responseMissing = $this->get('/r/'.$randomUuid);
+    $responseMissing->assertStatus(404);
+    $responseMissing->assertSee('Reel indisponible', false);
 });
 
 test('published listing renders open graph tags and price preview', function () {
@@ -154,7 +168,7 @@ test('draft or taken listing displays generic fallback', function () {
 
     $response = $this->get('/l/'.$listing->id);
 
-    $response->assertOk();
+    $response->assertStatus(404);
     $response->assertSee('Annonce indisponible', false);
     $response->assertDontSee('Secret unreleased draft listing', false);
 });
@@ -188,12 +202,12 @@ test('private or deleted user profile renders generic fallback', function () {
     ]);
 
     $response = $this->get('/@secret_agent');
-    $response->assertOk();
+    $response->assertStatus(404);
     $response->assertSee('Ce profil est privé ou indisponible sur BANGO', false);
     $response->assertDontSee('Top secret information', false);
 });
 
-test('assetlinks.json returns valid android digital asset links configuration', function () {
+test('assetlinks.json returns valid android digital asset links configuration with EAS fingerprint', function () {
     $response = $this->get('/.well-known/assetlinks.json');
 
     $response->assertOk();
@@ -203,6 +217,9 @@ test('assetlinks.json returns valid android digital asset links configuration', 
     expect($data)->toBeArray();
     expect($data[0]['relation'])->toContain('delegate_permission/common.handle_all_urls');
     expect($data[0]['target']['package_name'])->toBe('com.bangoapp.app');
+    expect($data[0]['target']['sha256_cert_fingerprints'])->toContain(
+        '37:9B:57:1F:F8:85:96:D9:A2:41:37:E8:1C:0B:EA:9F:21:6E:62:E7:7E:10:6E:2C:95:AF:07:20:D1:49:D0:D6'
+    );
 });
 
 test('apple-app-site-association returns valid ios universal links configuration', function () {
@@ -215,4 +232,24 @@ test('apple-app-site-association returns valid ios universal links configuration
     expect($data)->toBeArray();
     expect($data)->toHaveKey('applinks');
     expect($data['applinks']['details'][0]['components'])->toBeArray();
+});
+
+test('GET /api/reels/{id} is public in read-only and works without authentication', function () {
+    $author = User::factory()->create([
+        'name' => 'Marc Dupont',
+        'handle' => 'marc_public',
+    ]);
+
+    $reel = Reel::factory()->create([
+        'user_id' => $author->id,
+        'caption' => 'Reel public accessible sans jeton',
+        'status' => ReelStatus::Ready,
+    ]);
+
+    $response = $this->getJson('/api/reels/'.$reel->id);
+
+    $response->assertOk();
+    $response->assertJsonPath('success', true);
+    $response->assertJsonPath('data.id', (string) $reel->id);
+    $response->assertJsonPath('data.caption', 'Reel public accessible sans jeton');
 });

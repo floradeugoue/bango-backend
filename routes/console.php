@@ -259,3 +259,12 @@ Schedule::command('birthdays:notify')
     ->hourly()
     ->withoutOverlapping()
     ->onOneServer();
+
+// --------------------------------------------------------------------------
+// PLANIFICATEUR DE SYNCHRONISATION GÉOGRAPHIQUE MONDIALE (GeoNames CC BY 4.0)
+// --------------------------------------------------------------------------
+// 17. Actualisation mensuelle des 250 pays et ~150 000 villes depuis GeoNames
+Schedule::command('geo:import-geonames')
+    ->monthly()
+    ->withoutOverlapping()
+    ->onOneServer();

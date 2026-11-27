@@ -28,6 +28,28 @@ class CityController extends Controller
             $query->where('is_active', filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN));
         }
 
+        if ($request->filled('q')) {
+            $search = trim((string) $request->query('q'));
+            $lowered = mb_strtolower($search);
+            $query->where(function ($sub) use ($lowered) {
+                $sub->whereRaw('LOWER(name) LIKE ?', ["{$lowered}%"])
+                    ->orWhereRaw('LOWER(name) LIKE ?', ["%{$lowered}%"])
+                    ->orWhereRaw('LOWER(slug) LIKE ?', ["%{$lowered}%"]);
+            });
+
+            // Les 20 premières par population décroissante (Point 2)
+            $query->orderByRaw('CASE WHEN population IS NOT NULL THEN population ELSE 0 END DESC')
+                ->orderBy('name')
+                ->limit((int) $request->query('limit', 20));
+
+            return response()->json($query->get());
+        }
+
+        $limit = (int) $request->query('limit', 100);
+        $query->orderByRaw('CASE WHEN population IS NOT NULL THEN population ELSE 0 END DESC')
+            ->orderBy('name')
+            ->limit($limit);
+
         return response()->json($query->get());
     }
 
