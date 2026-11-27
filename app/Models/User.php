@@ -108,6 +108,7 @@ class User extends Authenticatable implements MustVerifyEmail
         'suspended_from',
         'suspended_until',
         'onboarding_progress',
+        'onboarding_completed_at',
         'two_factor_method',
         'two_factor_secret',
         'two_factor_confirmed_at',
@@ -169,7 +170,21 @@ class User extends Authenticatable implements MustVerifyEmail
             'terms_accepted_at' => 'datetime',
             'last_seen_at' => 'datetime',
             'neighbourhood_verified_at' => 'datetime',
+            'onboarding_completed_at' => 'datetime',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::saving(function (User $user): void {
+            if ($user->birth_date !== null && $user->terms_accepted_at !== null) {
+                if ($user->onboarding_completed_at === null) {
+                    $user->onboarding_completed_at = $user->terms_accepted_at ?? now();
+                }
+            } else {
+                $user->onboarding_completed_at = null;
+            }
+        });
     }
 
     public function interests(): BelongsToMany

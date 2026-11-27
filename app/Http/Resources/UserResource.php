@@ -62,6 +62,12 @@ class UserResource extends JsonResource
                 'posts' => 0,
             ],
             'onboardingProgress' => $this->onboarding_progress,
+            'onboarding_completed_at' => ($this->birth_date !== null && $this->terms_accepted_at !== null)
+                ? ($this->onboarding_completed_at ?? $this->terms_accepted_at)?->toIso8601String()
+                : null,
+            'onboardingCompletedAt' => ($this->birth_date !== null && $this->terms_accepted_at !== null)
+                ? ($this->onboarding_completed_at ?? $this->terms_accepted_at)?->toIso8601String()
+                : null,
             'interests' => $this->whenLoaded('interests', function () {
                 return $this->interests->pluck('id')->toArray();
             }),

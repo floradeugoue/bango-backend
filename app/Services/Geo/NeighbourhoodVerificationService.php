@@ -228,7 +228,7 @@ class NeighbourhoodVerificationService
         $latitude = isset($input['latitude']) && $input['latitude'] !== '' ? (float) $input['latitude'] : null;
         $longitude = isset($input['longitude']) && $input['longitude'] !== '' ? (float) $input['longitude'] : null;
         $accuracy = isset($input['accuracy']) && $input['accuracy'] !== '' ? (float) $input['accuracy'] : null;
-        $coordinatesProvided = $latitude !== null || $longitude !== null;
+        $coordinatesProvided = $latitude !== null && $longitude !== null;
 
         $neighbourhood = $this->resolveNeighbourhood(
             $neighbourhoodIdInput !== null && $neighbourhoodIdInput !== '' ? (int) $neighbourhoodIdInput : null,
@@ -241,6 +241,27 @@ class NeighbourhoodVerificationService
         // (ex: formulaire d'édition de profil renvoyant l'état complet lors d'un changement de bio),
         // on conserve la vérification existante sans rejeter la requête.
         if (! $coordinatesProvided && ! $cityChanged && $this->isSameVerifiedNeighbourhood($user, $neighbourhood, $neighbourhoodNameInput)) {
+            return [
+                'updates' => $updates,
+                'neighbourhood_just_verified' => false,
+            ];
+        }
+
+        // Si aucune coordonnée GPS n'est fournie : enregistre le quartier comme non vérifié.
+        // La preuve par la position GPS ne sert plus qu'à la pastille « Voisin ».
+        if (! $coordinatesProvided) {
+            $updates['neighbourhood_id'] = $neighbourhood?->id;
+            $updates['neighbourhood'] = $neighbourhood ? $neighbourhood->name : $neighbourhoodNameInput;
+            $updates['neighbourhood_verified_at'] = null;
+
+            if ($neighbourhood && $neighbourhood->city) {
+                $updates['city_id'] = $neighbourhood->city->id;
+                $updates['city'] = $neighbourhood->city->name;
+            } elseif ($cityExplicitlyProvided && $resolvedCity) {
+                $updates['city_id'] = $resolvedCity->id;
+                $updates['city'] = $resolvedCity->name;
+            }
+
             return [
                 'updates' => $updates,
                 'neighbourhood_just_verified' => false,

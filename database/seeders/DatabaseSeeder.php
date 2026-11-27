@@ -20,6 +20,7 @@ class DatabaseSeeder extends Seeder
             RoleSeeder::class,
             InterestSeeder::class,
             GeoSeeder::class,
+            NeighbourhoodSeeder::class,
             SubscriptionCatalogSeeder::class,
             SoundSeeder::class,
             HelpArticleSeeder::class,

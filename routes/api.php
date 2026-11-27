@@ -258,7 +258,13 @@ Route::prefix('geo')->name('geo.')->group(function () {
     Route::get('/genders', [GenderController::class, 'index'])->name('genders');
 });
 
-// Alias direct pour GET /api/operators et /api/genders
+// Alias direct pour GET /api/neighbourhoods, /api/cities, /api/countries, /api/operators et /api/genders
+Route::get('/neighbourhoods', [NeighbourhoodController::class, 'index'])->name('api.neighbourhoods.index');
+Route::get('/neighbourhoods/{neighbourhood}', [NeighbourhoodController::class, 'show'])->name('api.neighbourhoods.show');
+Route::get('/cities', [CityController::class, 'index'])->name('api.cities.index');
+Route::get('/cities/{city}', [CityController::class, 'show'])->name('api.cities.show');
+Route::get('/countries', [CountryController::class, 'index'])->name('api.countries.index');
+Route::get('/countries/{country}', [CountryController::class, 'show'])->name('api.countries.show');
 Route::apiResource('operators', OperatorController::class)->only(['index', 'show']);
 Route::get('/genders', [GenderController::class, 'index'])->name('api.genders');
 

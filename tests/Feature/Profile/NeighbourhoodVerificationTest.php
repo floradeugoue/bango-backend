@@ -198,17 +198,30 @@ it('rejects requests without coordinates, unknown neighbourhoods, city mismatch,
     $user = User::factory()->create();
     Passport::actingAs($user);
 
-    // 1. Hors app : aucun latitude/longitude fourni sur PUT /api/profile
-    putJson('/api/profile', [
-        'city' => 'Douala',
-        'neighbourhood' => 'Bonapriso',
-    ])->assertStatus(422)->assertJsonPath('code', 'NEIGHBOURHOOD_NOT_VERIFIED');
-
-    // 2. Hors app : aucun latitude/longitude fourni sur PUT /api/profile/location
+    // 1. Sans coordonnées : PUT /api/profile/location enregistre le quartier comme non vérifié (preuve GPS facultative)
     putJson('/api/profile/location', [
         'city' => 'Douala',
         'neighbourhood' => 'Bonapriso',
-    ])->assertStatus(422)->assertJsonPath('code', 'NEIGHBOURHOOD_NOT_VERIFIED');
+    ])->assertOk()
+        ->assertJsonPath('user.neighbourhood', 'Bonapriso')
+        ->assertJsonPath('user.neighbourhood_verified', false)
+        ->assertJsonPath('user.neighbourhoodVerified', false);
+
+    // 2. Sans coordonnées : PUT /api/profile enregistre également le quartier comme non vérifié
+    putJson('/api/profile', [
+        'city' => 'Douala',
+        'neighbourhood' => 'Akwa',
+    ])->assertOk()
+        ->assertJsonPath('user.neighbourhood', 'Akwa')
+        ->assertJsonPath('user.neighbourhood_verified', false)
+        ->assertJsonPath('user.neighbourhoodVerified', false);
+
+    $user->refresh();
+    expect($user->neighbourhoodName())->toBe('Akwa')
+        ->and($user->neighbourhood_verified_at)->toBeNull();
+
+    // Réinitialisation pour tester les rejets lors de l'envoi de coordonnées GPS invalides
+    $user->update(['neighbourhood' => null, 'neighbourhood_id' => null, 'neighbourhood_verified_at' => null]);
 
     // 3. Quartier inexistant
     putJson('/api/profile', [
@@ -318,7 +331,7 @@ it('preserves existing verified neighbourhood when editing bio without new coord
         ->assertJsonPath('user.neighbourhood_verified', false);
 });
 
-it('requires position proof when an existing unverified account re-submits its already declared neighbourhood', function () {
+it('keeps neighbourhood unverified without GPS and verifies it when GPS coordinates are provided', function () {
     $this->seed(GeoSeeder::class);
 
     $existingUnverified = User::factory()->create([
@@ -328,12 +341,14 @@ it('requires position proof when an existing unverified account re-submits its a
     ]);
     Passport::actingAs($existingUnverified);
 
-    // Sans GPS -> refusé même si le quartier était déjà inscrit sur le compte
+    // Sans GPS -> accepté comme non vérifié
     putJson('/api/profile', [
         'city' => 'Douala',
         'neighbourhood' => 'Bonapriso',
-    ])->assertStatus(422)
-        ->assertJsonPath('code', 'NEIGHBOURHOOD_NOT_VERIFIED');
+    ])->assertOk()
+        ->assertJsonPath('user.neighbourhood', 'Bonapriso')
+        ->assertJsonPath('user.neighbourhood_verified', false)
+        ->assertJsonPath('user.needs_neighbourhood_verification', true);
 
     // Avec GPS valide -> confirmé !
     putJson('/api/profile', [
