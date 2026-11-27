@@ -81,11 +81,13 @@ class SignupController extends Controller
 
         $user->save();
 
-        try {
-            $user->sendWelcomeEmailVerificationNotification();
-        } catch (\Throwable $e) {
-            Log::warning('Échec envoi email de bienvenue à l\'inscription : '.$e->getMessage());
-        }
+        dispatch(function () use ($user) {
+            try {
+                $user->sendWelcomeEmailVerificationNotification();
+            } catch (\Throwable $e) {
+                Log::warning('Échec envoi email de bienvenue à l\'inscription : '.$e->getMessage());
+            }
+        })->afterResponse();
 
         if (! empty($user->name)) {
             app(AutomatedTextFilterService::class)->scanText($user->name, 'user', $user->id, $user);

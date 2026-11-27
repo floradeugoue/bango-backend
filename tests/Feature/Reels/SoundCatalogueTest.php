@@ -157,3 +157,66 @@ test('les sons affichent le nombre reel de reels sans base_uses invente', functi
         ->assertJsonPath('data.uses_count', 1)
         ->assertJsonPath('data.uses', '1 vidéos');
 });
+
+test('GET /api/sounds renvoie provenance et license_type pour chaque son', function () {
+    $response = $this->getJson('/api/sounds');
+
+    $response->assertStatus(200)
+        ->assertJsonStructure([
+            'data' => [
+                '*' => [
+                    'id',
+                    'title',
+                    'artist',
+                    'provenance',
+                    'license_type',
+                ],
+            ],
+        ]);
+
+    $data = $response->json('data');
+    expect(count($data))->toBeGreaterThan(0);
+
+    $allowedProvenances = ['bango', 'partner', 'user', 'royalty_free'];
+    $allowedLicenseTypes = ['bango', 'partner', 'user', 'royalty_free'];
+
+    foreach ($data as $sound) {
+        expect($sound['provenance'])->not->toBeNull()
+            ->and(in_array($sound['provenance'], $allowedProvenances, true))->toBeTrue()
+            ->and($sound['license_type'])->not->toBeNull()
+            ->and(in_array($sound['license_type'], $allowedLicenseTypes, true))->toBeTrue();
+    }
+});
+
+test('GET /api/sounds permet de filtrer les sons par provenance', function () {
+    // Créer un son partenaire
+    Sound::create([
+        'id' => 'partner-groove',
+        'title' => 'Partner Groove',
+        'artist' => 'Partner Artist',
+        'genre' => 'afro',
+        'provenance' => 'partner',
+        'license_type' => 'royalty_free',
+        'rights_status' => 'verified',
+        'is_published' => true,
+        'published_at' => now(),
+    ]);
+
+    $responsePartner = $this->getJson('/api/sounds?provenance=partner');
+    $responsePartner->assertStatus(200);
+
+    $partnerData = $responsePartner->json('data');
+    expect(count($partnerData))->toBeGreaterThanOrEqual(1);
+    foreach ($partnerData as $sound) {
+        expect($sound['provenance'])->toBe('partner');
+    }
+
+    $responseBango = $this->getJson('/api/sounds?provenance=bango');
+    $responseBango->assertStatus(200);
+
+    $bangoData = $responseBango->json('data');
+    expect(count($bangoData))->toBeGreaterThan(0);
+    foreach ($bangoData as $sound) {
+        expect($sound['provenance'])->toBe('bango');
+    }
+});

@@ -236,7 +236,15 @@ class SoundSeeder extends Seeder
         ];
 
         foreach ($sounds as $soundData) {
-            Sound::updateOrCreate(['id' => $soundData['id']], $soundData);
+            $data = array_merge([
+                'provenance' => 'bango',
+                'license_type' => 'royalty_free',
+                'rights_status' => 'verified',
+                'is_published' => true,
+                'published_at' => now(),
+            ], $soundData);
+
+            Sound::updateOrCreate(['id' => $soundData['id']], $data);
         }
     }
 }

@@ -21,9 +21,10 @@ class SoundController extends Controller
     {
         $genre = $request->query('genre');
         $search = $request->query('search') ?? $request->query('q');
+        $provenance = $request->query('provenance');
         $perPage = (int) $request->query('per_page', 20);
 
-        $sounds = $this->soundService->listSounds($genre, $search, $perPage);
+        $sounds = $this->soundService->listSounds($genre, $search, $perPage, $provenance);
 
         return SoundResource::collection($sounds);
     }

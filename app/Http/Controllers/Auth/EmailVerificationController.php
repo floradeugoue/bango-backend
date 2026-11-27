@@ -9,6 +9,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\ValidationException;
 
@@ -198,8 +199,15 @@ class EmailVerificationController extends Controller
         }
 
         RateLimiter::hit($throttleKey, 60);
+        $userToNotify = $user;
 
-        $user->sendWelcomeEmailVerificationNotification();
+        dispatch(function () use ($userToNotify) {
+            try {
+                $userToNotify->sendWelcomeEmailVerificationNotification();
+            } catch (\Throwable $e) {
+                Log::warning('Échec renvoi e-mail de confirmation : '.$e->getMessage());
+            }
+        })->afterResponse();
 
         $sentMsg = $locale === 'en'
             ? 'A new confirmation email has been sent.'

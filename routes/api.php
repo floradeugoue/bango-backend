@@ -268,6 +268,11 @@ Route::get('/countries/{country}', [CountryController::class, 'show'])->name('ap
 Route::apiResource('operators', OperatorController::class)->only(['index', 'show']);
 Route::get('/genders', [GenderController::class, 'index'])->name('api.genders');
 
+// Catalogue et détails des sons audio (GET /api/sounds)
+Route::get('/sounds', [SoundController::class, 'index'])->name('api.sounds.index');
+Route::get('/sounds/{id}', [SoundController::class, 'show'])->name('api.sounds.show');
+Route::get('/sounds/{id}/reels', [SoundController::class, 'reels'])->name('api.sounds.reels');
+
 // --------------------------------------------------------------------------
 // AGENTS — ANNUAIRE PUBLIC & RECHERCHE (AG-06)
 // --------------------------------------------------------------------------

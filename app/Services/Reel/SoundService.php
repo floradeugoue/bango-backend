@@ -17,12 +17,13 @@ class SoundService
     /**
      * Liste les sons du catalogue avec filtres (genre, recherche).
      */
-    public function listSounds(?string $genre = null, ?string $search = null, int $perPage = 20): LengthAwarePaginator
+    public function listSounds(?string $genre = null, ?string $search = null, int $perPage = 20, ?string $provenance = null): LengthAwarePaginator
     {
         return Sound::query()
             ->availableForUsers()
             ->withCount('reels')
             ->when($genre, fn (Builder $q) => $q->where('genre', $genre))
+            ->when($provenance, fn (Builder $q) => $q->where('provenance', $provenance))
             ->when($search, function (Builder $q) use ($search) {
                 $term = strtolower(trim($search));
                 $q->where(function (Builder $sub) use ($term) {
@@ -30,6 +31,7 @@ class SoundService
                         ->orWhereRaw('LOWER(artist) LIKE ?', ["%{$term}%"]);
                 });
             })
+            ->orderByRaw("CASE WHEN provenance = 'bango' THEN 0 WHEN provenance = 'partner' THEN 1 ELSE 2 END")
             ->orderByDesc('reels_count')
             ->paginate($perPage);
     }
@@ -63,6 +65,11 @@ class SoundService
                     'original_reel_id' => $reel->id,
                     'user_id' => $reel->user_id,
                     'audio_url' => $reel->video_url,
+                    'provenance' => 'user',
+                    'license_type' => 'user',
+                    'rights_status' => 'verified',
+                    'is_published' => true,
+                    'published_at' => now(),
                 ]);
             }
         }
@@ -170,6 +177,11 @@ class SoundService
                 'is_original' => true,
                 'original_reel_id' => $reel->id,
                 'user_id' => $user->id,
+                'provenance' => 'user',
+                'license_type' => 'user',
+                'rights_status' => 'verified',
+                'is_published' => true,
+                'published_at' => now(),
             ]
         );
 
@@ -204,6 +216,8 @@ class SoundService
                 'original_reel_id' => $reelId,
                 'user_id' => $reelObj?->user_id,
                 'audio_url' => $reelObj?->video_url,
+                'provenance' => 'user',
+                'license_type' => 'user',
             ]
         );
 
