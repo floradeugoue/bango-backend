@@ -6,6 +6,8 @@ use App\Enums\Media\MediaProcessingStatus;
 use App\Enums\Square\PostAudience;
 use App\Enums\Square\PostMediaKind;
 use App\Models\Square\Post;
+use App\Models\Square\PostComment;
+use App\Models\Square\PostLike;
 use App\Models\Square\PostMedia;
 use App\Models\User;
 use Carbon\Carbon;
@@ -132,9 +134,59 @@ class InjectSquarePostsCommand extends Command
                 ]);
             }
 
+            // Génération des vrais Likes réels (4 à 12 profils)
+            $availableLikers = $communityUsers->filter(fn ($u) => $u->id !== $author->id)->shuffle();
+            $likeCount = min(rand(4, 12), $availableLikers->count());
+            $likers = $availableLikers->take($likeCount);
+
+            foreach ($likers as $liker) {
+                PostLike::firstOrCreate([
+                    'post_id' => $post->id,
+                    'user_id' => $liker->id,
+                ], [
+                    'created_at' => (clone $createdAt)->addMinutes(rand(1, 20)),
+                ]);
+            }
+
+            // Génération des vrais Commentaires réels (1 à 4 profils)
+            $commentsLibraryFile = database_path('data/bango_comments.json');
+            $commentsList = file_exists($commentsLibraryFile) ? json_decode(file_get_contents($commentsLibraryFile), true) : [];
+
+            if (! empty($commentsList)) {
+                $availableCommenters = $availableLikers->diff($likers);
+                if ($availableCommenters->isEmpty()) {
+                    $availableCommenters = $availableLikers;
+                }
+                $commentCount = min(rand(1, 4), $availableCommenters->count());
+                $commenters = $availableCommenters->take($commentCount);
+
+                foreach ($commenters as $commenter) {
+                    $body = $commentsList[array_rand($commentsList)];
+                    $commentTime = (clone $createdAt)->addMinutes(rand(3, 45));
+
+                    PostComment::create([
+                        'post_id' => $post->id,
+                        'user_id' => $commenter->id,
+                        'body' => $body,
+                        'language' => 'fr',
+                        'likes_count' => rand(0, 3),
+                        'created_at' => $commentTime,
+                        'updated_at' => $commentTime,
+                    ]);
+                }
+            }
+
+            // Synchronisation exacte des compteurs
+            $actualLikes = PostLike::where('post_id', $post->id)->count();
+            $actualComments = PostComment::where('post_id', $post->id)->count();
+            $post->update([
+                'likes_count' => $actualLikes,
+                'comments_count' => $actualComments,
+            ]);
+
             $injected++;
             $shortBody = mb_substr($postData['body'], 0, 45).'...';
-            $this->line("  [{$postData['id']}] Publié par @{$author->handle} ({$author->city}) : \"{$shortBody}\"");
+            $this->line("  [{$postData['id']}] Publié par @{$author->handle} ({$author->city}) : \"{$shortBody}\" ({$actualLikes} likes, {$actualComments} comms)");
         }
 
         $remaining = $pendingCount - $injected;

@@ -11,6 +11,8 @@ use App\Models\Geo\City;
 use App\Models\Geo\Country;
 use App\Models\Geo\Neighbourhood;
 use App\Models\Square\Post;
+use App\Models\Square\PostComment;
+use App\Models\Square\PostLike;
 use App\Models\Square\PostMedia;
 use App\Models\User;
 use Carbon\Carbon;
@@ -172,9 +174,61 @@ class CommunityProfilesSeeder extends Seeder
                 ]);
             }
 
+            // Génération des vrais Likes réels (5 à 18 profils)
+            $potentialLikers = array_filter($users, fn ($u) => $u->id !== $author->id);
+            shuffle($potentialLikers);
+            $likeCount = min(rand(5, 18), count($potentialLikers));
+            $likers = array_slice($potentialLikers, 0, $likeCount);
+
+            foreach ($likers as $liker) {
+                PostLike::firstOrCreate([
+                    'post_id' => $post->id,
+                    'user_id' => $liker->id,
+                ], [
+                    'created_at' => (clone $createdAt)->addMinutes(rand(1, 40)),
+                ]);
+            }
+
+            // Génération des vrais Commentaires réels (2 à 5 profils)
+            $commentsLibraryFile = database_path('data/bango_comments.json');
+            $commentsList = file_exists($commentsLibraryFile) ? json_decode(file_get_contents($commentsLibraryFile), true) : [];
+
+            if (! empty($commentsList)) {
+                $potentialCommenters = array_filter($potentialLikers, fn ($u) => ! in_array($u->id, array_column($likers, 'id')));
+                if (empty($potentialCommenters)) {
+                    $potentialCommenters = $potentialLikers;
+                }
+                shuffle($potentialCommenters);
+                $commentCount = min(rand(2, 5), count($potentialCommenters));
+                $commenters = array_slice($potentialCommenters, 0, $commentCount);
+
+                foreach ($commenters as $cIdx => $commenter) {
+                    $body = $commentsList[array_rand($commentsList)];
+                    $commentCreatedAt = (clone $createdAt)->addMinutes(rand(5, 120));
+
+                    PostComment::create([
+                        'post_id' => $post->id,
+                        'user_id' => $commenter->id,
+                        'body' => $body,
+                        'language' => 'fr',
+                        'likes_count' => rand(0, 4),
+                        'created_at' => $commentCreatedAt,
+                        'updated_at' => $commentCreatedAt,
+                    ]);
+                }
+            }
+
+            // Synchronisation exacte des compteurs
+            $actualLikes = PostLike::where('post_id', $post->id)->count();
+            $actualComments = PostComment::where('post_id', $post->id)->count();
+            $post->update([
+                'likes_count' => $actualLikes,
+                'comments_count' => $actualComments,
+            ]);
+
             $injectedCount++;
         }
 
-        $this->command?->info("✅ {$injectedCount} posts Square injectés avec succès (échelonnés sur 48h) !");
+        $this->command?->info("✅ {$injectedCount} posts Square injectés avec succès (avec vrais likes et commentaires réels) !");
     }
 }
