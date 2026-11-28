@@ -268,3 +268,18 @@ Schedule::command('geo:import-geonames')
     ->monthly()
     ->withoutOverlapping()
     ->onOneServer();
+
+// --------------------------------------------------------------------------
+// PLANIFICATEUR D'ANIMATION ET D'INJECTION DU SQUARE (Communauté Cameroun)
+// --------------------------------------------------------------------------
+// 18. Animation continue du Square (likes et commentaires) toutes les 15 minutes
+Schedule::command('square:simulate-engagement')
+    ->everyFifteenMinutes()
+    ->withoutOverlapping()
+    ->onOneServer();
+
+// 19. Publication automatique de 3 nouveaux posts du réservoir toutes les 6 heures
+Schedule::command('square:inject --count=3')
+    ->everySixHours()
+    ->withoutOverlapping()
+    ->onOneServer();
