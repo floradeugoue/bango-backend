@@ -85,4 +85,11 @@ return [
         'url' => env('BACKOFFICE_URL', 'https://admin.bango.app'),
     ],
 
+    'whatsapp' => [
+        'token' => env('WHATSAPP_CLOUD_TOKEN'),
+        'phone_number_id' => env('WHATSAPP_PHONE_NUMBER_ID'),
+        'template_name' => env('WHATSAPP_TEMPLATE_NAME', 'bango_otp_code'),
+        'template_lang' => env('WHATSAPP_TEMPLATE_LANG', 'fr'),
+    ],
+
 ];

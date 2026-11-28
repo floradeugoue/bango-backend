@@ -11,6 +11,7 @@ use App\Http\Controllers\Auth\AccountStateController;
 use App\Http\Controllers\Auth\EmailVerificationController;
 use App\Http\Controllers\Auth\ForgotPasswordController;
 use App\Http\Controllers\Auth\LogoutController;
+use App\Http\Controllers\Auth\PhoneSignupController;
 use App\Http\Controllers\Auth\ResetPasswordController;
 use App\Http\Controllers\Auth\SecondFactorController;
 use App\Http\Controllers\Auth\SignedOutAppealController;
@@ -177,6 +178,9 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('auth')->group(function () {
     // Création d'un nouveau compte utilisateur
     Route::post('/signup', SignupController::class);
+    // Inscription par numéro de téléphone avec code WhatsApp Cloud API
+    Route::post('/signup/phone/start', [PhoneSignupController::class, 'start']);
+    Route::post('/signup/phone/verify', [PhoneSignupController::class, 'verify']);
     // Annulation immédiate de l'inscription et effacement du compte (LG-09)
     Route::delete('/signup', [SignupController::class, 'destroy'])->middleware('auth:api');
     Route::post('/underage', [ProfileController::class, 'reportUnderage'])->middleware('auth:api');
